@@ -1,15 +1,12 @@
 // =============================================================================
-// message 模块：定义对话核心数据结构
+// message 模块：定义对话核心数据结构与消息构造器
 // =============================================================================
 // 本模块抽离了与消息内容相关的通用类型：
 // - `Role`：消息发送者角色
 // - `Part`：单条消息的内容块（文本、图片、工具调用、工具结果、推理）
 // - `ImageSource`：图片数据来源
 // - `Message`：包含完整元数据的消息结构
-//
-// 设计演进：这些类型原本位于 `agent/mod.rs` 中，但随着 `session` 持久化、
-// `provider` 序列化、`tools` 工具结果等多个模块的依赖增加，
-// 将其独立为顶层模块可降低耦合、避免循环依赖。
+// - `MessageBuilder`：用于从持久化记录流式重建 Message 的构造器
 
 use serde::{Deserialize, Serialize};
 
@@ -120,4 +117,52 @@ pub fn current_timestamp_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+// =============================================================================
+// MessageBuilder：用于从持久化记录流式重建 Message
+// =============================================================================
+
+/// 消息构造器，在 `load_session` 过程中暂存一个 Message 的中间状态。
+pub struct MessageBuilder {
+    pub id: String,
+    pub session_id: String,
+    pub role: Role,
+    pub created_at: u64,
+    pub parts: Vec<Part>,
+}
+
+impl MessageBuilder {
+    pub fn new(
+        id: impl Into<String>,
+        session_id: impl Into<String>,
+        role: Role,
+        created_at: u64,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            session_id: session_id.into(),
+            role,
+            created_at,
+            parts: Vec::new(),
+        }
+    }
+
+    /// 向当前消息追加一个 Part。
+    pub fn add_part(&mut self, part: Part) {
+        self.parts.push(part);
+    }
+
+    /// 完成消息构造，合并可选的 token_count 和 cost。
+    pub fn finalize(self, token_count: Option<u64>, cost: Option<f64>) -> Message {
+        Message {
+            id: self.id,
+            session_id: self.session_id,
+            role: self.role,
+            created_at: self.created_at,
+            parts: self.parts,
+            token_count,
+            cost,
+        }
+    }
 }

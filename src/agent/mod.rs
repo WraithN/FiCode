@@ -10,7 +10,7 @@
 
 use anyhow::Result;
 
-use crate::message::{Message, Part, Role};
+use crate::session::message::{Message, Part, Role};
 use crate::provider::base_client::{AIClient, ChunkContent, FinishReason};
 use crate::provider::execute_tool_calls;
 use crate::tools::tool_schema;

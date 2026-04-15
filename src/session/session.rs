@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::message::{current_timestamp_ms, Message, Part, Role};
+use crate::session::message::{current_timestamp_ms, Message, MessageBuilder, Part, Role};
 
 // =============================================================================
 // 会话状态枚举
@@ -179,16 +179,27 @@ impl SessionManager {
                     session = Some(parse_session_record(record)?);
                 }
                 "message_start" => {
-                    current_message = Some(MessageBuilder::new(record)?);
+                    let id = get_str(&record, "message_id").unwrap_or_default();
+                    let session_id = get_str(&record, "session_id").unwrap_or_default();
+                    let role_str = get_str(&record, "role").unwrap_or("user".to_string());
+                    let role: Role = serde_json::from_value(serde_json::json!(role_str)).unwrap_or(Role::User);
+                    let created_at = get_u64(&record, "created_at").unwrap_or(0);
+                    current_message = Some(MessageBuilder::new(id, session_id, role, created_at));
                 }
                 "part" => {
                     if let Some(ref mut builder) = current_message {
-                        builder.add_part(record)?;
+                        if let Some(part_value) = record.fields.get("part").cloned() {
+                            if let Ok(part) = serde_json::from_value::<Part>(part_value) {
+                                builder.add_part(part);
+                            }
+                        }
                     }
                 }
                 "message_end" => {
                     if let Some(builder) = current_message.take() {
-                        let msg = builder.finalize(record)?;
+                        let token_count = record.fields.get("token_count").and_then(|v| v.as_u64());
+                        let cost = record.fields.get("cost").and_then(|v| v.as_f64());
+                        let msg = builder.finalize(token_count, cost);
                         if let Some(ref mut s) = session {
                             s.messages.push(msg);
                         }
@@ -310,57 +321,6 @@ fn parse_session_record(record: Record) -> Result<Session> {
 }
 
 // =============================================================================
-// MessageBuilder：用于从 JSONL 记录流式重建 Message
-// =============================================================================
-
-/// 消息构造器，在 `load_session` 过程中暂存一个 Message 的中间状态。
-struct MessageBuilder {
-    id: String,
-    session_id: String,
-    role: Role,
-    created_at: u64,
-    parts: Vec<Part>,
-}
-
-impl MessageBuilder {
-    fn new(record: Record) -> Result<Self> {
-        let role_str = get_str(&record, "role")?;
-        Ok(Self {
-            id: get_str(&record, "message_id")?,
-            session_id: get_str(&record, "session_id").unwrap_or_default(),
-            role: serde_json::from_value(json!(role_str))?,
-            created_at: get_u64(&record, "created_at")?,
-            parts: Vec::new(),
-        })
-    }
-
-    /// 向当前消息追加一个 Part。
-    fn add_part(&mut self, record: Record) -> Result<()> {
-        let part_value = record
-            .fields
-            .get("part")
-            .cloned()
-            .context("Missing 'part' field")?;
-        let part: Part = serde_json::from_value(part_value)?;
-        self.parts.push(part);
-        Ok(())
-    }
-
-    /// 完成消息构造，合并 `message_end` 中可能携带的 token_count 和 cost。
-    fn finalize(self, record: Record) -> Result<Message> {
-        Ok(Message {
-            id: self.id,
-            session_id: self.session_id,
-            role: self.role,
-            created_at: self.created_at,
-            parts: self.parts,
-            token_count: record.fields.get("token_count").and_then(|v| v.as_u64()),
-            cost: record.fields.get("cost").and_then(|v| v.as_f64()),
-        })
-    }
-}
-
-// =============================================================================
 // 记录生成辅助函数
 // =============================================================================
 
@@ -434,7 +394,7 @@ fn get_u64(record: &Record, key: &str) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::{Part, Role};
+    use crate::session::message::{Part, Role};
     use std::io::Write;
 
     /// 创建临时目录和管理器的辅助函数。

@@ -1,4 +1,4 @@
-use crate::message::Part;
+use crate::session::message::Part;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 

@@ -6,7 +6,6 @@
 // `mod` 关键字声明当前 crate 包含的模块，Rust 编译器会在对应目录查找
 
 mod agent;
-mod message;
 mod permission;
 mod provider;
 mod session;
@@ -22,8 +21,8 @@ use colored::Colorize;
 use rustyline::DefaultEditor;
 
 use agent::{agent_loop, LoopState};
-use message::{Message, Role};
 use provider::{Model, Provider};
+use session::message::{Message, Role};
 use session::{SessionManager, SessionMeta, SessionStatus};
 use std::path::PathBuf;
 
@@ -76,7 +75,7 @@ async fn main() -> Result<()> {
                 let user_msg = Message::new(
                     session.id.clone(),
                     Role::User,
-                    vec![message::Part::Text { text: query.to_string() }],
+                    vec![session::message::Part::Text { text: query.to_string() }],
                 );
                 session.messages.push(user_msg.clone());
 
