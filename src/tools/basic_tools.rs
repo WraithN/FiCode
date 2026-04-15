@@ -2,8 +2,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::LazyLock;
 use std::sync::mpsc;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 // =============================================================================
@@ -41,7 +41,9 @@ impl BasicTool {
         }
         // 如果路径不存在（常见于 write），尝试 canonicalize 父目录
         if let Some(parent) = path.parent() {
-            let canonical_parent = parent.canonicalize().map_err(|e| format!("路径解析失败: {}", e))?;
+            let canonical_parent = parent
+                .canonicalize()
+                .map_err(|e| format!("路径解析失败: {}", e))?;
             if !canonical_parent.starts_with(&*WORKDIR) {
                 return Err(format!("路径逃逸出工作目录: {}", p));
             }
@@ -182,8 +184,7 @@ impl BasicTool {
     // =========================================================================
 
     pub fn run_web_fetch(url: &str) -> Result<String, String> {
-        let resp = reqwest::blocking::get(url)
-            .map_err(|e| format!("Request failed: {}", e))?;
+        let resp = reqwest::blocking::get(url).map_err(|e| format!("Request failed: {}", e))?;
         let html = resp
             .text()
             .map_err(|e| format!("Failed to read response: {}", e))?;

@@ -5,8 +5,10 @@ use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde_json::json;
 
+use crate::provider::base_client::{
+    send_with_retry, AIClient, Chunk, ChunkContent, FinishReason, RetryConfig,
+};
 use crate::session::message::{ImageSource, Message, Part, Role};
-use crate::provider::base_client::{AIClient, Chunk, ChunkContent, FinishReason, RetryConfig, send_with_retry};
 
 // =============================================================================
 // Anthropic API 客户端
@@ -73,7 +75,11 @@ impl AIClient for AnthropicClient {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Anthropic API error ({}): {}", status, text));
+            return Err(anyhow::anyhow!(
+                "Anthropic API error ({}): {}",
+                status,
+                text
+            ));
         }
 
         // 直接读取 SSE 字节流并调用闭包
@@ -140,8 +146,12 @@ fn build_messages(messages: &[Message]) -> Vec<serde_json::Value> {
                             }
                         })
                     }
-                }
-                Part::ToolUse { id, name, arguments } => {
+                },
+                Part::ToolUse {
+                    id,
+                    name,
+                    arguments,
+                } => {
                     json!({
                         "type": "tool_use",
                         "id": id,
@@ -149,7 +159,11 @@ fn build_messages(messages: &[Message]) -> Vec<serde_json::Value> {
                         "input": arguments
                     })
                 }
-                Part::ToolResult { tool_call_id, content: c, is_error } => {
+                Part::ToolResult {
+                    tool_call_id,
+                    content: c,
+                    is_error,
+                } => {
                     json!({
                         "type": "tool_result",
                         "tool_use_id": tool_call_id,
@@ -195,7 +209,8 @@ where
 {
     let mut buffer = String::new();
     // 维护 index -> (tool_id, tool_name, args_json_string)
-    let mut index_to_tool: std::collections::HashMap<usize, (String, String, String)> = std::collections::HashMap::new();
+    let mut index_to_tool: std::collections::HashMap<usize, (String, String, String)> =
+        std::collections::HashMap::new();
     let mut current_event_type: Option<String> = None;
 
     tokio::pin!(byte_stream);
@@ -223,18 +238,29 @@ where
                 match event_type.as_str() {
                     "content_block_start" => {
                         if let Some(block) = json.get("content_block") {
-                            let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            let block_type =
+                                block.get("type").and_then(|v| v.as_str()).unwrap_or("");
                             if block_type == "tool_use" {
-                                let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                                let id = block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
+                                    as usize;
+                                let id = block
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let name = block
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
                                 index_to_tool.insert(index, (id, name, String::new()));
                             }
                         }
                     }
                     "content_block_delta" => {
                         if let Some(delta) = json.get("delta") {
-                            let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            let delta_type =
+                                delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
                             match delta_type {
                                 "text_delta" => {
                                     if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
@@ -244,16 +270,22 @@ where
                                     }
                                 }
                                 "thinking_delta" => {
-                                    if let Some(text) = delta.get("thinking").and_then(|v| v.as_str()) {
+                                    if let Some(text) =
+                                        delta.get("thinking").and_then(|v| v.as_str())
+                                    {
                                         on_chunk(Chunk {
                                             content: ChunkContent::Think(text.to_string()),
                                         });
                                     }
                                 }
                                 "input_json_delta" => {
-                                    let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                                    let index =
+                                        json.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
+                                            as usize;
                                     if let Some((_, _, args)) = index_to_tool.get_mut(&index) {
-                                        if let Some(partial) = delta.get("partial_json").and_then(|v| v.as_str()) {
+                                        if let Some(partial) =
+                                            delta.get("partial_json").and_then(|v| v.as_str())
+                                        {
                                             args.push_str(partial);
                                         }
                                     }
@@ -263,11 +295,16 @@ where
                         }
                     }
                     "content_block_stop" => {
-                        let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                        let index =
+                            json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                         if let Some((id, name, args)) = index_to_tool.remove(&index) {
                             let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
                             on_chunk(Chunk {
-                                content: ChunkContent::ToolUse(Part::ToolUse { id, name, arguments }),
+                                content: ChunkContent::ToolUse(Part::ToolUse {
+                                    id,
+                                    name,
+                                    arguments,
+                                }),
                             });
                         }
                     }

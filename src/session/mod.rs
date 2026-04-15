@@ -3,5 +3,5 @@
 pub mod message;
 pub mod session;
 
-pub use message::{ImageSource, Message, MessageBuilder, Part, Role, current_timestamp_ms};
+pub use message::{current_timestamp_ms, ImageSource, Message, MessageBuilder, Part, Role};
 pub use session::{Session, SessionManager, SessionMeta, SessionStatus};

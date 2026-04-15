@@ -10,9 +10,9 @@
 
 use anyhow::Result;
 
-use crate::session::message::{Message, Part, Role};
 use crate::provider::base_client::{AIClient, ChunkContent, FinishReason};
 use crate::provider::execute_tool_calls;
+use crate::session::message::{Message, Part, Role};
 use crate::tools::tool_schema;
 
 // =============================================================================
@@ -73,10 +73,15 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
                     }
                     // 思考增量：与最后一个 Reasoning 块合并
                     ChunkContent::Think(text) => {
-                        if let Some(Part::Reasoning { thinking: last, .. }) = content_blocks.last_mut() {
+                        if let Some(Part::Reasoning { thinking: last, .. }) =
+                            content_blocks.last_mut()
+                        {
                             last.push_str(&text);
                         } else {
-                            content_blocks.push(Part::Reasoning { thinking: text, signature: None });
+                            content_blocks.push(Part::Reasoning {
+                                thinking: text,
+                                signature: None,
+                            });
                         }
                     }
                     // 完整的工具调用块（客户端已拼装完毕）
@@ -120,11 +125,9 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
     }
 
     // 将工具结果封装为 User 消息回传（符合 OpenAI / Anthropic API 的角色交替要求）
-    state.messages.push(Message::new(
-        session_id,
-        Role::User,
-        tool_results,
-    ));
+    state
+        .messages
+        .push(Message::new(session_id, Role::User, tool_results));
 
     state.turn_count += 1;
     state.transition_reason = Some("tool_result".to_string());

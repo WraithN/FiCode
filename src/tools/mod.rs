@@ -28,7 +28,10 @@ use tools_type::{ToolHandler, ToolParameter, ToolParams};
 // 如果上一步是 Some，则继续执行闭包；如果是 None，则直接传递 None
 
 fn get_json_param(v: &serde_json::Value, key: &str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 // =============================================================================
@@ -75,9 +78,7 @@ impl ToolHandler for ReadHandler {
                 let limit = v.get("limit").and_then(|x| x.as_u64()).map(|n| n as usize);
                 (path, limit)
             }
-            [ToolParameter::String(p), ToolParameter::Integer(l)] => {
-                (p.clone(), Some(*l as usize))
-            }
+            [ToolParameter::String(p), ToolParameter::Integer(l)] => (p.clone(), Some(*l as usize)),
             [ToolParameter::String(p)] => (p.clone(), None),
             _ => ("".to_string(), None),
         };
@@ -101,9 +102,7 @@ struct WriteHandler;
 impl ToolHandler for WriteHandler {
     fn call(&self, _name: &str, params: ToolParams) -> Result<String, String> {
         let (path, content) = match &params[..] {
-            [ToolParameter::Json(v)] => {
-                (get_json_param(v, "path"), get_json_param(v, "content"))
-            }
+            [ToolParameter::Json(v)] => (get_json_param(v, "path"), get_json_param(v, "content")),
             [ToolParameter::String(p), ToolParameter::String(c)] => (p.clone(), c.clone()),
             _ => ("".to_string(), "".to_string()),
         };
@@ -179,9 +178,7 @@ struct GrepHandler;
 impl ToolHandler for GrepHandler {
     fn call(&self, _name: &str, params: ToolParams) -> Result<String, String> {
         let (dir, pattern) = match &params[..] {
-            [ToolParameter::Json(v)] => {
-                (get_json_param(v, "dir"), get_json_param(v, "pattern"))
-            }
+            [ToolParameter::Json(v)] => (get_json_param(v, "dir"), get_json_param(v, "pattern")),
             [ToolParameter::String(d), ToolParameter::String(p)] => (d.clone(), p.clone()),
             _ => ("".to_string(), "".to_string()),
         };
@@ -316,12 +313,19 @@ pub fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
 
     for part in parts {
         // 只处理 ToolUse 类型的 Part
-        if let Part::ToolUse { id, name, arguments } = part {
+        if let Part::ToolUse {
+            id,
+            name,
+            arguments,
+        } = part
+        {
             println!("{}", format!("${}", name).yellow());
 
             // `arguments` 是 serde_json::Value，需要转成 HashMap 才能传给 `tool_call`
             let input: HashMap<String, serde_json::Value> = match arguments {
-                serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                serde_json::Value::Object(map) => {
+                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                }
                 _ => HashMap::new(),
             };
 
@@ -363,7 +367,10 @@ mod tests {
         assert!(list.contains("read"), "registry should contain read tool");
         assert!(list.contains("write"), "registry should contain write tool");
         assert!(list.contains("edit"), "registry should contain edit tool");
-        assert!(list.contains("web_fetch"), "registry should contain web_fetch tool");
+        assert!(
+            list.contains("web_fetch"),
+            "registry should contain web_fetch tool"
+        );
         assert!(list.contains("grep"), "registry should contain grep tool");
     }
 
@@ -371,7 +378,10 @@ mod tests {
     #[test]
     fn test_tool_call_bash() {
         let mut input = HashMap::new();
-        input.insert("command".to_string(), serde_json::json!("echo hello_registry"));
+        input.insert(
+            "command".to_string(),
+            serde_json::json!("echo hello_registry"),
+        );
 
         let result = tool_call("bash", &input).unwrap();
         assert!(

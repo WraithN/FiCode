@@ -182,7 +182,8 @@ impl SessionManager {
                     let id = get_str(&record, "message_id").unwrap_or_default();
                     let session_id = get_str(&record, "session_id").unwrap_or_default();
                     let role_str = get_str(&record, "role").unwrap_or("user".to_string());
-                    let role: Role = serde_json::from_value(serde_json::json!(role_str)).unwrap_or(Role::User);
+                    let role: Role =
+                        serde_json::from_value(serde_json::json!(role_str)).unwrap_or(Role::User);
                     let created_at = get_u64(&record, "created_at").unwrap_or(0);
                     current_message = Some(MessageBuilder::new(id, session_id, role, created_at));
                 }
@@ -221,7 +222,11 @@ impl SessionManager {
         let path = self.session_path(&session.id);
         let mut file = File::create(&path)?;
         // 第一行写入 session 元数据头
-        writeln!(file, "{}", serde_json::to_string(&session_to_record(session))?)?;
+        writeln!(
+            file,
+            "{}",
+            serde_json::to_string(&session_to_record(session))?
+        )?;
         // 随后逐条写入消息
         for msg in &session.messages {
             self.write_message(&mut file, msg)?;
@@ -242,7 +247,11 @@ impl SessionManager {
     fn write_session_header(&self, session: &Session) -> Result<()> {
         let path = self.session_path(&session.id);
         let mut file = File::create(&path)?;
-        writeln!(file, "{}", serde_json::to_string(&session_to_record(session))?)?;
+        writeln!(
+            file,
+            "{}",
+            serde_json::to_string(&session_to_record(session))?
+        )?;
         Ok(())
     }
 
@@ -298,7 +307,10 @@ fn session_to_record(session: &Session) -> Record {
     fields.insert("created_at".to_string(), json!(session.created_at));
     fields.insert("updated_at".to_string(), json!(session.updated_at));
     fields.insert("model".to_string(), json!(session.model));
-    fields.insert("status".to_string(), serde_json::to_value(&session.status).unwrap());
+    fields.insert(
+        "status".to_string(),
+        serde_json::to_value(&session.status).unwrap(),
+    );
     Record {
         type_: "session".to_string(),
         fields,
@@ -314,7 +326,11 @@ fn parse_session_record(record: Record) -> Result<Session> {
         updated_at: get_u64(&record, "updated_at")?,
         model: get_str(&record, "model")?,
         status: serde_json::from_value(
-            record.fields.get("status").cloned().unwrap_or(json!("active"))
+            record
+                .fields
+                .get("status")
+                .cloned()
+                .unwrap_or(json!("active")),
         )?,
         messages: Vec::new(),
     })

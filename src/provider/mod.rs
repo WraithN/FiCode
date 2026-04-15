@@ -5,7 +5,10 @@ pub mod client;
 pub mod provider;
 
 // 重新导出常用类型，简化外部使用
-pub use base_client::{AIClient, ApiResponse, Chunk, ChunkContent, FinishReason, RetryConfig, extract_text, send_with_retry};
+pub use base_client::{
+    extract_text, send_with_retry, AIClient, ApiResponse, Chunk, ChunkContent, FinishReason,
+    RetryConfig,
+};
 pub use client::{AnthropicClient, OpenAiClient};
 pub use provider::{Model, ModelType, Provider};
 

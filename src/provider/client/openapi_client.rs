@@ -6,8 +6,10 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::json;
 
+use crate::provider::base_client::{
+    send_with_retry, AIClient, Chunk, ChunkContent, FinishReason, RetryConfig,
+};
 use crate::session::message::{Message, Part, Role};
-use crate::provider::base_client::{AIClient, Chunk, ChunkContent, FinishReason, RetryConfig, send_with_retry};
 
 // =============================================================================
 // OpenAI API 兼容客户端
@@ -89,16 +91,16 @@ impl AIClient for OpenAiClient {
 /// - `delta.tool_calls` 存在 => 在内存中累积每个 index 的 (id, name, arguments)
 /// - `finish_reason` 存在 => 若因 tool_calls 结束，先将所有拼好的 tool_use 回传，
 ///   最后统一回传 `ChunkContent::Finish`
-async fn parse_openai_sse<S>(
-    byte_stream: S,
-    on_chunk: &mut (dyn FnMut(Chunk) + Send),
-) -> Result<()>
+async fn parse_openai_sse<S>(byte_stream: S, on_chunk: &mut (dyn FnMut(Chunk) + Send)) -> Result<()>
 where
     S: Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send + 'static,
 {
     let mut buffer = String::new();
     // OpenAI 的 tool_calls 增量只带 `index`，需要维护 index -> (id, name, args_buffer)
-    let mut index_to_tool: std::collections::HashMap<usize, (Option<String>, Option<String>, String)> = std::collections::HashMap::new();
+    let mut index_to_tool: std::collections::HashMap<
+        usize,
+        (Option<String>, Option<String>, String),
+    > = std::collections::HashMap::new();
 
     tokio::pin!(byte_stream);
     while let Some(chunk) = byte_stream.next().await {
@@ -134,10 +136,16 @@ where
                             }
 
                             // 工具调用增量：仅更新内存状态，暂不回传
-                            if let Some(tools) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+                            if let Some(tools) = delta.get("tool_calls").and_then(|v| v.as_array())
+                            {
                                 for tool in tools {
-                                    let index = tool.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                                    let id = tool.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    let index =
+                                        tool.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
+                                            as usize;
+                                    let id = tool
+                                        .get("id")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string());
                                     let name = tool
                                         .get("function")
                                         .and_then(|f| f.get("name"))
@@ -150,7 +158,11 @@ where
                                         .unwrap_or("")
                                         .to_string();
 
-                                    let entry = index_to_tool.entry(index).or_insert((None, None, String::new()));
+                                    let entry = index_to_tool.entry(index).or_insert((
+                                        None,
+                                        None,
+                                        String::new(),
+                                    ));
                                     if let Some(id) = id {
                                         entry.0 = Some(id);
                                     }
@@ -166,11 +178,15 @@ where
                         if let Some(finish) = finish_reason {
                             // 若因工具调用结束，先将拼好的完整 tool_use 回传
                             if finish == "tool_calls" {
-                                let mut indices: Vec<usize> = index_to_tool.keys().cloned().collect();
+                                let mut indices: Vec<usize> =
+                                    index_to_tool.keys().cloned().collect();
                                 indices.sort();
                                 for idx in indices {
-                                    if let Some((Some(id), Some(name), args)) = index_to_tool.remove(&idx) {
-                                        let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
+                                    if let Some((Some(id), Some(name), args)) =
+                                        index_to_tool.remove(&idx)
+                                    {
+                                        let arguments =
+                                            serde_json::from_str(&args).unwrap_or(json!({}));
                                         on_chunk(Chunk {
                                             content: ChunkContent::ToolUse(Part::ToolUse {
                                                 id,
@@ -258,7 +274,11 @@ fn build_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAiMessag
                         Part::Text { text } => {
                             text_parts.push(text.clone());
                         }
-                        Part::ToolResult { tool_call_id, content: c, .. } => {
+                        Part::ToolResult {
+                            tool_call_id,
+                            content: c,
+                            ..
+                        } => {
                             tool_results.push(OpenAiMessage {
                                 role: "tool".to_string(),
                                 content: Some(c.clone()),
@@ -296,7 +316,11 @@ fn build_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAiMessag
                         Part::Text { text } => {
                             text_parts.push(text.clone());
                         }
-                        Part::ToolUse { id, name, arguments } => {
+                        Part::ToolUse {
+                            id,
+                            name,
+                            arguments,
+                        } => {
                             tool_calls.push(OpenAiToolCall {
                                 id: id.clone(),
                                 call_type: "function".to_string(),
@@ -322,7 +346,11 @@ fn build_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAiMessag
                 result.push(OpenAiMessage {
                     role: "assistant".to_string(),
                     content: content_text,
-                    tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                    tool_calls: if tool_calls.is_empty() {
+                        None
+                    } else {
+                        Some(tool_calls)
+                    },
                     tool_call_id: None,
                 });
             }
@@ -344,7 +372,10 @@ fn convert_tools_schema(tools_schema: &serde_json::Value) -> serde_json::Value {
             .iter()
             .map(|tool| {
                 let name = tool.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                let description = tool.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let description = tool
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let parameters = tool.get("input_schema").cloned().unwrap_or(json!({}));
                 json!({
                     "type": "function",

@@ -1,6 +1,6 @@
+use super::{AIClient, AnthropicClient, OpenAiClient};
 use anyhow::{anyhow, Result};
 use std::env;
-use super::{AnthropicClient, OpenAiClient, AIClient};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelType {
@@ -33,8 +33,8 @@ impl Model {
             });
         }
 
-        let anthropic_api_key = env::var("ANTHROPIC_API_KEY")
-            .or_else(|_| env::var("ANTHROPIC_AUTH_TOKEN"));
+        let anthropic_api_key =
+            env::var("ANTHROPIC_API_KEY").or_else(|_| env::var("ANTHROPIC_AUTH_TOKEN"));
         if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
             anthropic_api_key,
             env::var("ANTHROPIC_BASE_URL"),
@@ -60,9 +60,7 @@ pub struct Provider {
 
 impl Provider {
     pub fn new() -> Self {
-        Self {
-            model: None,
-        }
+        Self { model: None }
     }
 
     pub fn set_model(&mut self, model: Model) {
@@ -70,7 +68,10 @@ impl Provider {
     }
 
     pub fn get_client(&self) -> Result<Box<dyn AIClient>> {
-        let model = self.model.as_ref().ok_or_else(|| anyhow!("Model not set"))?;
+        let model = self
+            .model
+            .as_ref()
+            .ok_or_else(|| anyhow!("Model not set"))?;
         if model.model_type == ModelType::OpenAiCompatible {
             let client = OpenAiClient::from_model(model)?;
             Ok(Box::new(client))
@@ -78,7 +79,9 @@ impl Provider {
             let client = AnthropicClient::from_model(model)?;
             Ok(Box::new(client))
         } else {
-            Err(anyhow!("Model type conflict: cannot be both OpenAiCompatible and Anthropic"))
+            Err(anyhow!(
+                "Model type conflict: cannot be both OpenAiCompatible and Anthropic"
+            ))
         }
     }
 }

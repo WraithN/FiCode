@@ -75,7 +75,9 @@ async fn main() -> Result<()> {
                 let user_msg = Message::new(
                     session.id.clone(),
                     Role::User,
-                    vec![session::message::Part::Text { text: query.to_string() }],
+                    vec![session::message::Part::Text {
+                        text: query.to_string(),
+                    }],
                 );
                 session.messages.push(user_msg.clone());
 
@@ -95,7 +97,9 @@ async fn main() -> Result<()> {
                     let sm = SessionManager::new(sessions_dir.clone());
                     let s = session.clone();
                     move || sm.save_session(&s)
-                }).await? {
+                })
+                .await?
+                {
                     eprintln!("Warning: failed to save session: {}", e);
                 }
 

@@ -168,9 +168,9 @@ pub async fn send_with_retry(
     let mut attempt = 0u32;
 
     loop {
-        let req = request.try_clone().ok_or_else(|| {
-            anyhow::anyhow!("Request body is not cloneable, cannot retry")
-        })?;
+        let req = request
+            .try_clone()
+            .ok_or_else(|| anyhow::anyhow!("Request body is not cloneable, cannot retry"))?;
 
         match client.execute(req).await {
             Ok(resp) => {
