@@ -1,0 +1,31 @@
+{
+    // === 编辑器外观 ===
+    "editor.fontFamily": "JetBrainsMono Nerd Font, JetBrains Mono, 'Microsoft YaHei', monospace",
+    "editor.fontSize": 15,
+    "editor.lineHeight": 1.8,
+    "editor.fontLigatures": true,
+    "workbench.colorTheme": "GitHub Dark Dimmed",
+    "workbench.iconTheme": "vscode-icons",
+    
+    // === 功能增强 ===
+    "editor.formatOnSave": true,
+    "editor.wordWrap": "on",
+    "editor.minimap.enabled": true,
+    "editor.cursorBlinking": "smooth",
+    
+    // === 文件排除 ===
+    "files.exclude": {
+        "**/node_modules": true,
+        "**/.git": true,
+        "**/dist": true
+    },
+    
+    // === 终端 ===
+    "terminal.integrated.cursorStyle": "line",
+    // 终端核心字体配置
+    "terminal.integrated.fontFamily": "JetBrainsMono Nerd Font Mono",
+  // 终端字体大小，根据你的屏幕调整，一般13-15号比较舒服
+    "terminal.integrated.fontSize": 14,
+  // 可选：调整终端行高，避免太挤/太松
+    "terminal.integrated.lineHeight": 1.2,
+}
