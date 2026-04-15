@@ -1,7 +1,19 @@
+// =============================================================================
+// session 模块：会话持久化与管理
+// =============================================================================
+// 本模块负责将多轮对话以 JSONL（JSON Lines）格式持久化到本地磁盘，
+// 支持会话创建、列表浏览、完整恢复、增量追加写入。
+//
+// 存储格式设计：
+// - 每个 Session 对应一个 `.jsonl` 文件
+// - 文件内每行是一个独立的 JSON 记录，支持 append-only 写入和流式恢复
+// - 记录类型包括：`session`（文件头）、`message_start`、`part`、`message_end`
+// - 采用 ULID 作为 Session ID 和 Message ID，天然可按时间排序
+
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -9,6 +21,14 @@ use serde_json::json;
 
 use crate::agent::{Message, Part, Role};
 
+// =============================================================================
+// 会话状态枚举
+// =============================================================================
+
+/// 会话生命周期状态。
+/// - `Active`：正在活跃使用
+/// - `Idle`：超过一定时间无操作（当前由上层逻辑判断）
+/// - `Archived`：用户手动归档
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionStatus {
@@ -17,6 +37,11 @@ pub enum SessionStatus {
     Archived,
 }
 
+// =============================================================================
+// Session 与 SessionMeta
+// =============================================================================
+
+/// 会话根结构，包含会话元数据和完整的消息历史。
 #[derive(Clone, Debug)]
 pub struct Session {
     pub id: String,
@@ -28,6 +53,7 @@ pub struct Session {
     pub messages: Vec<Message>,
 }
 
+/// 会话元数据摘要，用于列表展示，避免加载全部消息内容。
 #[derive(Clone, Debug)]
 pub struct SessionMeta {
     pub id: String,
@@ -39,15 +65,27 @@ pub struct SessionMeta {
     pub message_count: usize,
 }
 
+// =============================================================================
+// SessionManager：JSONL 读写核心
+// =============================================================================
+
+/// 会话管理器，封装所有与文件系统交互的操作。
+/// 内部使用同步 `std::fs` I/O；若需在 async 上下文中调用，
+/// 建议通过 `tokio::task::spawn_blocking` 包裹。
 pub struct SessionManager {
     sessions_dir: PathBuf,
 }
 
 impl SessionManager {
+    /// 创建新的管理器实例。
     pub fn new(sessions_dir: PathBuf) -> Self {
         Self { sessions_dir }
     }
 
+    /// 创建一个新的活跃会话。
+    /// - 自动生成 ULID 作为 session_id
+    /// - `project_path` 取当前工作目录
+    /// - 创建完成后立即写入 `session` 文件头
     pub fn create_session(&self, model: &str) -> Result<Session> {
         fs::create_dir_all(&self.sessions_dir)?;
         let id = ulid::Ulid::new().to_string();
@@ -69,6 +107,8 @@ impl SessionManager {
         Ok(session)
     }
 
+    /// 列出 `sessions_dir` 下的所有会话摘要，按 `updated_at` 降序排列。
+    /// 遍历 `.jsonl` 文件并调用 `load_session` 读取完整内容后提取元数据。
     pub fn list_sessions(&self) -> Result<Vec<SessionMeta>> {
         let mut metas = Vec::new();
         if !self.sessions_dir.exists() {
@@ -77,6 +117,7 @@ impl SessionManager {
         for entry in fs::read_dir(&self.sessions_dir)? {
             let entry = entry?;
             let path = entry.path();
+            // 只处理 .jsonl 扩展名的文件
             if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
                 if let Some(id) = path.file_stem().and_then(|s| s.to_str()) {
                     if let Ok(session) = self.load_session(id) {
@@ -97,6 +138,17 @@ impl SessionManager {
         Ok(metas)
     }
 
+    /// 从 JSONL 文件恢复完整 Session（含所有 Message 和 Part）。
+    ///
+    /// 恢复逻辑：
+    /// 1. 按行读取
+    /// 2. 解析为统一的 `Record` 结构
+    /// 3. 根据 `type_` 字段分别处理：
+    ///    - `session`：初始化 Session 对象
+    ///    - `message_start`：创建 MessageBuilder
+    ///    - `part`：将 Part 追加到当前 MessageBuilder
+    ///    - `message_end`：将 Builder 转为 Message 并压入 Session
+    /// 4. 遇到解析失败的行：打印警告并跳过，保证容错性
     pub fn load_session(&self, session_id: &str) -> Result<Session> {
         let path = self.session_path(session_id);
         let file = File::open(&path)
@@ -151,17 +203,23 @@ impl SessionManager {
         session.with_context(|| format!("No session header found in {:?}", path))
     }
 
+    /// 全量覆写保存整个 Session。
+    /// 适用场景：初始化重建、批量保存。
     pub fn save_session(&self, session: &Session) -> Result<()> {
         fs::create_dir_all(&self.sessions_dir)?;
         let path = self.session_path(&session.id);
         let mut file = File::create(&path)?;
+        // 第一行写入 session 元数据头
         writeln!(file, "{}", serde_json::to_string(&session_to_record(session))?)?;
+        // 随后逐条写入消息
         for msg in &session.messages {
             self.write_message(&mut file, msg)?;
         }
         Ok(())
     }
 
+    /// 运行时追加单条 Message（增量持久化）。
+    /// 适用场景：用户每输入一条查询或模型每返回一条回复后即时落盘。
     pub fn append_message(&self, session_id: &str, message: &Message) -> Result<()> {
         let path = self.session_path(session_id);
         let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
@@ -169,6 +227,7 @@ impl SessionManager {
         Ok(())
     }
 
+    /// 私有方法：写入 session 文件头（创建新会话时使用）。
     fn write_session_header(&self, session: &Session) -> Result<()> {
         let path = self.session_path(&session.id);
         let mut file = File::create(&path)?;
@@ -176,6 +235,8 @@ impl SessionManager {
         Ok(())
     }
 
+    /// 私有方法：将一条 Message 序列化为三行 JSONL：
+    /// message_start -> [part...] -> message_end
     fn write_message(&self, file: &mut File, message: &Message) -> Result<()> {
         writeln!(
             file,
@@ -197,11 +258,19 @@ impl SessionManager {
         Ok(())
     }
 
+    /// 构造 session 文件的完整路径：`{sessions_dir}/{session_id}.jsonl`
     fn session_path(&self, session_id: &str) -> PathBuf {
         self.sessions_dir.join(format!("{}.jsonl", session_id))
     }
 }
 
+// =============================================================================
+// JSONL 记录类型与辅助函数
+// =============================================================================
+
+/// 统一的 JSONL 行记录结构。
+/// 通过 `#[serde(flatten)]` 将剩余字段存入 `fields` Map，
+/// 方便按 `type_` 做二次分发解析。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Record {
     #[serde(rename = "type")]
@@ -210,6 +279,7 @@ struct Record {
     fields: serde_json::Map<String, serde_json::Value>,
 }
 
+/// 将 `Session` 元数据转换为 `Record`，用于写入 JSONL 文件头。
 fn session_to_record(session: &Session) -> Record {
     let mut fields = serde_json::Map::new();
     fields.insert("id".to_string(), json!(session.id));
@@ -224,6 +294,7 @@ fn session_to_record(session: &Session) -> Record {
     }
 }
 
+/// 从 `Record` 中解析出 `Session`（不含消息内容）。
 fn parse_session_record(record: Record) -> Result<Session> {
     Ok(Session {
         id: get_str(&record, "id")?,
@@ -238,6 +309,11 @@ fn parse_session_record(record: Record) -> Result<Session> {
     })
 }
 
+// =============================================================================
+// MessageBuilder：用于从 JSONL 记录流式重建 Message
+// =============================================================================
+
+/// 消息构造器，在 `load_session` 过程中暂存一个 Message 的中间状态。
 struct MessageBuilder {
     id: String,
     session_id: String,
@@ -258,6 +334,7 @@ impl MessageBuilder {
         })
     }
 
+    /// 向当前消息追加一个 Part。
     fn add_part(&mut self, record: Record) -> Result<()> {
         let part_value = record
             .fields
@@ -269,6 +346,7 @@ impl MessageBuilder {
         Ok(())
     }
 
+    /// 完成消息构造，合并 `message_end` 中可能携带的 token_count 和 cost。
     fn finalize(self, record: Record) -> Result<Message> {
         Ok(Message {
             id: self.id,
@@ -282,6 +360,11 @@ impl MessageBuilder {
     }
 }
 
+// =============================================================================
+// 记录生成辅助函数
+// =============================================================================
+
+/// 生成 `message_start` 记录。
 fn message_start_record(message: &Message) -> Record {
     let mut fields = serde_json::Map::new();
     fields.insert("message_id".to_string(), json!(message.id));
@@ -297,6 +380,7 @@ fn message_start_record(message: &Message) -> Record {
     }
 }
 
+/// 生成 `part` 记录，`sequence` 保证 Part 的顺序可恢复。
 fn part_record(message: &Message, sequence: usize, part: &Part) -> Record {
     let mut fields = serde_json::Map::new();
     fields.insert("message_id".to_string(), json!(message.id));
@@ -308,6 +392,7 @@ fn part_record(message: &Message, sequence: usize, part: &Part) -> Record {
     }
 }
 
+/// 生成 `message_end` 记录。
 fn message_end_record(message: &Message) -> Record {
     let mut fields = serde_json::Map::new();
     fields.insert("message_id".to_string(), json!(message.id));
@@ -323,6 +408,7 @@ fn message_end_record(message: &Message) -> Record {
     }
 }
 
+/// 从 Record 的 fields 中安全提取字符串。
 fn get_str(record: &Record, key: &str) -> Result<String> {
     record
         .fields
@@ -332,6 +418,7 @@ fn get_str(record: &Record, key: &str) -> Result<String> {
         .with_context(|| format!("Missing or invalid field: {}", key))
 }
 
+/// 从 Record 的 fields 中安全提取 u64。
 fn get_u64(record: &Record, key: &str) -> Result<u64> {
     record
         .fields
@@ -340,6 +427,7 @@ fn get_u64(record: &Record, key: &str) -> Result<u64> {
         .with_context(|| format!("Missing or invalid field: {}", key))
 }
 
+/// 获取当前 Unix 时间戳（毫秒）。
 fn current_timestamp_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -348,18 +436,24 @@ fn current_timestamp_ms() -> u64 {
         .as_millis() as u64
 }
 
+// =============================================================================
+// 单元测试
+// =============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent::{Part, Role};
     use std::io::Write;
 
+    /// 创建临时目录和管理器的辅助函数。
     fn temp_manager() -> (SessionManager, tempfile::TempDir) {
         let dir = tempfile::TempDir::new().unwrap();
         let manager = SessionManager::new(dir.path().to_path_buf());
         (manager, dir)
     }
 
+    /// 测试创建会话后能够正确加载。
     #[test]
     fn test_create_and_load_session() {
         let (manager, _dir) = temp_manager();
@@ -372,6 +466,7 @@ mod tests {
         assert_eq!(loaded.model, session.model);
     }
 
+    /// 测试追加消息后能够完整恢复，包括 Part 内容。
     #[test]
     fn test_append_and_load_message() {
         let (manager, _dir) = temp_manager();
@@ -401,12 +496,13 @@ mod tests {
         }
     }
 
+    /// 测试遇到损坏的 JSONL 行时能够跳过并继续恢复后续记录。
     #[test]
     fn test_corrupted_line_skip() {
         let (manager, dir) = temp_manager();
         let session = manager.create_session("test").unwrap();
 
-        // Manually append a corrupted line
+        // 手动向文件末尾追加一行非法 JSON
         let path = dir.path().join(format!("{}.jsonl", session.id));
         let mut file = std::fs::OpenOptions::new()
             .append(true)
@@ -415,6 +511,6 @@ mod tests {
         writeln!(file, "this is not json").unwrap();
 
         let loaded = manager.load_session(&session.id).unwrap();
-        assert_eq!(loaded.messages.len(), 0); // should still load session header
+        assert_eq!(loaded.messages.len(), 0); // 会话头仍在，消息为空
     }
 }

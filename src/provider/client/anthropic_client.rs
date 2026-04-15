@@ -8,6 +8,10 @@ use serde_json::json;
 use crate::agent::{Message, Part, Role, ImageSource};
 use crate::provider::base_client::{AIClient, Chunk, ChunkContent, FinishReason, RetryConfig, send_with_retry};
 
+// =============================================================================
+// Anthropic API 客户端
+// =============================================================================
+
 /// Anthropic API 客户端。
 /// 内部仅持有 HTTP 客户端与统一的 `Model` 配置。
 pub struct AnthropicClient {
@@ -43,6 +47,7 @@ impl AIClient for AnthropicClient {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         // 构造 Anthropic 兼容的请求消息
+        // 由于 `Message` 已升级为 `Vec<Part>` 结构，需要手动映射到 Anthropic 的 content block 格式
         let anthropic_messages = build_messages(messages);
 
         // 构造请求体，显式开启流式模式
@@ -77,7 +82,19 @@ impl AIClient for AnthropicClient {
     }
 }
 
-/// 将内部 Message 列表转换为 Anthropic 兼容格式
+// =============================================================================
+// 消息格式转换：内部 Message -> Anthropic 请求格式
+// =============================================================================
+
+/// 将内部 `Message` 列表转换为 Anthropic 兼容的消息数组。
+///
+/// 映射规则：
+/// - `Role` -> 小写字符串（user/assistant/system/developer）
+/// - `Part::Text` -> `{"type": "text", "text": ...}`
+/// - `Part::Image` -> 根据 `ImageSource` 生成 base64 或 url 类型的 image block
+/// - `Part::ToolUse` -> `{"type": "tool_use", "id", "name", "input"}`
+/// - `Part::ToolResult` -> `{"type": "tool_result", "tool_use_id", "content", "is_error"}`
+/// - `Part::Reasoning` -> 暂映射为 text block 以保留内容
 fn build_messages(messages: &[Message]) -> Vec<serde_json::Value> {
     let mut result = Vec::new();
     for msg in messages {
@@ -141,8 +158,8 @@ fn build_messages(messages: &[Message]) -> Vec<serde_json::Value> {
                     })
                 }
                 Part::Reasoning { thinking, .. } => {
-                    // Anthropic extended thinking may use a different block type;
-                    // for now map to text to preserve content
+                    // Anthropic extended thinking 可能使用不同的 block 类型；
+                    // 当前为了保留内容，先映射为普通文本块
                     json!({"type": "text", "text": thinking})
                 }
             };

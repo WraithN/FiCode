@@ -304,6 +304,10 @@ pub fn tool_call(name: &str, input: &HashMap<String, serde_json::Value>) -> Resu
 // 批量执行工具调用（处理 Part 列表）
 // =============================================================================
 // 遍历 LLM 返回的 `Part`，如果是 `ToolUse` 类型，就逐个调用 `tool_call`。
+// 返回的 `Part::ToolResult` 列表将被打包为 User 消息回传给模型。
+//
+// 设计演进：此前返回的是裸 JSON Value 数组；为了与新的 `Message`/`Part` 模型对齐，
+// 现在直接返回结构化的 `Vec<Part>`，省去上层再做一次格式转换。
 
 pub fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
     use colored::Colorize;
@@ -311,10 +315,11 @@ pub fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
     let mut results = Vec::new();
 
     for part in parts {
+        // 只处理 ToolUse 类型的 Part
         if let Part::ToolUse { id, name, arguments } = part {
             println!("{}", format!("${}", name).yellow());
 
-            // arguments 是 serde_json::Value，需要转成 HashMap 传给 tool_call
+            // `arguments` 是 serde_json::Value，需要转成 HashMap 才能传给 `tool_call`
             let input: HashMap<String, serde_json::Value> = match arguments {
                 serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                 _ => HashMap::new(),

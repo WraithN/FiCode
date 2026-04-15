@@ -46,6 +46,7 @@ impl AIClient for OpenAiClient {
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
+        // 将内部 Message/Part 模型转换为 OpenAI 兼容的消息格式
         let openai_messages = build_messages(system_prompt, messages);
 
         // 显式开启流式模式
@@ -198,6 +199,7 @@ where
 // 请求/响应结构体（仅用于序列化请求体）
 // =============================================================================
 
+/// OpenAI 消息格式，用于序列化请求体。
 #[derive(Debug, Serialize)]
 struct OpenAiMessage {
     role: String,
@@ -228,7 +230,13 @@ struct OpenAiFunctionCall {
 // =============================================================================
 
 /// 将内部 `Message` 列表转换为 OpenAI 兼容的消息格式。
-/// 注意处理 tool_result 数组以及 assistant 消息中的工具调用片段。
+///
+/// 映射规则：
+/// - `Role::User`：将其中的 `Part::Text` 合并为 user 消息；
+///   `Part::ToolResult` 映射为独立的 `role: "tool"` 消息
+/// - `Role::Assistant`：将其中的 `Part::Text` 和 `Part::Reasoning` 合并为 content；
+///   `Part::ToolUse` 映射为 `tool_calls` 数组
+/// - `Role::System`：在循环前单独插入 system 消息
 fn build_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAiMessage> {
     let mut result = Vec::new();
 
@@ -258,8 +266,8 @@ fn build_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAiMessag
                                 tool_call_id: Some(tool_call_id.clone()),
                             });
                         }
-                        Part::Image { source } => {
-                            // OpenAI vision via URL not directly supported in this simple text path
+                        Part::Image { .. } => {
+                            // OpenAI vision 在当前简化路径中以占位符表示
                             text_parts.push("[image]".to_string());
                         }
                         _ => {}
