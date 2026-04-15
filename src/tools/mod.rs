@@ -1,5 +1,4 @@
-use crate::agent::ContentBlock;
-use serde_json::json;
+use crate::agent::Part;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -302,39 +301,41 @@ pub fn tool_call(name: &str, input: &HashMap<String, serde_json::Value>) -> Resu
 }
 
 // =============================================================================
-// 批量执行工具调用（保留给需要处理 ContentBlock 列表的调用方使用）
+// 批量执行工具调用（处理 Part 列表）
 // =============================================================================
-// 遍历 LLM 返回的 `ContentBlock`，如果是 `ToolUse` 类型，就逐个调用 `tool_call`。
+// 遍历 LLM 返回的 `Part`，如果是 `ToolUse` 类型，就逐个调用 `tool_call`。
 
-pub fn execute_tool_calls(content_blocks: &[ContentBlock]) -> Vec<serde_json::Value> {
+pub fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
     use colored::Colorize;
 
     let mut results = Vec::new();
 
-    for block in content_blocks {
-        // `if let` 是 Rust 中处理枚举变体的简洁写法，只匹配我们关心的变体
-        if let ContentBlock::ToolUse { id, name, input } = block {
+    for part in parts {
+        if let Part::ToolUse { id, name, arguments } = part {
             println!("{}", format!("${}", name).yellow());
 
-            // `match` 处理工具调用的成功和失败两种情况
-            match tool_call(name, input) {
+            // arguments 是 serde_json::Value，需要转成 HashMap 传给 tool_call
+            let input: HashMap<String, serde_json::Value> = match arguments {
+                serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                _ => HashMap::new(),
+            };
+
+            let (content, is_error) = match tool_call(name, &input) {
                 Ok(output) => {
                     println!("{}", &output[..output.len().min(200)]);
-                    results.push(json!({
-                        "type": "tool_result",
-                        "tool_use_id": id,
-                        "content": output
-                    }));
+                    (output, false)
                 }
                 Err(e) => {
                     eprintln!("Tool call error: {}", e);
-                    results.push(json!({
-                        "type": "tool_result",
-                        "tool_use_id": id,
-                        "content": format!("Error: {}", e)
-                    }));
+                    (format!("Error: {}", e), true)
                 }
-            }
+            };
+
+            results.push(Part::ToolResult {
+                tool_call_id: id.clone(),
+                content,
+                is_error,
+            });
         }
     }
     results

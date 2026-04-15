@@ -4,9 +4,8 @@ use futures::Stream;
 use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde_json::json;
-use std::collections::HashMap;
 
-use crate::agent::{ContentBlock, Message};
+use crate::agent::{Message, Part, Role, ImageSource};
 use crate::provider::base_client::{AIClient, Chunk, ChunkContent, FinishReason, RetryConfig, send_with_retry};
 
 /// Anthropic API 客户端。
@@ -43,11 +42,14 @@ impl AIClient for AnthropicClient {
         headers.insert("anthropic-version", HeaderValue::from_static("2025-06-01"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
+        // 构造 Anthropic 兼容的请求消息
+        let anthropic_messages = build_messages(messages);
+
         // 构造请求体，显式开启流式模式
         let body = json!({
             "model": self.model.model_name,
             "system": system_prompt,
-            "messages": messages,
+            "messages": anthropic_messages,
             "tools": *tools_schema,
             "max_tokens": 8000,
             "stream": true
@@ -75,6 +77,85 @@ impl AIClient for AnthropicClient {
     }
 }
 
+/// 将内部 Message 列表转换为 Anthropic 兼容格式
+fn build_messages(messages: &[Message]) -> Vec<serde_json::Value> {
+    let mut result = Vec::new();
+    for msg in messages {
+        let role_str = match msg.role {
+            Role::User => "user",
+            Role::Assistant => "assistant",
+            Role::System => "system",
+            Role::Developer => "developer",
+        };
+
+        let mut content = Vec::new();
+        for part in &msg.parts {
+            let value = match part {
+                Part::Text { text } => {
+                    json!({"type": "text", "text": text})
+                }
+                Part::Image { source } => match source {
+                    ImageSource::Base64 { media_type, data } => {
+                        json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": data
+                            }
+                        })
+                    }
+                    ImageSource::Path { path } => {
+                        json!({
+                            "type": "image",
+                            "source": {
+                                "type": "url",
+                                "url": format!("file://{}", path)
+                            }
+                        })
+                    }
+                    ImageSource::Url { url } => {
+                        json!({
+                            "type": "image",
+                            "source": {
+                                "type": "url",
+                                "url": url
+                            }
+                        })
+                    }
+                }
+                Part::ToolUse { id, name, arguments } => {
+                    json!({
+                        "type": "tool_use",
+                        "id": id,
+                        "name": name,
+                        "input": arguments
+                    })
+                }
+                Part::ToolResult { tool_call_id, content: c, is_error } => {
+                    json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool_call_id,
+                        "content": c,
+                        "is_error": is_error
+                    })
+                }
+                Part::Reasoning { thinking, .. } => {
+                    // Anthropic extended thinking may use a different block type;
+                    // for now map to text to preserve content
+                    json!({"type": "text", "text": thinking})
+                }
+            };
+            content.push(value);
+        }
+
+        if !content.is_empty() {
+            result.push(json!({"role": role_str, "content": content}));
+        }
+    }
+    result
+}
+
 // =============================================================================
 // Anthropic SSE 解析：将原生 Server-Sent Events 通过闭包实时回传
 // =============================================================================
@@ -97,7 +178,7 @@ where
 {
     let mut buffer = String::new();
     // 维护 index -> (tool_id, tool_name, args_json_string)
-    let mut index_to_tool: HashMap<usize, (String, String, String)> = HashMap::new();
+    let mut index_to_tool: std::collections::HashMap<usize, (String, String, String)> = std::collections::HashMap::new();
     let mut current_event_type: Option<String> = None;
 
     tokio::pin!(byte_stream);
@@ -167,10 +248,9 @@ where
                     "content_block_stop" => {
                         let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                         if let Some((id, name, args)) = index_to_tool.remove(&index) {
-                            let input: HashMap<String, serde_json::Value> =
-                                serde_json::from_str(&args).unwrap_or_default();
+                            let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
                             on_chunk(Chunk {
-                                content: ChunkContent::ToolUse(ContentBlock::ToolUse { id, name, input }),
+                                content: ChunkContent::ToolUse(Part::ToolUse { id, name, arguments }),
                             });
                         }
                     }

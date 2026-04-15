@@ -5,9 +5,8 @@ use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::json;
-use std::collections::HashMap;
 
-use crate::agent::{ContentBlock, Message};
+use crate::agent::{Message, Part, Role};
 use crate::provider::base_client::{AIClient, Chunk, ChunkContent, FinishReason, RetryConfig, send_with_retry};
 
 // =============================================================================
@@ -98,7 +97,7 @@ where
 {
     let mut buffer = String::new();
     // OpenAI 的 tool_calls 增量只带 `index`，需要维护 index -> (id, name, args_buffer)
-    let mut index_to_tool: HashMap<usize, (Option<String>, Option<String>, String)> = HashMap::new();
+    let mut index_to_tool: std::collections::HashMap<usize, (Option<String>, Option<String>, String)> = std::collections::HashMap::new();
 
     tokio::pin!(byte_stream);
     while let Some(chunk) = byte_stream.next().await {
@@ -170,13 +169,12 @@ where
                                 indices.sort();
                                 for idx in indices {
                                     if let Some((Some(id), Some(name), args)) = index_to_tool.remove(&idx) {
-                                        let input: HashMap<String, serde_json::Value> =
-                                            serde_json::from_str(&args).unwrap_or_default();
+                                        let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
                                         on_chunk(Chunk {
-                                            content: ChunkContent::ToolUse(ContentBlock::ToolUse {
+                                            content: ChunkContent::ToolUse(Part::ToolUse {
                                                 id,
                                                 name,
-                                                input,
+                                                arguments,
                                             }),
                                         });
                                     }
@@ -242,80 +240,68 @@ fn build_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAiMessag
     });
 
     for msg in messages {
-        match msg.role.as_str() {
-            "user" => {
-                if let Some(content) = &msg.content {
-                    if let Some(arr) = content.as_array() {
-                        for item in arr {
-                            if let Some(tool_use_id) = item.get("tool_use_id").and_then(|v| v.as_str()) {
-                                let text = item.get("content")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                result.push(OpenAiMessage {
-                                    role: "tool".to_string(),
-                                    content: Some(text),
-                                    tool_calls: None,
-                                    tool_call_id: Some(tool_use_id.to_string()),
-                                });
-                            } else {
-                                let text = item.get("text")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                if !text.is_empty() {
-                                    result.push(OpenAiMessage {
-                                        role: "user".to_string(),
-                                        content: Some(text),
-                                        tool_calls: None,
-                                        tool_call_id: None,
-                                    });
-                                }
-                            }
+        match msg.role {
+            Role::User => {
+                let mut text_parts = Vec::new();
+                let mut tool_results = Vec::new();
+
+                for part in &msg.parts {
+                    match part {
+                        Part::Text { text } => {
+                            text_parts.push(text.clone());
                         }
-                    } else if let Some(s) = content.as_str() {
-                        result.push(OpenAiMessage {
-                            role: "user".to_string(),
-                            content: Some(s.to_string()),
-                            tool_calls: None,
-                            tool_call_id: None,
-                        });
-                    } else {
-                        result.push(OpenAiMessage {
-                            role: "user".to_string(),
-                            content: Some(content.to_string()),
-                            tool_calls: None,
-                            tool_call_id: None,
-                        });
+                        Part::ToolResult { tool_call_id, content: c, .. } => {
+                            tool_results.push(OpenAiMessage {
+                                role: "tool".to_string(),
+                                content: Some(c.clone()),
+                                tool_calls: None,
+                                tool_call_id: Some(tool_call_id.clone()),
+                            });
+                        }
+                        Part::Image { source } => {
+                            // OpenAI vision via URL not directly supported in this simple text path
+                            text_parts.push("[image]".to_string());
+                        }
+                        _ => {}
                     }
                 }
+
+                if !text_parts.is_empty() {
+                    result.push(OpenAiMessage {
+                        role: "user".to_string(),
+                        content: Some(text_parts.join("\n")),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
+                }
+
+                for tr in tool_results {
+                    result.push(tr);
+                }
             }
-            "assistant" => {
+            Role::Assistant => {
                 let mut text_parts = Vec::new();
                 let mut tool_calls = Vec::new();
 
-                if let Some(content) = &msg.content {
-                    if let Some(arr) = content.as_array() {
-                        for item in arr {
-                            if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-                                text_parts.push(t.to_string());
-                            } else if let Some(name) = item.get("name").and_then(|v| v.as_str()) {
-                                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("call_unknown").to_string();
-                                let input = item.get("input").cloned().unwrap_or(json!({}));
-                                tool_calls.push(OpenAiToolCall {
-                                    id,
-                                    call_type: "function".to_string(),
-                                    function: OpenAiFunctionCall {
-                                        name: name.to_string(),
-                                        arguments: input.to_string(),
-                                    },
-                                });
-                            }
+                for part in &msg.parts {
+                    match part {
+                        Part::Text { text } => {
+                            text_parts.push(text.clone());
                         }
-                    } else if let Some(s) = content.as_str() {
-                        text_parts.push(s.to_string());
-                    } else {
-                        text_parts.push(content.to_string());
+                        Part::ToolUse { id, name, arguments } => {
+                            tool_calls.push(OpenAiToolCall {
+                                id: id.clone(),
+                                call_type: "function".to_string(),
+                                function: OpenAiFunctionCall {
+                                    name: name.clone(),
+                                    arguments: arguments.to_string(),
+                                },
+                            });
+                        }
+                        Part::Reasoning { thinking, .. } => {
+                            text_parts.push(thinking.clone());
+                        }
+                        _ => {}
                     }
                 }
 

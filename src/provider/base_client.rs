@@ -1,4 +1,4 @@
-use crate::agent::ContentBlock;
+use crate::agent::Part;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::time::Duration;
@@ -63,7 +63,7 @@ impl FinishReason {
 pub enum ChunkContent {
     Text(String),
     Think(String),
-    ToolUse(ContentBlock),
+    ToolUse(Part),
     Finish(FinishReason),
 }
 
@@ -82,17 +82,17 @@ pub struct Chunk {
 /// `finish_reason` 为模型停止的统一原因。
 #[derive(Debug)]
 pub struct ApiResponse {
-    pub content: Vec<ContentBlock>,
+    pub content: Vec<Part>,
     pub finish_reason: Option<FinishReason>,
 }
 
 /// 从内容块列表中提取所有文本并按换行拼接。
-/// Think 块默认不暴露给终端输出，因此不被提取。
-pub fn extract_text(content_blocks: &[ContentBlock]) -> String {
-    content_blocks
+/// Reasoning 块默认不暴露给终端输出，因此不被提取。
+pub fn extract_text(parts: &[Part]) -> String {
+    parts
         .iter()
         .filter_map(|block| match block {
-            ContentBlock::Text { text } => Some(text.as_str()),
+            Part::Text { text } => Some(text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>()

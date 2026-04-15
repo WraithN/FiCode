@@ -1,7 +1,5 @@
 #![allow(warnings)]
 
-#![allow(warnings)]
-
 // =============================================================================
 // Rust 基础概念：模块系统
 // =============================================================================
@@ -10,6 +8,7 @@
 mod agent;
 mod permission;
 mod provider;
+mod session;
 mod tools;
 
 // `anyhow` 是一个错误处理库，提供了简化错误传播的功能
@@ -21,11 +20,10 @@ use colored::Colorize;
 // `rustyline` 是一个命令行读取库（类似 GNU readline）
 use rustyline::DefaultEditor;
 
-// `json!` 是 serde_json 提供的宏，用于方便地创建 JSON 值
-use serde_json::json;
-
-use agent::{agent_loop, ContentBlock, LoopState, Message};
+use agent::{agent_loop, LoopState, Message, Role};
 use provider::{Model, Provider};
+use session::{SessionManager, SessionMeta, SessionStatus};
+use std::path::PathBuf;
 
 // =============================================================================
 // 程序入口：main 函数
@@ -36,13 +34,21 @@ use provider::{Model, Provider};
 async fn main() -> Result<()> {
     let model = Model::get_model()?;
     let mut provider = Provider::new();
-    provider.set_model(model);
+    provider.set_model(model.clone());
     let client = provider.get_client()?;
     let mut editor = DefaultEditor::new()?;
-    let mut history: Vec<Message> = Vec::new();
+
+    let config_dir = directories::ProjectDirs::from("", "", "shun-code")
+        .map(|d| d.config_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from(".config/shun-code"));
+    let sessions_dir = config_dir.join("sessions");
+    let session_manager = SessionManager::new(sessions_dir.clone());
+
+    let mut session = choose_or_create_session(&session_manager, &model.model_name).await?;
+    let prompt_prefix = format!("{} >> ", &session.id[..session.id.len().min(8)]);
 
     loop {
-        let readline = editor.readline("s01 >> ".cyan().to_string().as_str());
+        let readline = editor.readline(prompt_prefix.cyan().to_string().as_str());
 
         match readline {
             Ok(line) => {
@@ -54,28 +60,37 @@ async fn main() -> Result<()> {
 
                 editor.add_history_entry(query)?;
 
-                history.push(Message {
-                    role: "user".to_string(),
-                    content: Some(json!(query)),
-                });
+                let user_msg = Message::new(
+                    session.id.clone(),
+                    Role::User,
+                    vec![agent::Part::Text { text: query.to_string() }],
+                );
+                session.messages.push(user_msg.clone());
 
-                let mut state = LoopState::new(history.clone());
+                if let Err(e) = session_manager.append_message(&session.id, &user_msg) {
+                    eprintln!("Warning: failed to persist user message: {}", e);
+                }
+
+                let mut state = LoopState::new(session.messages.clone());
 
                 agent_loop(client.as_ref(), &mut state).await?;
 
-                history = state.messages;
+                session.messages = state.messages;
 
-                if let Some(last_msg) = history.last() {
-                    if last_msg.role == "assistant" {
-                        if let Some(content) = &last_msg.content {
-                            if let Ok(blocks) =
-                                serde_json::from_value::<Vec<ContentBlock>>(content.clone())
-                            {
-                                let text = provider::extract_text(&blocks);
-                                if !text.is_empty() {
-                                    println!("{}", text);
-                                }
-                            }
+                // Persist session after each turn
+                if let Err(e) = tokio::task::spawn_blocking({
+                    let sm = SessionManager::new(sessions_dir.clone());
+                    let s = session.clone();
+                    move || sm.save_session(&s)
+                }).await? {
+                    eprintln!("Warning: failed to save session: {}", e);
+                }
+
+                if let Some(last_msg) = session.messages.last() {
+                    if last_msg.role == Role::Assistant {
+                        let text = provider::extract_text(&last_msg.parts);
+                        if !text.is_empty() {
+                            println!("{}", text);
                         }
                     }
                     println!();
@@ -93,4 +108,47 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn choose_or_create_session(
+    manager: &SessionManager,
+    model_name: &str,
+) -> Result<session::Session> {
+    let sessions = manager.list_sessions()?;
+    if sessions.is_empty() {
+        return Ok(manager.create_session(model_name)?);
+    }
+
+    println!("Recent sessions:");
+    for (i, s) in sessions.iter().enumerate() {
+        println!(
+            "  [{}] {} | {} | {} messages | {}",
+            i + 1,
+            &s.id[..s.id.len().min(8)],
+            s.project_path,
+            s.message_count,
+            if s.status == SessionStatus::Active {
+                "active"
+            } else {
+                "archived"
+            }
+        );
+    }
+    println!("  [0] Create new session");
+    println!();
+    print!("Select session [1]: ");
+    use std::io::Write;
+    std::io::stdout().flush()?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let choice = input.trim().parse::<usize>().unwrap_or(1);
+
+    if choice == 0 {
+        Ok(manager.create_session(model_name)?)
+    } else if choice <= sessions.len() {
+        Ok(manager.load_session(&sessions[choice - 1].id)?)
+    } else {
+        Ok(manager.load_session(&sessions[0].id)?)
+    }
 }
