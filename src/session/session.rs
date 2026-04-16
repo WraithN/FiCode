@@ -95,7 +95,12 @@ impl SessionManager {
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
-        log_debug!("session created | id={} | model={} | path={}", id, model, project_path);
+        log_debug!(
+            "session created | id={} | model={} | path={}",
+            id,
+            model,
+            project_path
+        );
         let session = Session {
             id: id.clone(),
             project_path,
@@ -215,7 +220,11 @@ impl SessionManager {
         }
 
         if let Some(ref s) = session {
-            log_debug!("session loaded | id={} | messages={}", s.id, s.messages.len());
+            log_debug!(
+                "session loaded | id={} | messages={}",
+                s.id,
+                s.messages.len()
+            );
         }
         session.with_context(|| format!("No session header found in {:?}", path))
     }
@@ -223,7 +232,11 @@ impl SessionManager {
     /// 全量覆写保存整个 Session。
     /// 适用场景：初始化重建、批量保存。
     pub fn save_session(&self, session: &Session) -> Result<()> {
-        log_debug!("session saved | id={} | messages={}", session.id, session.messages.len());
+        log_debug!(
+            "session saved | id={} | messages={}",
+            session.id,
+            session.messages.len()
+        );
         fs::create_dir_all(&self.sessions_dir)?;
         let path = self.session_path(&session.id);
         let mut file = File::create(&path)?;
@@ -243,7 +256,11 @@ impl SessionManager {
     /// 运行时追加单条 Message（增量持久化）。
     /// 适用场景：用户每输入一条查询或模型每返回一条回复后即时落盘。
     pub fn append_message(&self, session_id: &str, message: &Message) -> Result<()> {
-        log_debug!("message appended | session_id={} | message_id={}", session_id, message.id);
+        log_debug!(
+            "message appended | session_id={} | message_id={}",
+            session_id,
+            message.id
+        );
         let path = self.session_path(session_id);
         let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
         self.write_message(&mut file, message)?;
