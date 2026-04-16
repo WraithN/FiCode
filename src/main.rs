@@ -6,11 +6,12 @@
 // `mod` 关键字声明当前 crate 包含的模块，Rust 编译器会在对应目录查找
 
 mod agent;
-mod log;
 mod permission;
 mod provider;
 mod session;
 mod tools;
+mod cli;
+mod log;
 
 // `anyhow` 是一个错误处理库，提供了简化错误传播的功能
 use anyhow::Result;
@@ -22,6 +23,9 @@ use colored::Colorize;
 use rustyline::DefaultEditor;
 
 use agent::{agent_loop, LoopState};
+use cli::Args;
+use clap::Parser;
+use log::set_debug;
 use provider::Provider;
 use session::message::{Message, Role};
 use session::{SessionManager, SessionMeta, SessionStatus};
@@ -34,75 +38,144 @@ use std::path::PathBuf;
 // `#[tokio::main]` 是属性宏，将 main 函数包装在 tokio 异步运行时中
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. 初始化 provider 并创建 AI 客户端
-    let provider = Provider::new()?;
-    let client = provider.get_client()?;
-    let mut editor = DefaultEditor::new()?;
+    let args = Args::parse();
 
-    // 2. 初始化 SessionManager
-    // 使用 `directories` crate 解析平台相关的配置目录：
-    // - Linux:   ~/.config/shun-code/
-    // - macOS:   ~/Library/Application Support/shun-code/
-    // - Windows: %APPDATA%\shun-code\
+    set_debug(args.log_level.eq_ignore_ascii_case("debug"));
+
     let config_dir = directories::ProjectDirs::from("", "", "shun-code")
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".config/shun-code"));
     let sessions_dir = config_dir.join("sessions");
     let session_manager = SessionManager::new(sessions_dir.clone());
 
-    // 3. 让用户选择恢复历史会话或创建新会话
-    let mut session = choose_or_create_session(&session_manager, provider.model_name()?).await?;
-    // 提示符显示 session ID 的前 8 位，如 "01HQ8J3K >>"
-    let prompt_prefix = format!("{} >> ", &session.id[..session.id.len().min(8)]);
+    // -s 优先级最高
+    if let Some(session_arg) = args.session {
+        if let Some(selector) = session_arg {
+            let session = session_manager.find_session(&selector)?;
+            SessionManager::print_session(&session);
+        } else {
+            let sessions = session_manager.list_sessions()?;
+            if sessions.is_empty() {
+                println!("No sessions found.");
+            } else {
+                println!("Recent sessions:");
+                for (i, s) in sessions.iter().enumerate() {
+                    println!(
+                        "  [{}] {} | {} | {} messages | {}",
+                        i,
+                        &s.id[..s.id.len().min(8)],
+                        s.project_path,
+                        s.message_count,
+                        if s.status == SessionStatus::Active { "active" } else { "archived" }
+                    );
+                }
+            }
+        }
+        return Ok(());
+    }
 
-    // 4. REPL 主循环
+    let provider = Provider::new()?;
+    let client = provider.get_client()?;
+
+    // -c 单命令模式
+    if let Some(cmd) = args.command {
+        let cmd = cmd.trim();
+        if !cmd.is_empty() {
+            let mut session = session_manager.create_session(provider.model_name()?)?;
+            run_single_command(client.as_ref(), &session_manager, &sessions_dir, &mut session, cmd).await?;
+        }
+        return Ok(());
+    }
+
+    // 默认 / -i 交互式模式
+    run_interactive(client.as_ref(), &provider, &session_manager, &sessions_dir).await?;
+    Ok(())
+}
+
+async fn run_single_command(
+    client: &dyn crate::provider::base_client::AIClient,
+    session_manager: &SessionManager,
+    sessions_dir: &PathBuf,
+    session: &mut session::Session,
+    query: &str,
+) -> Result<()> {
+    use crate::session::message::Part;
+
+    let user_msg = Message::new(
+        session.id.clone(),
+        Role::User,
+        vec![Part::Text { text: query.to_string() }],
+    );
+    session.messages.push(user_msg.clone());
+    let _ = session_manager.append_message(&session.id, &user_msg);
+
+    let mut state = LoopState::new(session.messages.clone());
+    agent_loop(client, &mut state).await?;
+    session.messages = state.messages;
+
+    if let Err(e) = tokio::task::spawn_blocking({
+        let sm = SessionManager::new(sessions_dir.clone());
+        let s = session.clone();
+        move || sm.save_session(&s)
+    }).await?
+    {
+        eprintln!("Warning: failed to save session: {}", e);
+    }
+
+    if let Some(last_msg) = session.messages.last() {
+        if last_msg.role == Role::Assistant {
+            let text = provider::extract_text(&last_msg.parts);
+            if !text.is_empty() {
+                println!("{}", text);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_interactive(
+    client: &dyn crate::provider::base_client::AIClient,
+    provider: &Provider,
+    session_manager: &SessionManager,
+    sessions_dir: &PathBuf,
+) -> Result<()> {
+    let mut session = choose_or_create_session(session_manager, provider.model_name()?).await?;
+    let prompt_prefix = format!("{} >> ", &session.id[..session.id.len().min(8)]);
+    let mut editor = DefaultEditor::new()?;
+
     loop {
         let readline = editor.readline(prompt_prefix.cyan().to_string().as_str());
-
         match readline {
             Ok(line) => {
                 let query = line.trim();
-
-                // 空输入或退出指令
                 if query.is_empty() || ["q", "exit"].contains(&query.to_lowercase().as_str()) {
                     break;
                 }
-
                 editor.add_history_entry(query)?;
 
-                // 5. 构造用户消息并追加到当前会话
                 let user_msg = Message::new(
                     session.id.clone(),
                     Role::User,
-                    vec![session::message::Part::Text {
-                        text: query.to_string(),
-                    }],
+                    vec![session::message::Part::Text { text: query.to_string() }],
                 );
                 session.messages.push(user_msg.clone());
-
-                // 6. 尝试将用户消息持久化到 JSONL（失败仅打印警告，不中断对话）
                 if let Err(e) = session_manager.append_message(&session.id, &user_msg) {
                     eprintln!("Warning: failed to persist user message: {}", e);
                 }
 
-                // 7. 创建 LoopState 并运行 agent 循环
                 let mut state = LoopState::new(session.messages.clone());
-                agent_loop(client.as_ref(), &mut state).await?;
+                agent_loop(client, &mut state).await?;
                 session.messages = state.messages;
 
-                // 8. 每轮对话结束后，全量保存当前会话
-                // 使用 spawn_blocking 避免在 async main 中阻塞事件循环
                 if let Err(e) = tokio::task::spawn_blocking({
                     let sm = SessionManager::new(sessions_dir.clone());
                     let s = session.clone();
                     move || sm.save_session(&s)
-                })
-                .await?
+                }).await?
                 {
                     eprintln!("Warning: failed to save session: {}", e);
                 }
 
-                // 9. 提取并打印 Assistant 的最终文本回复
                 if let Some(last_msg) = session.messages.last() {
                     if last_msg.role == Role::Assistant {
                         let text = provider::extract_text(&last_msg.parts);
@@ -114,17 +187,13 @@ async fn main() -> Result<()> {
                 }
             }
             Err(rustyline::error::ReadlineError::Interrupted)
-            | Err(rustyline::error::ReadlineError::Eof) => {
-                // Ctrl-C 或 Ctrl-D 触发退出
-                break;
-            }
+            | Err(rustyline::error::ReadlineError::Eof) => break,
             Err(err) => {
                 eprintln!("Error: {:?}", err);
                 break;
             }
         }
     }
-
     Ok(())
 }
 
