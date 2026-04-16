@@ -57,19 +57,27 @@ async fn main() -> Result<()> {
     let workspace = workspace
         .canonicalize()
         .with_context(|| format!("无法解析工作目录: {:?}", workspace))?;
-    set_workspace(workspace);
+    set_workspace(workspace.clone());
+
+    log_info!(
+        "shun-code started | mode={} | workspace={:?}",
+        if args.interactive {
+            "interactive"
+        } else if args.command.is_some() {
+            "command"
+        } else if args.session.is_some() {
+            "session"
+        } else {
+            "none"
+        },
+        workspace
+    );
 
     let config_dir = directories::ProjectDirs::from("", "", "shun-code")
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".config/shun-code"));
     let sessions_dir = config_dir.join("sessions");
     let session_manager = SessionManager::new(sessions_dir.clone());
-
-    let workspace = std::env::current_dir()?;
-    log_info!("shun-code started | mode={} | workspace={:?}",
-        if args.interactive { "interactive" } else if args.command.is_some() { "command" } else if args.session.is_some() { "session" } else { "none" },
-        workspace
-    );
 
     // -s 优先级最高
     if let Some(session_arg) = args.session {
