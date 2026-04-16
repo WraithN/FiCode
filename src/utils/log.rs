@@ -13,7 +13,7 @@ pub fn is_debug() -> bool {
 #[macro_export]
 macro_rules! log_debug {
     ($($arg:tt)*) => {
-        if $crate::log::is_debug() {
+        if $crate::utils::log::is_debug() {
             eprintln!("[debug] {}", format!($($arg)*));
         }
     };

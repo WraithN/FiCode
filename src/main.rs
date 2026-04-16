@@ -10,8 +10,7 @@ mod permission;
 mod provider;
 mod session;
 mod tools;
-mod cli;
-mod log;
+mod utils;
 
 // `anyhow` 是一个错误处理库，提供了简化错误传播的功能
 use anyhow::Result;
@@ -23,9 +22,9 @@ use colored::Colorize;
 use rustyline::DefaultEditor;
 
 use agent::{agent_loop, LoopState};
-use cli::Args;
 use clap::Parser;
-use log::set_debug;
+use utils::cli::Args;
+use utils::log::set_debug;
 use provider::Provider;
 use session::message::{Message, Role};
 use session::{SessionManager, SessionMeta, SessionStatus};
