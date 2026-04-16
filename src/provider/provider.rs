@@ -3,21 +3,21 @@ use anyhow::{anyhow, Result};
 use std::env;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ModelType {
+enum ModelType {
     OpenAiCompatible,
     Anthropic,
 }
 
 #[derive(Debug, Clone)]
-pub struct Model {
-    pub api_key: String,
-    pub base_url: String,
-    pub model_name: String,
-    pub model_type: ModelType,
+struct Model {
+    api_key: String,
+    base_url: String,
+    model_name: String,
+    model_type: ModelType,
 }
 
 impl Model {
-    pub fn get_model() -> Result<Self> {
+    fn get_model() -> Result<Self> {
         dotenvy::dotenv().ok();
 
         if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
@@ -55,16 +55,20 @@ impl Model {
 }
 
 pub struct Provider {
-    pub model: Option<Model>,
+    model: Option<Model>,
 }
 
 impl Provider {
-    pub fn new() -> Self {
-        Self { model: None }
+    pub fn new() -> Result<Self> {
+        let model = Model::get_model()?;
+        Ok(Self { model: Some(model) })
     }
 
-    pub fn set_model(&mut self, model: Model) {
-        self.model = Some(model);
+    pub fn model_name(&self) -> Result<&str> {
+        self.model
+            .as_ref()
+            .map(|m| m.model_name.as_str())
+            .ok_or_else(|| anyhow!("Model not set"))
     }
 
     pub fn get_client(&self) -> Result<Box<dyn AIClient>> {
@@ -73,10 +77,18 @@ impl Provider {
             .as_ref()
             .ok_or_else(|| anyhow!("Model not set"))?;
         if model.model_type == ModelType::OpenAiCompatible {
-            let client = OpenAiClient::from_model(model)?;
+            let client = OpenAiClient::new(
+                model.api_key.clone(),
+                model.base_url.clone(),
+                model.model_name.clone(),
+            )?;
             Ok(Box::new(client))
         } else if model.model_type == ModelType::Anthropic {
-            let client = AnthropicClient::from_model(model)?;
+            let client = AnthropicClient::new(
+                model.api_key.clone(),
+                model.base_url.clone(),
+                model.model_name.clone(),
+            )?;
             Ok(Box::new(client))
         } else {
             Err(anyhow!(
@@ -118,15 +130,14 @@ mod tests {
             return;
         };
 
-        let model = Model {
-            api_key: "dummy".to_string(),
-            base_url: "http://localhost:11434".to_string(),
-            model_name,
-            model_type: ModelType::OpenAiCompatible,
+        let provider = Provider {
+            model: Some(Model {
+                api_key: "dummy".to_string(),
+                base_url: "http://localhost:11434".to_string(),
+                model_name,
+                model_type: ModelType::OpenAiCompatible,
+            }),
         };
-
-        let mut provider = Provider::new();
-        provider.set_model(model);
 
         let client = provider.get_client().expect("should create client");
 
@@ -177,15 +188,14 @@ mod tests {
             return;
         };
 
-        let model = Model {
-            api_key: "dummy".to_string(),
-            base_url: "http://localhost:11434".to_string(),
-            model_name,
-            model_type: ModelType::OpenAiCompatible,
+        let provider = Provider {
+            model: Some(Model {
+                api_key: "dummy".to_string(),
+                base_url: "http://localhost:11434".to_string(),
+                model_name,
+                model_type: ModelType::OpenAiCompatible,
+            }),
         };
-
-        let mut provider = Provider::new();
-        provider.set_model(model);
 
         let client = provider.get_client().expect("should create client");
 

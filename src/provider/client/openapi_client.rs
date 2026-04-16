@@ -6,6 +6,7 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::json;
 
+use crate::log_debug;
 use crate::provider::base_client::{
     send_with_retry, AIClient, Chunk, ChunkContent, FinishReason, RetryConfig,
 };
@@ -17,16 +18,20 @@ use crate::session::message::{Message, Part, Role};
 
 pub struct OpenAiClient {
     client: reqwest::Client,
-    model: crate::provider::provider::Model,
+    api_key: String,
+    base_url: String,
+    model_name: String,
     retry_config: RetryConfig,
 }
 
 impl OpenAiClient {
-    /// 根据 `Model` 配置构造客户端。
-    pub fn from_model(model: &crate::provider::provider::Model) -> Result<Self> {
+    /// 构造 OpenAI 兼容客户端。
+    pub(crate) fn new(api_key: String, base_url: String, model_name: String) -> Result<Self> {
         Ok(Self {
             client: reqwest::Client::new(),
-            model: model.clone(),
+            api_key,
+            base_url,
+            model_name,
             retry_config: RetryConfig::default(),
         })
     }
@@ -44,7 +49,7 @@ impl AIClient for OpenAiClient {
         let mut headers = HeaderMap::new();
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", self.model.api_key))?,
+            HeaderValue::from_str(&format!("Bearer {}", self.api_key))?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -53,14 +58,14 @@ impl AIClient for OpenAiClient {
 
         // 显式开启流式模式
         let body = json!({
-            "model": self.model.model_name,
+            "model": self.model_name,
             "messages": openai_messages,
             "tools": convert_tools_schema(tools_schema),
             "max_tokens": 8000,
             "stream": true
         });
 
-        let url = format!("{}/v1/chat/completions", self.model.base_url);
+        let url = format!("{}/v1/chat/completions", self.base_url);
         let request = self
             .client
             .post(&url)
@@ -187,6 +192,10 @@ where
                                     {
                                         let arguments =
                                             serde_json::from_str(&args).unwrap_or(json!({}));
+                                        log_debug!(
+                                            "OpenAI assembled tool_call | id={} | name={} | args={}",
+                                            id, name, arguments
+                                        );
                                         on_chunk(Chunk {
                                             content: ChunkContent::ToolUse(Part::ToolUse {
                                                 id,
@@ -198,8 +207,10 @@ where
                                 }
                             }
 
+                            let reason = FinishReason::from_openai(finish);
+                            log_debug!("OpenAI finish_reason={:?}", reason);
                             on_chunk(Chunk {
-                                content: ChunkContent::Finish(FinishReason::from_openai(finish)),
+                                content: ChunkContent::Finish(reason),
                             });
                         }
                     }

@@ -1,3 +1,4 @@
+use crate::log_debug;
 use crate::session::message::Part;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -320,6 +321,10 @@ pub fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
         } = part
         {
             println!("{}", format!("${}", name).yellow());
+            log_debug!(
+                "execute_tool_call | name={} | args={}",
+                name, arguments
+            );
 
             // `arguments` 是 serde_json::Value，需要转成 HashMap 才能传给 `tool_call`
             let input: HashMap<String, serde_json::Value> = match arguments {
@@ -332,10 +337,16 @@ pub fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
             let (content, is_error) = match tool_call(name, &input) {
                 Ok(output) => {
                     println!("{}", &output[..output.len().min(200)]);
+                    log_debug!(
+                        "execute_tool_call success | name={} | output_len={}",
+                        name,
+                        output.len()
+                    );
                     (output, false)
                 }
                 Err(e) => {
                     eprintln!("Tool call error: {}", e);
+                    log_debug!("execute_tool_call error | name={} | err={}", name, e);
                     (format!("Error: {}", e), true)
                 }
             };

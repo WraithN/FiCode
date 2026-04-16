@@ -10,7 +10,7 @@ pub use base_client::{
     RetryConfig,
 };
 pub use client::{AnthropicClient, OpenAiClient};
-pub use provider::{Model, ModelType, Provider};
+pub use provider::Provider;
 
 // 从 tools 模块重新导出工具调用函数
 #[allow(unused_imports)]

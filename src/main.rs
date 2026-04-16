@@ -6,6 +6,7 @@
 // `mod` 关键字声明当前 crate 包含的模块，Rust 编译器会在对应目录查找
 
 mod agent;
+mod log;
 mod permission;
 mod provider;
 mod session;
@@ -21,7 +22,7 @@ use colored::Colorize;
 use rustyline::DefaultEditor;
 
 use agent::{agent_loop, LoopState};
-use provider::{Model, Provider};
+use provider::Provider;
 use session::message::{Message, Role};
 use session::{SessionManager, SessionMeta, SessionStatus};
 use std::path::PathBuf;
@@ -33,10 +34,8 @@ use std::path::PathBuf;
 // `#[tokio::main]` 是属性宏，将 main 函数包装在 tokio 异步运行时中
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. 初始化模型与 provider
-    let model = Model::get_model()?;
-    let mut provider = Provider::new();
-    provider.set_model(model.clone());
+    // 1. 初始化 provider 并创建 AI 客户端
+    let provider = Provider::new()?;
     let client = provider.get_client()?;
     let mut editor = DefaultEditor::new()?;
 
@@ -52,7 +51,7 @@ async fn main() -> Result<()> {
     let session_manager = SessionManager::new(sessions_dir.clone());
 
     // 3. 让用户选择恢复历史会话或创建新会话
-    let mut session = choose_or_create_session(&session_manager, &model.model_name).await?;
+    let mut session = choose_or_create_session(&session_manager, provider.model_name()?).await?;
     // 提示符显示 session ID 的前 8 位，如 "01HQ8J3K >>"
     let prompt_prefix = format!("{} >> ", &session.id[..session.id.len().min(8)]);
 

@@ -5,6 +5,7 @@ use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde_json::json;
 
+use crate::log_debug;
 use crate::provider::base_client::{
     send_with_retry, AIClient, Chunk, ChunkContent, FinishReason, RetryConfig,
 };
@@ -15,19 +16,22 @@ use crate::session::message::{ImageSource, Message, Part, Role};
 // =============================================================================
 
 /// Anthropic API 客户端。
-/// 内部仅持有 HTTP 客户端与统一的 `Model` 配置。
 pub struct AnthropicClient {
     client: reqwest::Client,
-    model: crate::provider::provider::Model,
+    api_key: String,
+    base_url: String,
+    model_name: String,
     retry_config: RetryConfig,
 }
 
 impl AnthropicClient {
-    /// 根据 `Model` 配置构造客户端。
-    pub fn from_model(model: &crate::provider::provider::Model) -> Result<Self> {
+    /// 构造 Anthropic 客户端。
+    pub(crate) fn new(api_key: String, base_url: String, model_name: String) -> Result<Self> {
         Ok(Self {
             client: reqwest::Client::new(),
-            model: model.clone(),
+            api_key,
+            base_url,
+            model_name,
             retry_config: RetryConfig::default(),
         })
     }
@@ -44,7 +48,7 @@ impl AIClient for AnthropicClient {
     ) -> Result<()> {
         // 构造请求头
         let mut headers = HeaderMap::new();
-        headers.insert("x-api-key", HeaderValue::from_str(&self.model.api_key)?);
+        headers.insert("x-api-key", HeaderValue::from_str(&self.api_key)?);
         headers.insert("anthropic-version", HeaderValue::from_static("2025-06-01"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -54,7 +58,7 @@ impl AIClient for AnthropicClient {
 
         // 构造请求体，显式开启流式模式
         let body = json!({
-            "model": self.model.model_name,
+            "model": self.model_name,
             "system": system_prompt,
             "messages": anthropic_messages,
             "tools": *tools_schema,
@@ -62,7 +66,7 @@ impl AIClient for AnthropicClient {
             "stream": true
         });
 
-        let url = format!("{}/v1/messages", self.model.base_url);
+        let url = format!("{}/v1/messages", self.base_url);
         let request = self
             .client
             .post(&url)
@@ -299,6 +303,10 @@ where
                             json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                         if let Some((id, name, args)) = index_to_tool.remove(&index) {
                             let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
+                            log_debug!(
+                                "Anthropic assembled tool_call | id={} | name={} | args={}",
+                                id, name, arguments
+                            );
                             on_chunk(Chunk {
                                 content: ChunkContent::ToolUse(Part::ToolUse {
                                     id,
@@ -314,8 +322,10 @@ where
                             .and_then(|d| d.get("stop_reason"))
                             .and_then(|v| v.as_str())
                         {
+                            let reason = FinishReason::from_anthropic(stop);
+                            log_debug!("Anthropic finish_reason={:?}", reason);
                             on_chunk(Chunk {
-                                content: ChunkContent::Finish(FinishReason::from_anthropic(stop)),
+                                content: ChunkContent::Finish(reason),
                             });
                         }
                     }
