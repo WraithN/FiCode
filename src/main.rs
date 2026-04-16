@@ -13,7 +13,7 @@ mod tools;
 mod utils;
 
 // `anyhow` 是一个错误处理库，提供了简化错误传播的功能
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 // `colored` 库用于终端彩色输出
 use colored::Colorize;
@@ -23,6 +23,7 @@ use rustyline::DefaultEditor;
 
 use agent::{agent_loop, LoopState};
 use clap::Parser;
+use utils::workspace::set_workspace;
 use provider::Provider;
 use session::message::{Message, Role};
 use session::{SessionManager, SessionMeta, SessionStatus};
@@ -44,6 +45,19 @@ async fn main() -> Result<()> {
         set_log_level(LogLevel::from_str(&args.log_level));
         log_info!("shun-code starting | log_level={}", args.log_level);
     }
+
+    // 设置工作目录：命令行参数 > 默认用户主目录
+    let workspace = args.workspace.clone().unwrap_or_else(|| {
+        dirs::home_dir().expect("无法获取用户主目录")
+    });
+    if !workspace.exists() {
+        std::fs::create_dir_all(&workspace)
+            .with_context(|| format!("无法创建工作目录: {:?}", workspace))?;
+    }
+    let workspace = workspace
+        .canonicalize()
+        .with_context(|| format!("无法解析工作目录: {:?}", workspace))?;
+    set_workspace(workspace);
 
     let config_dir = directories::ProjectDirs::from("", "", "shun-code")
         .map(|d| d.config_dir().to_path_buf())
