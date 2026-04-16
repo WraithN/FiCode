@@ -54,15 +54,26 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
     let mut content_blocks = Vec::new();
     let mut finish_reason = None;
 
+    let system_prompt = PromptBuilder::new().build(&tool_schema());
     log_debug!(
         "run_one_turn start | turn={} | messages={}",
         state.turn_count,
         state.messages.len()
     );
+    log_debug!(
+        "system_prompt | len={} | preview={}",
+        system_prompt.len(),
+        system_prompt.chars().take(200).collect::<String>()
+    );
+    for (idx, msg) in state.messages.iter().enumerate() {
+        let preview: String = msg.parts.iter().map(|p| format!("{:?}", p)).collect::<String>().chars().take(150).collect();
+        log_debug!("message[{}] | role={:?} | preview={}", idx, msg.role, preview);
+    }
+    log_debug!("tools_schema | {}", serde_json::to_string(&tool_schema()).unwrap_or_default().chars().take(300).collect::<String>());
 
     client
         .stream_message(
-            &PromptBuilder::new().build(&tool_schema()),
+            &system_prompt,
             &state.messages,
             &tool_schema(),
             &mut |chunk| {
@@ -121,6 +132,10 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
     );
 
     // 将 Assistant 的完整回复追加到状态
+    for (idx, block) in content_blocks.iter().enumerate() {
+        let preview = format!("{:?}", block).chars().take(200).collect::<String>();
+        log_debug!("assistant block[{}] | {}", idx, preview);
+    }
     state.messages.push(Message::new(
         session_id.clone(),
         Role::Assistant,

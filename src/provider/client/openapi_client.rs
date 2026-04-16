@@ -66,6 +66,17 @@ impl AIClient for OpenAiClient {
         });
 
         let url = format!("{}/v1/chat/completions", self.base_url);
+        log_debug!(
+            "OpenAI request | url={} | model={} | messages={} | tools_count={}",
+            url,
+            self.model_name,
+            openai_messages.len(),
+            body.get("tools").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)
+        );
+        log_debug!(
+            "OpenAI request body preview | {}",
+            body.to_string().chars().take(500).collect::<String>()
+        );
         let request = self
             .client
             .post(&url)
@@ -119,8 +130,14 @@ where
             if line.starts_with("data:") {
                 let data = line[5..].trim();
                 if data == "[DONE]" {
+                    log_debug!("OpenAI SSE [DONE]");
                     continue;
                 }
+
+                log_debug!(
+                    "OpenAI SSE raw | {}",
+                    data.chars().take(300).collect::<String>()
+                );
 
                 let json: serde_json::Value = serde_json::from_str(data)
                     .with_context(|| format!("Failed to parse OpenAI SSE data: {}", data))?;
@@ -134,6 +151,7 @@ where
                             // 文本增量：直接回传
                             if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
                                 if !text.is_empty() {
+                                    log_debug!("OpenAI SSE text_delta | len={} | preview={}", text.len(), text.chars().take(80).collect::<String>());
                                     on_chunk(Chunk {
                                         content: ChunkContent::Text(text.to_string()),
                                     });
@@ -162,6 +180,11 @@ where
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("")
                                         .to_string();
+
+                                    log_debug!(
+                                        "OpenAI SSE tool_call_delta | index={} | id={:?} | name={:?} | args={}",
+                                        index, id, name, args
+                                    );
 
                                     let entry = index_to_tool.entry(index).or_insert((
                                         None,
