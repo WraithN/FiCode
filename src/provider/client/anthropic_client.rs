@@ -73,9 +73,15 @@ impl AIClient for AnthropicClient {
             url,
             self.model_name,
             anthropic_messages.len(),
-            body.get("tools").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)
+            body.get("tools")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0)
         );
-        log_trace!("Anthropic request body | {}", serde_json::to_string_pretty(&body).unwrap_or_default());
+        log_trace!(
+            "Anthropic request body | {}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
         let request = self
             .client
             .post(&url)
@@ -275,7 +281,9 @@ where
                                     .to_string();
                                 log_debug!(
                                     "Anthropic SSE tool_use_start | index={} | id={} | name={}",
-                                    index, id, name
+                                    index,
+                                    id,
+                                    name
                                 );
                                 index_to_tool.insert(index, (id, name, String::new()));
                             }
@@ -288,7 +296,11 @@ where
                             match delta_type {
                                 "text_delta" => {
                                     if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
-                                        log_trace!("Anthropic SSE text_delta | len={} | preview={}", text.len(), text.chars().take(80).collect::<String>());
+                                        log_trace!(
+                                            "Anthropic SSE text_delta | len={} | preview={}",
+                                            text.len(),
+                                            text.chars().take(80).collect::<String>()
+                                        );
                                         on_chunk(Chunk {
                                             content: ChunkContent::Text(text.to_string()),
                                         });
@@ -298,7 +310,11 @@ where
                                     if let Some(text) =
                                         delta.get("thinking").and_then(|v| v.as_str())
                                     {
-                                        log_trace!("Anthropic SSE thinking_delta | len={} | preview={}", text.len(), text.chars().take(80).collect::<String>());
+                                        log_trace!(
+                                            "Anthropic SSE thinking_delta | len={} | preview={}",
+                                            text.len(),
+                                            text.chars().take(80).collect::<String>()
+                                        );
                                         on_chunk(Chunk {
                                             content: ChunkContent::Think(text.to_string()),
                                         });
@@ -328,7 +344,9 @@ where
                             let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
                             log_debug!(
                                 "Anthropic assembled tool_call | id={} | name={} | args={}",
-                                id, name, arguments
+                                id,
+                                name,
+                                arguments
                             );
                             on_chunk(Chunk {
                                 content: ChunkContent::ToolUse(Part::ToolUse {
