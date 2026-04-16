@@ -282,6 +282,80 @@ impl SessionManager {
     fn session_path(&self, session_id: &str) -> PathBuf {
         self.sessions_dir.join(format!("{}.jsonl", session_id))
     }
+
+    /// 根据选择器查找单个会话。
+    ///   - "last"     -> 最近更新的会话
+    ///   - "last-N"   -> 倒数第 N+1 个会话（0-based）
+    ///   - 其他       -> 先精确匹配 session_id，再尝试前缀匹配
+    pub fn find_session(&self, selector: &str) -> Result<Session> {
+        let sessions = self.list_sessions()?;
+        if sessions.is_empty() {
+            return Err(anyhow::anyhow!("No sessions found"));
+        }
+
+        if selector.eq_ignore_ascii_case("last") {
+            return self.load_session(&sessions[0].id);
+        }
+
+        if selector.to_lowercase().starts_with("last-") {
+            let n: usize = selector[5..].parse().unwrap_or(0);
+            if n >= sessions.len() {
+                return Err(anyhow::anyhow!(
+                    "Session index out of range: last-{} (only {} sessions)",
+                    n,
+                    sessions.len()
+                ));
+            }
+            return self.load_session(&sessions[n].id);
+        }
+
+        // 精确匹配
+        for m in &sessions {
+            if m.id == selector {
+                return self.load_session(&m.id);
+            }
+        }
+
+        // 前缀匹配
+        let matches: Vec<_> = sessions.iter().filter(|m| m.id.starts_with(selector)).collect();
+        match matches.len() {
+            0 => Err(anyhow::anyhow!("No session matches '{}'", selector)),
+            1 => self.load_session(&matches[0].id),
+            _ => Err(anyhow::anyhow!(
+                "Ambiguous session prefix '{}' matches {} sessions",
+                selector,
+                matches.len()
+            )),
+        }
+    }
+
+    /// 将会话历史打印到 stdout（供 `-s` 使用）。
+    pub fn print_session(session: &Session) {
+        println!("Session: {} | {} | {} messages", session.id, session.model, session.messages.len());
+        println!("---");
+        for msg in &session.messages {
+            let role_prefix = format!("[{:?}]", msg.role);
+            for part in &msg.parts {
+                match part {
+                    crate::session::message::Part::Text { text } => {
+                        println!("{} {}", role_prefix, text);
+                    }
+                    crate::session::message::Part::ToolUse { id: _, name, arguments } => {
+                        println!("[{:?} -> tool_use: {}] {}", msg.role, name, arguments);
+                    }
+                    crate::session::message::Part::ToolResult { tool_call_id, content, .. } => {
+                        println!("[{:?} -> tool_result: {}] {}", msg.role, tool_call_id, content);
+                    }
+                    crate::session::message::Part::Image { .. } => {
+                        println!("{} [image]", role_prefix);
+                    }
+                    crate::session::message::Part::Reasoning { thinking, .. } => {
+                        println!("{} [reasoning] {}", role_prefix, thinking.chars().take(100).collect::<String>());
+                    }
+                }
+            }
+        }
+    }
 }
 
 // =============================================================================
@@ -479,5 +553,29 @@ mod tests {
 
         let loaded = manager.load_session(&session.id).unwrap();
         assert_eq!(loaded.messages.len(), 0); // 会话头仍在，消息为空
+    }
+
+    #[test]
+    fn test_find_session_last_and_last_n() {
+        let (manager, _dir) = temp_manager();
+        let s1 = manager.create_session("m1").unwrap();
+        let s2 = manager.create_session("m2").unwrap();
+
+        assert_eq!(manager.find_session("last").unwrap().id, s2.id);
+        assert_eq!(manager.find_session("last-0").unwrap().id, s2.id);
+        assert_eq!(manager.find_session("last-1").unwrap().id, s1.id);
+
+        assert!(manager.find_session("last-99").is_err());
+    }
+
+    #[test]
+    fn test_find_session_by_id_prefix() {
+        let (manager, _dir) = temp_manager();
+        let s = manager.create_session("m1").unwrap();
+        let prefix = &s.id[..4];
+
+        assert_eq!(manager.find_session(&s.id).unwrap().id, s.id);
+        assert_eq!(manager.find_session(prefix).unwrap().id, s.id);
+        assert!(manager.find_session("zzzz").is_err());
     }
 }
