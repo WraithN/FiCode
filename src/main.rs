@@ -23,11 +23,11 @@ use rustyline::DefaultEditor;
 
 use agent::{agent_loop, LoopState};
 use clap::Parser;
-use utils::cli::Args;
 use provider::Provider;
 use session::message::{Message, Role};
 use session::{SessionManager, SessionMeta, SessionStatus};
 use std::path::PathBuf;
+use utils::cli::Args;
 
 // =============================================================================
 // 程序入口：main 函数
@@ -51,6 +51,12 @@ async fn main() -> Result<()> {
     let sessions_dir = config_dir.join("sessions");
     let session_manager = SessionManager::new(sessions_dir.clone());
 
+    let workspace = std::env::current_dir()?;
+    log_info!("shun-code started | mode={} | workspace={:?}",
+        if args.interactive { "interactive" } else if args.command.is_some() { "command" } else if args.session.is_some() { "session" } else { "none" },
+        workspace
+    );
+
     // -s 优先级最高
     if let Some(session_arg) = args.session {
         if let Some(selector) = session_arg {
@@ -69,7 +75,11 @@ async fn main() -> Result<()> {
                         &s.id[..s.id.len().min(8)],
                         s.project_path,
                         s.message_count,
-                        if s.status == SessionStatus::Active { "active" } else { "archived" }
+                        if s.status == SessionStatus::Active {
+                            "active"
+                        } else {
+                            "archived"
+                        }
                     );
                 }
             }
@@ -91,7 +101,14 @@ async fn main() -> Result<()> {
         let cmd = cmd.trim();
         if !cmd.is_empty() {
             let mut session = session_manager.create_session(provider.model_name()?)?;
-            run_single_command(client.as_ref(), &session_manager, &sessions_dir, &mut session, cmd).await?;
+            run_single_command(
+                client.as_ref(),
+                &session_manager,
+                &sessions_dir,
+                &mut session,
+                cmd,
+            )
+            .await?;
         }
         return Ok(());
     }
@@ -110,10 +127,14 @@ async fn run_single_command(
 ) -> Result<()> {
     use crate::session::message::Part;
 
+    log_debug!("run_single_command | query_len={}", query.len());
+
     let user_msg = Message::new(
         session.id.clone(),
         Role::User,
-        vec![Part::Text { text: query.to_string() }],
+        vec![Part::Text {
+            text: query.to_string(),
+        }],
     );
     session.messages.push(user_msg.clone());
     let _ = session_manager.append_message(&session.id, &user_msg);
@@ -126,7 +147,8 @@ async fn run_single_command(
         let sm = SessionManager::new(sessions_dir.clone());
         let s = session.clone();
         move || sm.save_session(&s)
-    }).await?
+    })
+    .await?
     {
         eprintln!("Warning: failed to save session: {}", e);
     }
@@ -152,6 +174,8 @@ async fn run_interactive(
     let prompt_prefix = format!("{} >> ", &session.id[..session.id.len().min(8)]);
     let mut editor = DefaultEditor::new()?;
 
+    log_debug!("run_interactive | session_id={}", session.id);
+
     loop {
         let readline = editor.readline(prompt_prefix.cyan().to_string().as_str());
         match readline {
@@ -165,7 +189,9 @@ async fn run_interactive(
                 let user_msg = Message::new(
                     session.id.clone(),
                     Role::User,
-                    vec![session::message::Part::Text { text: query.to_string() }],
+                    vec![session::message::Part::Text {
+                        text: query.to_string(),
+                    }],
                 );
                 session.messages.push(user_msg.clone());
                 if let Err(e) = session_manager.append_message(&session.id, &user_msg) {
@@ -180,7 +206,8 @@ async fn run_interactive(
                     let sm = SessionManager::new(sessions_dir.clone());
                     let s = session.clone();
                     move || sm.save_session(&s)
-                }).await?
+                })
+                .await?
                 {
                     eprintln!("Warning: failed to save session: {}", e);
                 }
