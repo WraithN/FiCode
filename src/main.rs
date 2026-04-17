@@ -9,6 +9,7 @@ mod agent;
 mod permission;
 mod provider;
 mod session;
+mod skills;
 mod tools;
 mod utils;
 
