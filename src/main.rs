@@ -9,6 +9,7 @@ mod agent;
 mod permission;
 mod provider;
 mod session;
+mod skills;
 mod tools;
 mod utils;
 
@@ -59,6 +60,11 @@ async fn main() -> Result<()> {
         .canonicalize()
         .with_context(|| format!("无法解析工作目录: {:?}", workspace))?;
     set_workspace(workspace.clone());
+    skills::init_skills();
+    log_info!(
+        "skills initialized | count={}",
+        skills::get_registry().entries.len()
+    );
 
     log_info!(
         "shun-code started | mode={} | workspace={:?}",

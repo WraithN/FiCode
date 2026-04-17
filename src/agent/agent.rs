@@ -17,6 +17,7 @@ use crate::log_trace;
 use crate::provider::base_client::{AIClient, ChunkContent, FinishReason};
 use crate::provider::execute_tool_calls;
 use crate::session::message::{Message, Part, Role};
+use crate::skills::get_registry;
 use crate::tools::tool_schema;
 
 // =============================================================================
@@ -59,7 +60,8 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
     let mut content_blocks = Vec::new();
     let mut finish_reason = None;
 
-    let system_prompt = PromptBuilder::new().build(&tool_schema());
+    let registry = get_registry();
+    let system_prompt = PromptBuilder::new().build(&tool_schema(), registry);
 
     #[cfg(debug_assertions)]
     PROMPT_LOGGED_ONCE.call_once(|| {

@@ -197,6 +197,32 @@ impl ToolHandler for GrepHandler {
 }
 
 // =============================================================================
+// UseSkillHandler：按需加载 Skill 内容
+// =============================================================================
+// 允许 Agent 在运行时通过名称或 ID 加载 Skill 的完整说明内容。
+
+#[derive(Debug)]
+struct UseSkillHandler;
+
+impl ToolHandler for UseSkillHandler {
+    fn call(&self, _name: &str, params: ToolParams) -> Result<String, String> {
+        let name = match &params[..] {
+            [ToolParameter::Json(v)] => v
+                .get("name")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            [ToolParameter::String(n)] => n.clone(),
+            _ => "".to_string(),
+        };
+        if name.is_empty() {
+            return Err("Missing name parameter".to_string());
+        }
+        crate::skills::load_skill_content(&name)
+    }
+}
+
+// =============================================================================
 // 全局注册表：LazyLock 实现懒加载的单例
 // =============================================================================
 // `LazyLock` 保证这段初始化代码只会在首次访问 `REGISTRY` 时执行一次，
@@ -255,6 +281,14 @@ static REGISTRY: LazyLock<ToolsRegistry> = LazyLock::new(|| {
             Box::new(GrepHandler),
         )
         .expect("register grep tool failed");
+    registry
+        .register(
+            "use_skill",
+            "Load a skill by name or ID to inject its instructions into the conversation.",
+            r#"{"type":"object","properties":{"name":{"type":"string","description":"Skill name or full ID (e.g., 'commit' or 'claude-commit')"}},"required":["name"]}"#,
+            Box::new(UseSkillHandler),
+        )
+        .expect("register use_skill tool failed");
     registry
 });
 
@@ -389,6 +423,17 @@ mod tests {
         assert!(list.contains("grep"), "registry should contain grep tool");
     }
 
+    /// 测试 use_skill 工具已注册
+    #[test]
+    fn test_list_tools_includes_use_skill() {
+        let list = REGISTRY.list_tools().unwrap();
+        assert!(
+            list.contains("use_skill"),
+            "registry should contain use_skill tool, got: {}",
+            list
+        );
+    }
+
     /// 测试通过 tool_call 调用 bash 工具
     #[test]
     fn test_tool_call_bash() {
@@ -496,5 +541,24 @@ mod tests {
         let result = tool_call("non_existent_tool", &input);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
+    }
+
+    /// 测试调用 use_skill 工具但 Skill 不存在时返回错误
+    #[test]
+    fn test_tool_call_use_skill_not_found() {
+        let mut input = HashMap::new();
+        input.insert(
+            "name".to_string(),
+            serde_json::json!("nonexistent-skill-abc"),
+        );
+
+        let result = tool_call("use_skill", &input);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("not found"),
+            "error should contain 'not found', got: {}",
+            err
+        );
     }
 }
