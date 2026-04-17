@@ -3,6 +3,7 @@
 
 pub mod loader;
 pub mod registry;
+pub mod scanner;
 pub mod skill_type;
 
 // 重新导出常用类型，减少外部调用时的路径层级
