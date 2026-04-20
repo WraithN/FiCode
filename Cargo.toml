@@ -25,7 +25,7 @@ dirs = "5.0"
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 notify = "8"
-jsonc-parser = "0.32"
+jsonc-parser = { version = "0.32", features = ["serde"] }
 
 [dev-dependencies]
 wiremock = "0.6"
