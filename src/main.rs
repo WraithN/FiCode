@@ -6,6 +6,7 @@
 // `mod` 关键字声明当前 crate 包含的模块，Rust 编译器会在对应目录查找
 
 mod agent;
+mod config;
 mod permission;
 mod provider;
 mod session;
