@@ -20,6 +20,7 @@
 3. **工具调用**：内置 6 个工具（`bash`、`read`、`write`、`edit`、`web_fetch`、`grep`），Agent 可根据模型返回的 `ToolUse` 自动执行并回传结果。
 4. **会话持久化**：采用 JSONL（JSON Lines）格式将会话增量写入本地磁盘，支持中断后恢复。
 5. **权限校验**：对 Bash 等高危操作进行风险分级（Allow / Ask / Deny），拦截 `sudo`、`rm -rf` 及常见注入攻击。
+6. **配置管理**：支持通过 `~/.config/shun-code/config.json` 或 `config.jsonc` 管理模型和 Provider 设置，支持 JSONC 注释、环境变量占位符（`{env:VAR_NAME}`）以及文件系统事件热重载（500ms 防抖）。
 
 ---
 
@@ -36,6 +37,8 @@
 | `dotenvy` | 加载 `.env` 环境变量 |
 | `ulid` | 生成 Session / Message ID |
 | `directories` | 解析平台相关的配置目录 |
+| `notify` | 配置文件热重载的文件系统事件监听 |
+| `jsonc-parser` | 解析带注释的 JSONC 配置文件 |
 | `html2md` | 网页 HTML 转 Markdown |
 | `regex` | `grep` 工具的正则匹配 |
 | `async-trait` | 异步 trait 支持 |
@@ -69,6 +72,10 @@ src/
 │   ├── basic_tools.rs      # BasicTool：bash/read/write/edit/web_fetch/grep 的底层实现
 │   ├── tools_registry.rs   # ToolsRegistry：工具的注册与查找
 │   └── tools_type.rs       # ToolHandler trait、ToolParameter、ToolParams
+├── config/
+│   ├── mod.rs              # 模块入口，导出 Config 和相关类型
+│   ├── config.rs           # Config 加载、JSONC 解析、环境变量占位符、热重载监听
+│   └── models.rs           # 配置数据模型：Config / ProviderConfig / ModelConfig / ModelLimits
 ├── permission/
 │   ├── mod.rs
 │   └── permission.rs       # 权限风险分级与交互式确认
@@ -80,9 +87,13 @@ src/
 
 ## 4. 构建与运行
 
-### 4.1 环境变量配置
+### 4.1 配置方式
 
-运行前必须设置对应 Provider 的环境变量（支持 `.env` 文件）：
+支持两种配置方式，**优先级：环境变量 > 配置文件 > 错误提示**。
+
+#### 方式一：环境变量（最高优先级）
+
+运行前设置对应 Provider 的环境变量（支持 `.env` 文件）：
 
 **OpenAI 兼容：**
 ```bash
@@ -98,6 +109,42 @@ ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_BASE_URL=https://api.anthropic.com
 ANTHROPIC_MODEL=claude-3-7-sonnet-20250219
 ```
+
+#### 方式二：配置文件（环境变量不存在时自动降级）
+
+配置文件路径（按优先级查找）：
+1. `~/.config/shun-code/config.jsonc`
+2. `~/.config/shun-code/config.json`
+
+**配置文件格式示例：**
+```json
+{
+  "model": "my-model",
+  "provider": {
+    "openai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "My Provider",
+      "options": {
+        "apiKey": "{env:MY_API_KEY}",
+        "baseURL": "https://api.example.com/v1",
+        "timeout": 300000,
+        "chunkTimeout": 10000
+      },
+      "models": {
+        "my-model": {
+          "name": "My Model",
+          "limit": { "context": 200000, "output": 65536 }
+        }
+      }
+    }
+  }
+}
+```
+
+**特性说明：**
+- `config.jsonc` 支持 `//` 和 `/* */` 注释
+- `apiKey` 支持 `{env:VAR_NAME}` 占位符语法，启动时自动替换为对应环境变量值
+- 配置文件变更后自动热重载（500ms 防抖）
 
 ### 4.2 常用命令
 
@@ -125,18 +172,24 @@ cargo clippy
 - macOS: `~/Library/Application Support/shun-code/sessions/`
 - Windows: `%APPDATA%\shun-code\sessions\`
 
+配置文件保存在同一配置目录下：
+- Linux: `~/.config/shun-code/config.json` 或 `config.jsonc`
+- macOS: `~/Library/Application Support/shun-code/config.json` 或 `config.jsonc`
+- Windows: `%APPDATA%\shun-code\config.json` 或 `config.jsonc`
+
 ---
 
 ## 5. 测试策略与现状
 
 - **单元测试**：各模块的 `#[cfg(test)]` 内嵌测试，覆盖工具调用、权限校验、Session 创建/加载/追加、损坏 JSONL 容错等场景。
-- **当前状态**：共 22 个测试，全部通过。
+- **当前状态**：共 26 个测试，全部通过。
 - **运行方式**：直接执行 `cargo test` 即可。
 - **关键测试文件**：
   - `src/tools/mod.rs`：注册表功能、各工具的 `tool_call` 调用。
   - `src/tools/basic_tools.rs`：底层读写、Bash、Grep 的独立测试。
   - `src/session/session.rs`：SessionManager 的创建、追加、加载、损坏行跳过。
   - `src/permission/permission.rs`：Allow / Ask / Deny 的风险分级规则校验。
+  - `src/config/mod.rs`：Config 默认构造、JSON/JSONC 解析、环境变量占位符替换。
 
 ---
 
@@ -188,3 +241,5 @@ cargo clippy
 - [ ] 涉及文件系统或 Bash 的操作必须复用现有的 `safe_path` / 权限检查 / 超时 / 输出截断机制。
 - [ ] 保持中文注释风格，对新增的 Rust 语法或设计模式可适当补充说明。
 - [ ] `Cargo.toml` 或环境变量相关变更需在本文对应章节同步更新。
+- [ ] 新增或修改配置模块功能时，同步更新本文第 4.1 节（配置方式）的示例和说明。
+- [ ] 配置文件格式变更时，同步更新设计文档 `docs/superpowers/specs/` 中的相关 spec。
