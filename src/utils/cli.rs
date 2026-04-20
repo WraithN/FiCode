@@ -26,6 +26,10 @@ pub struct Args {
     #[arg(short = 'c', long = "command", value_name = "MESSAGE")]
     pub command: Option<String>,
 
+    /// Show configured providers and models
+    #[arg(short = 'm', long = "models")]
+    pub models: bool,
+
     /// Workspace directory (default: home directory)
     #[arg(short = 'w', long = "workspace", value_name = "PATH")]
     pub workspace: Option<PathBuf>,
