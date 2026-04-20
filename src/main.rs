@@ -119,12 +119,6 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 如果没有显式指定操作模式，提示用户
-    if !args.interactive && args.session.is_none() && args.command.is_none() {
-        println!("Please provide an option. Use -h or --help for more information.");
-        return Ok(());
-    }
-
     let config = Arc::new(RwLock::new(Config::load()?));
     let _watcher = crate::config::config::spawn_watcher(Arc::clone(&config))?;
 
@@ -139,6 +133,12 @@ async fn main() -> Result<()> {
                     model_cfg.limit.context, model_cfg.limit.output);
             }
         }
+        return Ok(());
+    }
+
+    // 如果没有显式指定操作模式，提示用户
+    if !args.interactive && args.session.is_none() && args.command.is_none() {
+        println!("Please provide an option. Use -h or --help for more information.");
         return Ok(());
     }
 
