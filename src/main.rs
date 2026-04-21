@@ -7,6 +7,7 @@
 
 mod agent;
 mod config;
+mod mcp;
 mod permission;
 mod provider;
 mod session;
@@ -26,11 +27,13 @@ use rustyline::DefaultEditor;
 use agent::{agent_loop, LoopState};
 use clap::Parser;
 use config::Config;
+use mcp::manager::McpManager;
 use provider::Provider;
 use session::message::{Message, Role};
 use session::{SessionManager, SessionMeta, SessionStatus};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use tools::set_mcp_manager;
 use utils::cli::Args;
 use utils::workspace::set_workspace;
 
@@ -122,6 +125,26 @@ async fn main() -> Result<()> {
     let config = Arc::new(RwLock::new(Config::load()?));
     let _watcher = crate::config::config::spawn_watcher(Arc::clone(&config))?;
 
+    // 初始化 MCP Manager
+    {
+        let cfg = config.read().map_err(|_| anyhow!("配置锁中毒"))?;
+        if let Some(mcp_config) = &cfg.mcp {
+            match McpManager::from_config(mcp_config).await {
+                Ok(manager) => {
+                    let status = manager.all_status();
+                    log_info!("MCP initialized | servers={}", status.len());
+                    for (name, st) in &status {
+                        log_info!("MCP server status | {}={:?}", name, st);
+                    }
+                    set_mcp_manager(Arc::new(manager));
+                }
+                Err(e) => {
+                    eprintln!("Warning: MCP initialization failed: {}", e);
+                }
+            }
+        }
+    }
+
     if args.models {
         let cfg = config.read().map_err(|_| anyhow!("配置锁中毒"))?;
         println!("Providers and Models:");
@@ -129,8 +152,10 @@ async fn main() -> Result<()> {
             println!("  {} ({})", provider_key, provider_cfg.name);
             for (model_key, model_cfg) in &provider_cfg.models {
                 println!("    {} — {}", model_key, model_cfg.name);
-                println!("      context: {}, output: {}",
-                    model_cfg.limit.context, model_cfg.limit.output);
+                println!(
+                    "      context: {}, output: {}",
+                    model_cfg.limit.context, model_cfg.limit.output
+                );
             }
         }
         return Ok(());

@@ -1,7 +1,10 @@
 pub mod config;
 pub mod models;
 
-pub use models::{Config, ModelConfig, ModelLimits, ProviderConfig, ProviderOptions};
+pub use models::{
+    Config, McpServerConfig, McpServerType, ModelConfig, ModelLimits, ProviderConfig,
+    ProviderOptions,
+};
 
 #[cfg(test)]
 mod tests {
@@ -71,6 +74,41 @@ mod tests {
 
         let config = Config::parse(jsonc, true).unwrap();
         assert_eq!(config.model, "my-model");
+    }
+
+    #[test]
+    fn test_parse_mcp_config() {
+        let json = r#"{
+            "model": "test-model",
+            "provider": {},
+            "mcp": {
+                "local-server": {
+                    "type": "local",
+                    "enabled": true,
+                    "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+                },
+                "remote-server": {
+                    "type": "remote",
+                    "enabled": false,
+                    "url": "http://localhost:3000/mcp",
+                    "headers": {"Authorization": "Bearer test"}
+                }
+            }
+        }"#;
+
+        let config = Config::parse(json, false).unwrap();
+        let mcp = config.mcp.as_ref().unwrap();
+        assert_eq!(mcp.len(), 2);
+
+        let local = mcp.get("local-server").unwrap();
+        assert_eq!(local.server_type, McpServerType::Local);
+        assert!(local.enabled);
+        assert_eq!(local.command.as_ref().unwrap()[0], "npx");
+
+        let remote = mcp.get("remote-server").unwrap();
+        assert_eq!(remote.server_type, McpServerType::Remote);
+        assert!(!remote.enabled);
+        assert_eq!(remote.url.as_ref().unwrap(), "http://localhost:3000/mcp");
     }
 
     #[test]

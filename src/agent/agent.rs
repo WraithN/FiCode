@@ -16,6 +16,7 @@ use crate::log_debug;
 use crate::log_trace;
 use crate::provider::base_client::{AIClient, ChunkContent, FinishReason};
 use crate::provider::execute_tool_calls;
+use crate::provider::Chunk;
 use crate::session::message::{Message, Part, Role};
 use crate::skills::get_registry;
 use crate::tools::tool_schema;
@@ -56,6 +57,53 @@ static PROMPT_LOGGED_ONCE: std::sync::Once = std::sync::Once::new();
 /// 4. 将 assistant 回复追加到状态；
 /// 5. 若停止原因为 `ToolUse`，则执行工具调用并将结果以 user 身份回传；
 /// 6. 返回 `true` 表示需要继续下一轮，`false` 表示本轮结束。
+/// 辅助函数：处理流式 chunk，将内容聚合到 content_blocks
+fn process_chunk(
+    chunk: Chunk,
+    content_blocks: &mut Vec<Part>,
+    finish_reason: &mut Option<FinishReason>,
+) {
+    match chunk.content {
+        ChunkContent::Text(text) => {
+            if let Some(Part::Text { text: last }) = content_blocks.last_mut() {
+                last.push_str(&text);
+            } else {
+                content_blocks.push(Part::Text { text });
+            }
+        }
+        ChunkContent::Think(text) => {
+            if let Some(Part::Reasoning { thinking: last, .. }) = content_blocks.last_mut() {
+                last.push_str(&text);
+            } else {
+                content_blocks.push(Part::Reasoning {
+                    thinking: text,
+                    signature: None,
+                });
+            }
+        }
+        ChunkContent::ToolUse(ref tool) => {
+            if let Part::ToolUse {
+                id,
+                name,
+                arguments,
+            } = tool
+            {
+                log_debug!(
+                    "LLM tool_use | id={} | name={} | args={}",
+                    id,
+                    name,
+                    arguments
+                );
+            }
+            content_blocks.push(tool.clone());
+        }
+        ChunkContent::Finish(ref reason) => {
+            log_debug!("LLM finish_reason={:?}", reason);
+            *finish_reason = Some(reason.clone());
+        }
+    }
+}
+
 pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopState) -> Result<bool> {
     let mut content_blocks = Vec::new();
     let mut finish_reason = None;
@@ -116,53 +164,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
             &system_prompt,
             &state.messages,
             &tool_schema(),
-            &mut |chunk| {
-                match chunk.content {
-                    // 文本增量：与最后一个 Text 块合并，避免历史记录碎片化
-                    ChunkContent::Text(text) => {
-                        if let Some(Part::Text { text: last }) = content_blocks.last_mut() {
-                            last.push_str(&text);
-                        } else {
-                            content_blocks.push(Part::Text { text });
-                        }
-                    }
-                    // 思考增量：与最后一个 Reasoning 块合并
-                    ChunkContent::Think(text) => {
-                        if let Some(Part::Reasoning { thinking: last, .. }) =
-                            content_blocks.last_mut()
-                        {
-                            last.push_str(&text);
-                        } else {
-                            content_blocks.push(Part::Reasoning {
-                                thinking: text,
-                                signature: None,
-                            });
-                        }
-                    }
-                    // 完整的工具调用块（客户端已拼装完毕）
-                    ChunkContent::ToolUse(ref tool) => {
-                        if let Part::ToolUse {
-                            id,
-                            name,
-                            arguments,
-                        } = tool
-                        {
-                            log_debug!(
-                                "LLM tool_use | id={} | name={} | args={}",
-                                id,
-                                name,
-                                arguments
-                            );
-                        }
-                        content_blocks.push(tool.clone());
-                    }
-                    // 流结束标志
-                    ChunkContent::Finish(ref reason) => {
-                        log_debug!("LLM finish_reason={:?}", reason);
-                        finish_reason = Some(reason.clone());
-                    }
-                }
-            },
+            &mut |chunk| process_chunk(chunk, &mut content_blocks, &mut finish_reason),
         )
         .await?;
 
@@ -197,8 +199,78 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
         return Ok(false);
     }
 
+    // =============================================================================
+    // MCP Two-Step-Discovery
+    // =============================================================================
+    // 如果 LLM 返回的 ToolUse 中包含 mcp: 前缀且参数为空，
+    // 则获取完整 input_schema，构造补充消息，重新调用 LLM。
+
+    let needs_two_step = content_blocks.iter().any(|p| {
+        if let Part::ToolUse {
+            name, arguments, ..
+        } = p
+        {
+            name.starts_with("mcp:") && arguments.as_object().map(|o| o.is_empty()).unwrap_or(true)
+        } else {
+            false
+        }
+    });
+
+    if needs_two_step {
+        let mut schema_texts = Vec::new();
+        for part in &content_blocks {
+            if let Part::ToolUse { name, .. } = part {
+                if name.starts_with("mcp:") {
+                    if let Some(mcp) = crate::tools::get_mcp_manager() {
+                        if let Some(schema) = mcp.tool_schema(name) {
+                            if let Some(input_schema) = schema.input_schema {
+                                schema_texts.push(format!(
+                                    "工具 `{}` 的完整参数格式：\n```json\n{}\n```",
+                                    name,
+                                    serde_json::to_string_pretty(&input_schema).unwrap_or_default()
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !schema_texts.is_empty() {
+            state.messages.push(Message::new(
+                session_id.clone(),
+                Role::User,
+                vec![Part::Text {
+                    text: format!(
+                        "请为以下 MCP 工具提供正确的参数：\n\n{}",
+                        schema_texts.join("\n\n")
+                    ),
+                }],
+            ));
+
+            // 重新调用 LLM 获取带参数的 ToolUse
+            content_blocks.clear();
+            finish_reason = None;
+
+            client
+                .stream_message(
+                    &system_prompt,
+                    &state.messages,
+                    &tool_schema(),
+                    &mut |chunk| process_chunk(chunk, &mut content_blocks, &mut finish_reason),
+                )
+                .await?;
+
+            state.messages.push(Message::new(
+                session_id.clone(),
+                Role::Assistant,
+                content_blocks.clone(),
+            ));
+        }
+    }
+
     // 执行所有工具调用，并收集结果
-    let tool_results = execute_tool_calls(&content_blocks);
+    let tool_results = execute_tool_calls(&content_blocks).await;
     if tool_results.is_empty() {
         state.transition_reason = None;
         log_debug!("run_one_turn end | tool_use finish but no results");

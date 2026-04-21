@@ -1,8 +1,9 @@
 use crate::log_debug;
 use crate::log_trace;
+use crate::mcp::manager::McpManager;
 use crate::session::message::Part;
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, RwLock};
 
 // =============================================================================
 // Rust 基础概念：模块声明
@@ -223,6 +224,23 @@ impl ToolHandler for UseSkillHandler {
 }
 
 // =============================================================================
+// MCP Manager 全局状态
+// =============================================================================
+// `McpManager` 在程序启动后由 `main.rs` 异步初始化并设置到这里。
+// 运行期间只读（通过 `Arc` 共享），因此 `RwLock` 仅用于初始设置。
+
+static MCP_MANAGER: RwLock<Option<Arc<McpManager>>> = RwLock::new(None);
+
+pub fn set_mcp_manager(manager: Arc<McpManager>) {
+    let mut lock = MCP_MANAGER.write().unwrap();
+    *lock = Some(manager);
+}
+
+pub fn get_mcp_manager() -> Option<Arc<McpManager>> {
+    MCP_MANAGER.read().unwrap().clone()
+}
+
+// =============================================================================
 // 全局注册表：LazyLock 实现懒加载的单例
 // =============================================================================
 // `LazyLock` 保证这段初始化代码只会在首次访问 `REGISTRY` 时执行一次，
@@ -307,9 +325,31 @@ pub fn init_tools() {
 // 生成工具的 JSON Schema
 // =============================================================================
 // 现在 schema 完全从注册表里动态生成，新增工具时不需要再手动维护这段代码。
+// MCP 工具的轻量 schema（name + description，input_schema 为空）也在这里合并。
 
 pub fn tool_schema() -> serde_json::Value {
-    REGISTRY.tool_schema()
+    let mut schemas = Vec::new();
+
+    // basic_tools：完整 schema（从注册表获取）
+    let basic = REGISTRY.tool_schema();
+    if let Some(arr) = basic.as_array() {
+        schemas.extend(arr.iter().cloned());
+    }
+
+    // mcp_tools：轻量 schema（仅 name + description，input_schema 为空对象）
+    if let Ok(lock) = MCP_MANAGER.read() {
+        if let Some(mcp) = lock.as_ref() {
+            for (full_name, desc) in mcp.tools_list() {
+                schemas.push(serde_json::json!({
+                    "name": full_name,
+                    "description": desc,
+                    "input_schema": serde_json::Value::Object(serde_json::Map::new()),
+                }));
+            }
+        }
+    }
+
+    serde_json::Value::Array(schemas)
 }
 
 // =============================================================================
@@ -322,15 +362,31 @@ pub fn tool_list() -> String {
 }
 
 // =============================================================================
-// 执行单个工具调用（同步方法）
+// 执行单个工具调用（异步方法）
 // =============================================================================
 // 将调用方传入的 HashMap 参数打包成 `ToolParameter::Json`，
 // 通过注册表分发给对应的 handler。
+// 支持 MCP 工具（mcp: 前缀）和本地工具。
 
-pub fn tool_call(name: &str, input: &HashMap<String, serde_json::Value>) -> Result<String, String> {
-    let input_json = serde_json::to_value(input).unwrap_or_default();
-    let params = vec![ToolParameter::Json(input_json)];
-    REGISTRY.call(name, params)
+pub async fn tool_call(
+    name: &str,
+    input: &HashMap<String, serde_json::Value>,
+) -> Result<String, String> {
+    if name.starts_with("mcp:") {
+        let input_json = serde_json::to_value(input).unwrap_or_default();
+        let mcp = get_mcp_manager().ok_or("MCP manager not initialized".to_string())?;
+        match mcp.tool_call(name, input_json).await {
+            Ok(result) => {
+                let texts: Vec<String> = result.content.iter().map(|c| c.text.clone()).collect();
+                Ok(texts.join("\n"))
+            }
+            Err(e) => Err(format!("MCP call failed: {}", e)),
+        }
+    } else {
+        let input_json = serde_json::to_value(input).unwrap_or_default();
+        let params = vec![ToolParameter::Json(input_json)];
+        REGISTRY.call(name, params)
+    }
 }
 
 // =============================================================================
@@ -341,8 +397,9 @@ pub fn tool_call(name: &str, input: &HashMap<String, serde_json::Value>) -> Resu
 //
 // 设计演进：此前返回的是裸 JSON Value 数组；为了与新的 `Message`/`Part` 模型对齐，
 // 现在直接返回结构化的 `Vec<Part>`，省去上层再做一次格式转换。
+// 因 MCP 调用需要异步，此函数已升级为 `async`。
 
-pub fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
+pub async fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
     use colored::Colorize;
 
     let mut results = Vec::new();
@@ -366,7 +423,7 @@ pub fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
                 _ => HashMap::new(),
             };
 
-            let (content, is_error) = match tool_call(name, &input) {
+            let (content, is_error) = match tool_call(name, &input).await {
                 Ok(output) => {
                     log_trace!(
                         "execute_tool_call raw output | name={} | output={}",
@@ -435,15 +492,15 @@ mod tests {
     }
 
     /// 测试通过 tool_call 调用 bash 工具
-    #[test]
-    fn test_tool_call_bash() {
+    #[tokio::test]
+    async fn test_tool_call_bash() {
         let mut input = HashMap::new();
         input.insert(
             "command".to_string(),
             serde_json::json!("echo hello_registry"),
         );
 
-        let result = tool_call("bash", &input).unwrap();
+        let result = tool_call("bash", &input).await.unwrap();
         assert!(
             result.contains("hello_registry"),
             "bash output should contain 'hello_registry', got: {}",
@@ -452,12 +509,12 @@ mod tests {
     }
 
     /// 测试通过 tool_call 调用 read 工具
-    #[test]
-    fn test_tool_call_read() {
+    #[tokio::test]
+    async fn test_tool_call_read() {
         let mut input = HashMap::new();
         input.insert("path".to_string(), serde_json::json!("src/tools/mod.rs"));
 
-        let result = tool_call("read", &input).unwrap();
+        let result = tool_call("read", &input).await.unwrap();
         assert!(
             result.contains("tool_call"),
             "read output should contain 'tool_call', got: {}",
@@ -466,8 +523,8 @@ mod tests {
     }
 
     /// 测试通过 tool_call 调用 write 和 edit 工具
-    #[test]
-    fn test_tool_call_write_and_edit() {
+    #[tokio::test]
+    async fn test_tool_call_write_and_edit() {
         let path = "target/test_tool_call_write.txt";
 
         // 1. 调用 write 工具创建文件
@@ -475,7 +532,7 @@ mod tests {
         write_input.insert("path".to_string(), serde_json::json!(path));
         write_input.insert("content".to_string(), serde_json::json!("hello world"));
 
-        let write_result = tool_call("write", &write_input).unwrap();
+        let write_result = tool_call("write", &write_input).await.unwrap();
         assert!(
             write_result.contains("Wrote"),
             "write output should contain 'Wrote', got: {}",
@@ -488,7 +545,7 @@ mod tests {
         edit_input.insert("old_text".to_string(), serde_json::json!("world"));
         edit_input.insert("new_text".to_string(), serde_json::json!("rust"));
 
-        let edit_result = tool_call("edit", &edit_input).unwrap();
+        let edit_result = tool_call("edit", &edit_input).await.unwrap();
         assert!(
             edit_result.contains("Edited"),
             "edit output should contain 'Edited', got: {}",
@@ -499,7 +556,7 @@ mod tests {
         let mut read_input = HashMap::new();
         read_input.insert("path".to_string(), serde_json::json!(path));
 
-        let read_result = tool_call("read", &read_input).unwrap();
+        let read_result = tool_call("read", &read_input).await.unwrap();
         assert!(
             read_result.contains("hello rust"),
             "read output should contain 'hello rust', got: {}",
@@ -511,13 +568,13 @@ mod tests {
     }
 
     /// 测试通过 tool_call 调用 grep 工具
-    #[test]
-    fn test_tool_call_grep() {
+    #[tokio::test]
+    async fn test_tool_call_grep() {
         let mut input = HashMap::new();
         input.insert("dir".to_string(), serde_json::json!("src/tools"));
         input.insert("pattern".to_string(), serde_json::json!("run_read"));
 
-        let result = tool_call("grep", &input).unwrap();
+        let result = tool_call("grep", &input).await.unwrap();
         assert!(
             result.contains("run_read"),
             "grep output should contain 'run_read', got: {}",
@@ -526,33 +583,33 @@ mod tests {
     }
 
     /// 测试 web_fetch 工具参数缺失时返回错误
-    #[test]
-    fn test_tool_call_web_fetch_missing_url() {
+    #[tokio::test]
+    async fn test_tool_call_web_fetch_missing_url() {
         let input = HashMap::new();
-        let result = tool_call("web_fetch", &input);
+        let result = tool_call("web_fetch", &input).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Missing url"));
     }
 
     /// 测试调用不存在的工具会返回错误
-    #[test]
-    fn test_tool_call_not_found() {
+    #[tokio::test]
+    async fn test_tool_call_not_found() {
         let input = HashMap::new();
-        let result = tool_call("non_existent_tool", &input);
+        let result = tool_call("non_existent_tool", &input).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
     }
 
     /// 测试调用 use_skill 工具但 Skill 不存在时返回错误
-    #[test]
-    fn test_tool_call_use_skill_not_found() {
+    #[tokio::test]
+    async fn test_tool_call_use_skill_not_found() {
         let mut input = HashMap::new();
         input.insert(
             "name".to_string(),
             serde_json::json!("nonexistent-skill-abc"),
         );
 
-        let result = tool_call("use_skill", &input);
+        let result = tool_call("use_skill", &input).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -560,5 +617,57 @@ mod tests {
             "error should contain 'not found', got: {}",
             err
         );
+    }
+
+    /// MCP 端到端验证：tool_schema 合并 + tool_call 路由
+    #[tokio::test]
+    async fn test_mcp_end_to_end() {
+        use crate::config::models::{McpServerConfig, McpServerType};
+        use crate::mcp::manager::McpManager;
+        use std::collections::HashMap;
+
+        // 初始化 mock MCP 服务器
+        let mut config = HashMap::new();
+        config.insert(
+            "mock".to_string(),
+            McpServerConfig {
+                server_type: McpServerType::Local,
+                enabled: true,
+                command: Some(vec!["/tmp/mcp-mock-server.sh".to_string()]),
+                url: None,
+                headers: None,
+            },
+        );
+        let manager = McpManager::from_config(&config).await.unwrap();
+        set_mcp_manager(std::sync::Arc::new(manager));
+
+        // 1. 验证 tool_schema 合并了 MCP 工具
+        let schema = tool_schema();
+        let arr = schema.as_array().unwrap();
+        let mcp_tools: Vec<_> = arr
+            .iter()
+            .filter(|v| {
+                v.get("name")
+                    .and_then(|n| n.as_str())
+                    .map(|s| s.starts_with("mcp:"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(mcp_tools.len(), 2, "expected 2 mcp tools in schema");
+        assert!(mcp_tools.iter().any(|v| {
+            v.get("name").and_then(|n| n.as_str()) == Some("mcp:mock/echo")
+        }));
+
+        // 2. 验证 tool_call 正确路由到 MCP
+        let mut input = HashMap::new();
+        input.insert("message".to_string(), serde_json::json!("world"));
+        let result = tool_call("mcp:mock/echo", &input).await.unwrap();
+        assert!(result.contains("Echo: world"), "got: {}", result);
+
+        // 3. 验证本地工具不受影响
+        let mut input = HashMap::new();
+        input.insert("command".to_string(), serde_json::json!("echo hello_local"));
+        let result = tool_call("bash", &input).await.unwrap();
+        assert!(result.contains("hello_local"));
     }
 }

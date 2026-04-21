@@ -81,7 +81,9 @@ src/
 │   └── permission.rs       # 权限风险分级与交互式确认
 ```
 
-> **注意**：`src/commands`、`src/coroutine`、`src/mcp`、`src/plugins`、`src/skills`、`src/task`、`src/teammate` 目前为空目录，属于预留或待扩展模块，无实际代码。
+> **注意**：`src/commands`、`src/coroutine`、`src/plugins`、`src/skills`、`src/task`、`src/teammate` 目前为空目录或仅含框架代码，属于预留或待扩展模块。
+>
+> `src/mcp/` 已实现 MCP（Model Context Protocol）支持，包含协议类型（`types.rs`）、客户端 trait（`client.rs`）、stdio/HTTP 传输层（`transport.rs`）和多服务器管理器（`manager.rs`）。
 
 ---
 

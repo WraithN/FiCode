@@ -73,30 +73,33 @@ pub fn spawn_watcher(config: Arc<RwLock<Config>>) -> Result<impl notify::Watcher
     let config_dir = Config::config_dir();
     let last_reload = Arc::new(Mutex::new(Instant::now()));
 
-    let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-        let Ok(event) = res else { return };
-        if !event.kind.is_modify() { return };
+    let mut watcher =
+        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            let Ok(event) = res else { return };
+            if !event.kind.is_modify() {
+                return;
+            };
 
-        let mut last = last_reload.lock().unwrap();
-        if last.elapsed() < Duration::from_millis(500) {
-            return;
-        }
-        *last = Instant::now();
-        drop(last);
+            let mut last = last_reload.lock().unwrap();
+            if last.elapsed() < Duration::from_millis(500) {
+                return;
+            }
+            *last = Instant::now();
+            drop(last);
 
-        let Ok(new_config) = Config::load() else {
-            eprintln!("Warning: 配置热重载失败");
-            return;
-        };
+            let Ok(new_config) = Config::load() else {
+                eprintln!("Warning: 配置热重载失败");
+                return;
+            };
 
-        let Ok(mut cfg) = config.write() else {
-            eprintln!("Warning: 配置锁中毒，无法更新");
-            return;
-        };
+            let Ok(mut cfg) = config.write() else {
+                eprintln!("Warning: 配置锁中毒，无法更新");
+                return;
+            };
 
-        *cfg = new_config;
-        println!("配置已热重载");
-    })?;
+            *cfg = new_config;
+            println!("配置已热重载");
+        })?;
 
     watcher.watch(&config_dir, notify::RecursiveMode::NonRecursive)?;
     Ok(watcher)

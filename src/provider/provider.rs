@@ -88,10 +88,7 @@ impl Provider {
             }
         }
 
-        Err(anyhow!(
-            "默认模型 '{}' 在配置中未找到",
-            config.model
-        ))
+        Err(anyhow!("默认模型 '{}' 在配置中未找到", config.model))
     }
 
     pub fn model_name(&self) -> Result<&str> {
@@ -189,6 +186,7 @@ mod tests {
         let config = Config {
             model: "gpt-4".to_string(),
             provider: provider_map,
+            mcp: None,
         };
 
         let model = Provider::from_config(&config).unwrap();

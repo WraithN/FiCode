@@ -103,7 +103,7 @@ impl PermissionChecker {
     /// - DENY:  直接返回 Permission denied
     /// - ASK:   提示用户输入，输入 Yes 则调用工具，否则返回 Permission denied
     /// - ALLOW: 直接运行工具
-    pub fn check(
+    pub async fn check(
         tool_name: &str,
         input: &HashMap<String, serde_json::Value>,
     ) -> Result<String, String> {
@@ -120,7 +120,7 @@ impl PermissionChecker {
             }
             PermissionAction::Allow => {
                 log_debug!("permission allowed | tool={}", tool_name);
-                crate::tools::tool_call(tool_name, input)
+                crate::tools::tool_call(tool_name, input).await
             }
             PermissionAction::Ask => {
                 log_debug!(
@@ -143,7 +143,7 @@ impl PermissionChecker {
 
                 let answer = buffer.trim();
                 if answer.eq_ignore_ascii_case("yes") || answer.eq_ignore_ascii_case("y") {
-                    crate::tools::tool_call(tool_name, input)
+                    crate::tools::tool_call(tool_name, input).await
                 } else {
                     Err("Permission denied: user rejected".to_string())
                 }
