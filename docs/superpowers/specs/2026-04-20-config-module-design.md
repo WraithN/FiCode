@@ -2,7 +2,7 @@
 
 ## 背景与目标
 
-为 `shun-code` 新增统一的配置模块，支持通过 `~/.config/shun-code/config.json` 或 `config.jsonc` 管理模型和 Provider 设置，并实现热加载、环境变量占位符解析，以及与现有 `provider.rs` 的深度集成。
+为 `fi-code` 新增统一的配置模块，支持通过 `~/.config/fi-code/config.json` 或 `config.jsonc` 管理模型和 Provider 设置，并实现热加载、环境变量占位符解析，以及与现有 `provider.rs` 的深度集成。
 
 ## 文件结构
 
@@ -61,8 +61,8 @@ pub struct ModelLimits {
 
 ### 文件查找顺序
 
-1. `~/.config/shun-code/config.jsonc`
-2. `~/.config/shun-code/config.json`
+1. `~/.config/fi-code/config.jsonc`
+2. `~/.config/fi-code/config.json`
 3. 若均不存在，返回 `Config::default()`（空配置）
 
 ### JSONC 支持

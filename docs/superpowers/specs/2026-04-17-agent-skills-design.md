@@ -7,9 +7,9 @@
 
 ## 1. 背景与目标
 
-shun-code 是一个基于 Rust 的终端 AI Coding Agent CLI。当前 Agent 的 system prompt 只包含固定规则和工具描述，缺乏可扩展的领域知识注入机制。
+fi-code 是一个基于 Rust 的终端 AI Coding Agent CLI。当前 Agent 的 system prompt 只包含固定规则和工具描述，缺乏可扩展的领域知识注入机制。
 
-本设计为 shun-code 引入 **Agent Skills 加载能力**，允许用户通过声明式 Markdown 文件（SKILL.md）扩展 Agent 在特定场景下的行为（如代码审查、Git 提交、测试编写等）。Skills 支持按需加载，仅在当前对话回合生效，避免 system prompt 膨胀。
+本设计为 fi-code 引入 **Agent Skills 加载能力**，允许用户通过声明式 Markdown 文件（SKILL.md）扩展 Agent 在特定场景下的行为（如代码审查、Git 提交、测试编写等）。Skills 支持按需加载，仅在当前对话回合生效，避免 system prompt 膨胀。
 
 ---
 
@@ -19,7 +19,7 @@ shun-code 是一个基于 Rust 的终端 AI Coding Agent CLI。当前 Agent 的 
 |------|------|
 | Skill | 一个包含 `SKILL.md` 的目录，声明 Agent 在特定场景下的行为指南 |
 | Registry | Skill 的元数据索引，包含 id、name、description、source、软链路径等 |
-| Scope | Skill 的来源标识，如 `claude`、`shun-code`、`myproject` |
+| Scope | Skill 的来源标识，如 `claude`、`fi-code`、`myproject` |
 | Skill ID | 唯一标识，`{scope}-{name}`，如 `claude-commit` |
 
 ---
@@ -89,7 +89,7 @@ pub struct SkillMetadata {
 /// Skill 来源类型
 pub enum SkillSourceType {
     Project,    // <workspace>/.skills/
-    Global,     // ~/.config/shun-code/skills/
+    Global,     // ~/.config/fi-code/skills/
     Agent,      // ~/.config/agent/skills/
     Claude,     // ~/.claude/skills/
 }
@@ -99,7 +99,7 @@ pub struct SkillEntry {
     pub id: String,            // "{scope}-{name}"
     pub scope: String,         // 来源标识
     pub source_type: SkillSourceType,
-    pub symlink_path: PathBuf, // ~/.cache/shun-code/skills/{id}
+    pub symlink_path: PathBuf, // ~/.cache/fi-code/skills/{id}
     pub target_path: PathBuf,  // 原始目录
     pub metadata: SkillMetadata,
 }
@@ -120,7 +120,7 @@ pub struct SkillRegistry {
 | 优先级 | 来源路径 | Scope 前缀 | 类型 |
 |--------|----------|------------|------|
 | 1 | `<workspace>/.skills/` | `{workspace_basename}` | Project |
-| 2 | `~/.config/shun-code/skills/` | `shun-code` | Global |
+| 2 | `~/.config/fi-code/skills/` | `fi-code` | Global |
 | 3 | `~/.config/agent/skills/` | `agent` | Agent |
 | 4 | `~/.claude/skills/` | `claude` | Claude |
 
@@ -131,7 +131,7 @@ pub struct SkillRegistry {
 3. 解析 YAML front matter，提取 `name` 和 `description`
 4. 若 `name` 缺失或为空，跳过该目录并输出 warning
 5. 生成 `id = "{scope}-{name}"`
-6. 创建软链：`~/.cache/shun-code/skills/{id} -> {原始目录}`
+6. 创建软链：`~/.cache/fi-code/skills/{id} -> {原始目录}`
 7. 将条目写入 Registry
 
 ### 5.3 隔离规则
@@ -142,7 +142,7 @@ pub struct SkillRegistry {
 
 ### 5.4 持久化格式
 
-`~/.config/shun-code/registry-skills.json`：
+`~/.config/fi-code/registry-skills.json`：
 
 ```json
 {
@@ -151,7 +151,7 @@ pub struct SkillRegistry {
     {
       "id": "claude-commit",
       "type": "symlink",
-      "path": "~/.cache/shun-code/skills/claude-commit",
+      "path": "~/.cache/fi-code/skills/claude-commit",
       "target": "/home/user/.claude/skills/commit",
       "metadata": {
         "name": "commit",

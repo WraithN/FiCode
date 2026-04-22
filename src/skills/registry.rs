@@ -12,28 +12,28 @@ use crate::skills::{SkillEntry, SkillRegistry};
 /// 获取 Registry 文件的存储路径。
 ///
 /// 使用 `directories::ProjectDirs` 解析平台相关的配置目录：
-/// - Linux: `~/.config/shun-code/registry-skills.json`
-/// - macOS: `~/Library/Application Support/shun-code/registry-skills.json`
-/// - Windows: `%APPDATA%\shun-code\registry-skills.json`
+/// - Linux: `~/.config/fi-code/registry-skills.json`
+/// - macOS: `~/Library/Application Support/fi-code/registry-skills.json`
+/// - Windows: `%APPDATA%\fi-code\registry-skills.json`
 ///
 /// `directories::ProjectDirs::from(qualifier, organization, application)` 中，
-/// 前两个参数为空字符串，第三个是应用名 "shun-code"。
+/// 前两个参数为空字符串，第三个是应用名 "fi-code"。
 pub fn registry_path() -> PathBuf {
-    directories::ProjectDirs::from("", "", "shun-code")
+    directories::ProjectDirs::from("", "", "fi-code")
         .map(|dirs| dirs.config_dir().join("registry-skills.json"))
-        .unwrap_or_else(|| PathBuf::from(".config/shun-code/registry-skills.json"))
+        .unwrap_or_else(|| PathBuf::from(".config/fi-code/registry-skills.json"))
 }
 
 /// 获取 Skill 缓存目录的路径。
 ///
 /// 使用 `directories::ProjectDirs` 解析平台相关的缓存目录：
-/// - Linux: `~/.cache/shun-code/skills`
-/// - macOS: `~/Library/Caches/shun-code/skills`
-/// - Windows: `%LOCALAPPDATA%\shun-code\cache\skills`
+/// - Linux: `~/.cache/fi-code/skills`
+/// - macOS: `~/Library/Caches/fi-code/skills`
+/// - Windows: `%LOCALAPPDATA%\fi-code\cache\skills`
 pub fn cache_skills_dir() -> PathBuf {
-    directories::ProjectDirs::from("", "", "shun-code")
+    directories::ProjectDirs::from("", "", "fi-code")
         .map(|dirs| dirs.cache_dir().join("skills"))
-        .unwrap_or_else(|| PathBuf::from(".cache/shun-code/skills"))
+        .unwrap_or_else(|| PathBuf::from(".cache/fi-code/skills"))
 }
 
 /// 从磁盘加载 Registry。

@@ -2,7 +2,7 @@
 
 ## 背景与目标
 
-为 `shun-code` 新增 MCP（Model Context Protocol）支持，使其能够连接本地（stdio）和远程（HTTP）MCP 服务器，并将 MCP 工具与现有 basic_tools 一起注入系统提示词。通过 Two-Step-Discovery 机制优化 Token 使用：系统提示词中只展示工具名称和描述，当 LLM 决策调用时再获取完整 schema 并重新决策。
+为 `fi-code` 新增 MCP（Model Context Protocol）支持，使其能够连接本地（stdio）和远程（HTTP）MCP 服务器，并将 MCP 工具与现有 basic_tools 一起注入系统提示词。通过 Two-Step-Discovery 机制优化 Token 使用：系统提示词中只展示工具名称和描述，当 LLM 决策调用时再获取完整 schema 并重新决策。
 
 ## 文件结构
 

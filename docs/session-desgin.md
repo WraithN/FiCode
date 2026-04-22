@@ -17,7 +17,7 @@
 ## 2. 存储布局
 
 ```
-~/.config/shun-code/
+~/.config/fi-code/
 ├── sessions/
 │   ├── 01HQ8J3K2M4N5P6Q7R8S9T0UV.jsonl   # 活跃会话
 │   ├── 01HQ8J4L3M5N6P7Q8R9S0T1VW.jsonl   # 已归档

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 为 `shun-code` 引入 `debug` / `trace` 两级日志体系，统一格式并提升可读性，同时在 release 构建中编译期移除所有日志，防止敏感信息泄露。
+**Goal:** 为 `fi-code` 引入 `debug` / `trace` 两级日志体系，统一格式并提升可读性，同时在 release 构建中编译期移除所有日志，防止敏感信息泄露。
 
 **Architecture:** 扩展 `src/utils/log.rs` 为层级日志系统（`Off / Info / Debug / Trace`），提供 `log_info!` / `log_debug!` / `log_trace!` / `log_block!` 四个宏。在 `cfg(debug_assertions)` 下保留 `--log` 参数和日志功能；在 `not(debug_assertions)` 下将 `--log` 参数和所有日志宏编译为空。然后按设计文档在关键模块中分层插入日志打印。
 
@@ -261,7 +261,7 @@ Replace it with:
     {
         use utils::log::{set_log_level, LogLevel};
         set_log_level(LogLevel::from_str(&args.log_level));
-        log_info!("shun-code starting | log_level={}", args.log_level);
+        log_info!("fi-code starting | log_level={}", args.log_level);
     }
 ```
 
@@ -768,7 +768,7 @@ git commit -m "feat(logging): add debug logs to permission and session layers"
 After `set_workspace(workspace);`, add:
 
 ```rust
-    log_info!("shun-code started | mode={} | workspace={:?}",
+    log_info!("fi-code started | mode={} | workspace={:?}",
         if args.interactive { "interactive" } else if args.command.is_some() { "command" } else if args.session.is_some() { "session" } else { "none" },
         workspace
     );
@@ -813,7 +813,7 @@ Expected output contains:
 - [ ] **Step 2: Verify debug build with `--log debug` prints startup and key nodes**
 
 Run: `cargo run -- --log debug -c "hello"`
-Expected: stderr shows timestamped `[INFO]` and `[DEBUG]` lines, including `shun-code started`, `run_single_command`, `run_one_turn start`, and **one** `SYSTEM PROMPT (first)` block.
+Expected: stderr shows timestamped `[INFO]` and `[DEBUG]` lines, including `fi-code started`, `run_single_command`, `run_one_turn start`, and **one** `SYSTEM PROMPT (first)` block.
 
 - [ ] **Step 3: Verify debug build with `--log trace` prints system prompt every turn and network details**
 
@@ -823,11 +823,11 @@ Expected: stderr includes `[TRACE]` lines with `SYSTEM PROMPT` block, message du
 - [ ] **Step 4: Verify release build removes `--log` argument**
 
 Run: `cargo build --release`
-Then: `./target/release/shun-code --log debug --help`
+Then: `./target/release/fi-code --log debug --help`
 Expected: `error: unexpected argument '--log' found`
 
 Also verify release build runs normally without `--log`:
-Run: `./target/release/shun-code -c "hello"`
+Run: `./target/release/fi-code -c "hello"`
 Expected: normal execution, no timestamped logs on stderr.
 
 - [ ] **Step 5: Run full test suite one last time**

@@ -8,11 +8,11 @@ use std::time::{Duration, Instant};
 use super::models::Config;
 
 impl Config {
-    /// 返回配置目录路径：~/.config/shun-code/
+    /// 返回配置目录路径：~/.config/fi-code/
     pub fn config_dir() -> PathBuf {
-        directories::ProjectDirs::from("", "", "shun-code")
+        directories::ProjectDirs::from("", "", "fi-code")
             .map(|d| d.config_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from(".config/shun-code"))
+            .unwrap_or_else(|| PathBuf::from(".config/fi-code"))
     }
 
     /// 加载配置文件，支持 .jsonc 和 .json

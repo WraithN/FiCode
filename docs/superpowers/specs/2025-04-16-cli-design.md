@@ -6,7 +6,7 @@
 
 ## 1. 背景与目标
 
-当前 `shun-code` 启动后直接进入交互式 REPL，缺乏命令行参数支持。本设计新增一组 CLI 选项，使用户能够：
+当前 `fi-code` 启动后直接进入交互式 REPL，缺乏命令行参数支持。本设计新增一组 CLI 选项，使用户能够：
 
 - 查看版本与帮助信息
 - 控制调试日志输出
@@ -22,7 +22,7 @@
 
 ```rust
 #[derive(Parser, Debug)]
-#[command(name = "shun-code", version = env!("CARGO_PKG_VERSION"))]
+#[command(name = "fi-code", version = env!("CARGO_PKG_VERSION"))]
 pub struct Args {
     /// Enable debug logging (debug|info, default: info)
     #[arg(short = 'l', long = "log", value_name = "LEVEL", default_value = "info")]

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 为 shun-code 实现 Agent Skills 扫描、注册、按需加载能力，支持通过 `use_skill` 工具将 skill 内容注入当前对话回合。
+**Goal:** 为 fi-code 实现 Agent Skills 扫描、注册、按需加载能力，支持通过 `use_skill` 工具将 skill 内容注入当前对话回合。
 
 **Architecture:** 新增 `src/skills/` 模块负责 Skill 的扫描（scanner）、注册表管理（registry）和内容加载（loader）。SkillRegistry 通过 `LazyLock` 全局初始化，PromptBuilder 从中读取摘要注入 system prompt，`use_skill` 工具通过全局 registry 查找并返回 skill 完整内容作为 ToolResult。
 
@@ -300,17 +300,17 @@ use std::path::PathBuf;
 
 /// Registry 持久化路径
 pub fn registry_path() -> PathBuf {
-    let config_dir = directories::ProjectDirs::from("", "", "shun-code")
+    let config_dir = directories::ProjectDirs::from("", "", "fi-code")
         .map(|d| d.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".config/shun-code"));
+        .unwrap_or_else(|| PathBuf::from(".config/fi-code"));
     config_dir.join("registry-skills.json")
 }
 
 /// 缓存目录路径（软链存放处）
 pub fn cache_skills_dir() -> PathBuf {
-    let cache_dir = directories::ProjectDirs::from("", "", "shun-code")
+    let cache_dir = directories::ProjectDirs::from("", "", "fi-code")
         .map(|d| d.cache_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".cache/shun-code"));
+        .unwrap_or_else(|| PathBuf::from(".cache/fi-code"));
     cache_dir.join("skills")
 }
 
@@ -391,7 +391,7 @@ mod tests {
         });
 
         // 使用临时路径测试（但这里用真实路径，测试后清理）
-        let test_path = std::env::temp_dir().join("shun-code-test-registry.json");
+        let test_path = std::env::temp_dir().join("fi-code-test-registry.json");
         // 临时替换 registry_path 行为不可行，改为测试序列化/反序列化
         let json = serde_json::to_string_pretty(&registry).unwrap();
         let loaded: SkillRegistry = serde_json::from_str(&json).unwrap();
@@ -446,11 +446,11 @@ fn scan_sources(workspace: &Path) -> Vec<(PathBuf, String, SkillSourceType)> {
         sources.push((project_skills, scope, SkillSourceType::Project));
     }
 
-    // 2. ~/.config/shun-code/skills/
-    if let Some(dirs) = directories::ProjectDirs::from("", "", "shun-code") {
+    // 2. ~/.config/fi-code/skills/
+    if let Some(dirs) = directories::ProjectDirs::from("", "", "fi-code") {
         let global_skills = dirs.config_dir().join("skills");
         if global_skills.exists() && global_skills.is_dir() {
-            sources.push((global_skills, "shun-code".to_string(), SkillSourceType::Global));
+            sources.push((global_skills, "fi-code".to_string(), SkillSourceType::Global));
         }
     }
 
@@ -595,13 +595,13 @@ mod tests {
 
     #[test]
     fn test_scan_source_dir_valid_skill() {
-        let tmp = std::env::temp_dir().join("shun-code-test-scan-1");
+        let tmp = std::env::temp_dir().join("fi-code-test-scan-1");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
         create_test_skill(&tmp, "commit", "Create commits", "## Steps\n1. Stage");
 
-        let cache = std::env::temp_dir().join("shun-code-test-cache-1");
+        let cache = std::env::temp_dir().join("fi-code-test-cache-1");
         let _ = std::fs::remove_dir_all(&cache);
         std::fs::create_dir_all(&cache).unwrap();
 
@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn test_scan_source_dir_skips_invalid() {
-        let tmp = std::env::temp_dir().join("shun-code-test-scan-2");
+        let tmp = std::env::temp_dir().join("fi-code-test-scan-2");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
@@ -628,7 +628,7 @@ mod tests {
         std::fs::create_dir_all(tmp.join("invalid")).unwrap();
         std::fs::write(tmp.join("invalid/README.md"), "no front matter").unwrap();
 
-        let cache = std::env::temp_dir().join("shun-code-test-cache-2");
+        let cache = std::env::temp_dir().join("fi-code-test-cache-2");
         let _ = std::fs::remove_dir_all(&cache);
         std::fs::create_dir_all(&cache).unwrap();
 
@@ -643,8 +643,8 @@ mod tests {
 
     #[test]
     fn test_scan_source_dir_overrides_same_name() {
-        let tmp1 = std::env::temp_dir().join("shun-code-test-scan-3a");
-        let tmp2 = std::env::temp_dir().join("shun-code-test-scan-3b");
+        let tmp1 = std::env::temp_dir().join("fi-code-test-scan-3a");
+        let tmp2 = std::env::temp_dir().join("fi-code-test-scan-3b");
         let _ = std::fs::remove_dir_all(&tmp1);
         let _ = std::fs::remove_dir_all(&tmp2);
         std::fs::create_dir_all(&tmp1).unwrap();
@@ -653,7 +653,7 @@ mod tests {
         create_test_skill(&tmp1, "commit", "First desc", "## A");
         create_test_skill(&tmp2, "commit", "Second desc", "## B");
 
-        let cache = std::env::temp_dir().join("shun-code-test-cache-3");
+        let cache = std::env::temp_dir().join("fi-code-test-cache-3");
         let _ = std::fs::remove_dir_all(&cache);
         std::fs::create_dir_all(&cache).unwrap();
 
@@ -1137,8 +1137,8 @@ git commit -m "style: cargo fmt and clippy pass"
 - [ ] **Step 1: 创建一个测试 skill**
 
 ```bash
-mkdir -p ~/.config/shun-code/skills/commit
-cat > ~/.config/shun-code/skills/commit/SKILL.md << 'EOF'
+mkdir -p ~/.config/fi-code/skills/commit
+cat > ~/.config/fi-code/skills/commit/SKILL.md << 'EOF'
 ---
 name: commit
 description: Create conventional commits with proper formatting and emoji prefixes
@@ -1155,11 +1155,11 @@ Current git status: !`git status`
 EOF
 ```
 
-- [ ] **Step 2: 编译并运行 shun-code**
+- [ ] **Step 2: 编译并运行 fi-code**
 
 ```bash
 cargo build --release
-./target/release/shun-code -i
+./target/release/fi-code -i
 ```
 
 Expected: 启动日志中显示 `skills initialized | count=1`。
@@ -1171,7 +1171,7 @@ Expected: 启动日志中显示 `skills initialized | count=1`。
 - [ ] **Step 4: 清理测试数据**
 
 ```bash
-rm -rf ~/.config/shun-code/skills/commit
+rm -rf ~/.config/fi-code/skills/commit
 ```
 
 ---

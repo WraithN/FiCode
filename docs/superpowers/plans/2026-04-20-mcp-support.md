@@ -331,7 +331,7 @@ impl McpClient for LocalClient {
                 tools: Some(ToolsCapability { list_changed: false }),
             },
             client_info: ClientInfo {
-                name: "shun-code".to_string(),
+                name: "fi-code".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
         };
@@ -441,7 +441,7 @@ impl McpClient for RemoteClient {
                 tools: Some(ToolsCapability { list_changed: false }),
             },
             client_info: ClientInfo {
-                name: "shun-code".to_string(),
+                name: "fi-code".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
         };

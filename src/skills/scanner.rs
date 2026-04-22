@@ -18,7 +18,7 @@ use crate::skills::{
 ///
 /// 来源目录按优先级排序（后加载的覆盖先加载的）：
 /// 1. `<workspace>/.skills/` — scope = workspace 目录名, type = Project
-/// 2. `~/.config/shun-code/skills/` — scope = "shun-code", type = Global
+/// 2. `~/.config/fi-code/skills/` — scope = "fi-code", type = Global
 /// 3. `~/.config/agent/skills/` — scope = "agent", type = Agent
 /// 4. `~/.claude/skills/` — scope = "claude", type = Claude
 ///
@@ -38,13 +38,13 @@ pub fn scan_sources(workspace: &Path) -> Vec<(PathBuf, String, SkillSourceType)>
         sources.push((workspace_skills, scope, SkillSourceType::Project));
     }
 
-    // 2. shun-code 全局配置目录
-    if let Some(project_dirs) = directories::ProjectDirs::from("", "", "shun-code") {
+    // 2. fi-code 全局配置目录
+    if let Some(project_dirs) = directories::ProjectDirs::from("", "", "fi-code") {
         let global_skills = project_dirs.config_dir().join("skills");
         if global_skills.is_dir() {
             sources.push((
                 global_skills,
-                "shun-code".to_string(),
+                "fi-code".to_string(),
                 SkillSourceType::Global,
             ));
         }

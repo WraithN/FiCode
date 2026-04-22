@@ -101,7 +101,7 @@ impl McpClient for LocalClient {
                 }),
             },
             client_info: ClientInfo {
-                name: "shun-code".to_string(),
+                name: "fi-code".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
         };
@@ -187,7 +187,7 @@ impl McpClient for RemoteClient {
                 }),
             },
             client_info: ClientInfo {
-                name: "shun-code".to_string(),
+                name: "fi-code".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
         };

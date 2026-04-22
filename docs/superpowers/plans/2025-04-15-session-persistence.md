@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement full session persistence with JSONL storage, multi-session management, and resume capability for the shun-code CLI.
+**Goal:** Implement full session persistence with JSONL storage, multi-session management, and resume capability for the fi-code CLI.
 
 **Architecture:** Replace existing `agent::Message`/`ContentBlock` with design-doc-aligned `Message`/`Part` types. Implement a synchronous `SessionManager` in `src/session/` that reads/writes append-only JSONL. Wire session creation, loading, and saving into `main.rs`'s REPL loop.
 
@@ -934,9 +934,9 @@ async fn main() -> Result<()> {
     let client = provider.get_client()?;
     let mut editor = DefaultEditor::new()?;
 
-    let config_dir = directories::ProjectDirs::from("", "", "shun-code")
+    let config_dir = directories::ProjectDirs::from("", "", "fi-code")
         .map(|d| d.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".config/shun-code"));
+        .unwrap_or_else(|| PathBuf::from(".config/fi-code"));
     let sessions_dir = config_dir.join("sessions");
     let session_manager = SessionManager::new(sessions_dir.clone());
 

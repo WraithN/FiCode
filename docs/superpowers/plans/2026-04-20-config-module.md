@@ -131,11 +131,11 @@ use std::path::PathBuf;
 use super::models::{Config, ProviderConfig, ProviderOptions, ModelConfig, ModelLimits};
 
 impl Config {
-    /// 返回配置目录路径：~/.config/shun-code/
+    /// 返回配置目录路径：~/.config/fi-code/
     pub fn config_dir() -> PathBuf {
-        directories::ProjectDirs::from("", "", "shun-code")
+        directories::ProjectDirs::from("", "", "fi-code")
             .map(|d| d.config_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from(".config/shun-code"))
+            .unwrap_or_else(|| PathBuf::from(".config/fi-code"))
     }
 
     /// 加载配置文件，支持 .jsonc 和 .json
@@ -502,7 +502,7 @@ impl Provider {
         if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
             std::env::var("OPENAI_API_KEY"),
             std::env::var("OPENAI_BASE_URL"),
-            std::env::var("OPENAI_MODEL"),
+            std::env::var("OPENAI_MODEL_NAME"),
         ) {
             return Ok(Model {
                 api_key,
@@ -517,7 +517,7 @@ impl Provider {
         if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
             anthropic_api_key,
             std::env::var("ANTHROPIC_BASE_URL"),
-            std::env::var("ANTHROPIC_MODEL"),
+            std::env::var("ANTHROPIC_MODEL_NAME"),
         ) {
             return Ok(Model {
                 api_key,
@@ -694,8 +694,8 @@ git commit -m "feat(main): integrate config module, hot-reload, and --models fla
 - [ ] **Step 1: Create test config directory and file**
 
 ```bash
-mkdir -p ~/.config/shun-code
-cat > ~/.config/shun-code/config.json << 'EOF'
+mkdir -p ~/.config/fi-code
+cat > ~/.config/fi-code/config.json << 'EOF'
 {
   "model": "my-model",
   "provider": {
@@ -733,17 +733,17 @@ Providers and Models:
 
 - [ ] **Step 3: Test with env var priority**
 
-Run: `OPENAI_API_KEY=real-key OPENAI_BASE_URL=https://real.com OPENAI_MODEL=gpt-4 cargo run -- --models`
+Run: `OPENAI_API_KEY=real-key OPENAI_BASE_URL=https://real.com OPENAI_MODEL_NAME=gpt-4 cargo run -- --models`
 Expected: `--models` still shows config models (env vars affect Provider, not `--models` display)
 
 Actually, verify Provider picks up env vars by checking interactive mode starts without error:
-Run: `OPENAI_API_KEY=real-key OPENAI_BASE_URL=https://real.com OPENAI_MODEL=gpt-4 cargo run -- -c "hello"`
+Run: `OPENAI_API_KEY=real-key OPENAI_BASE_URL=https://real.com OPENAI_MODEL_NAME=gpt-4 cargo run -- -c "hello"`
 Expected: Runs successfully (or fails at API call, not at config loading)
 
 - [ ] **Step 4: Clean up test config (optional)**
 
 ```bash
-rm ~/.config/shun-code/config.json
+rm ~/.config/fi-code/config.json
 ```
 
 - [ ] **Step 5: Final commit**
@@ -757,7 +757,7 @@ git commit --allow-empty -m "test: verify config module end-to-end"
 ## Self-Review
 
 **Spec coverage:**
-- ✅ Config file path (`~/.config/shun-code/config.json/c`) → Task 3
+- ✅ Config file path (`~/.config/fi-code/config.json/c`) → Task 3
 - ✅ Hot reload → Task 5
 - ✅ JSONC support → Task 3
 - ✅ Env var placeholders → Task 3

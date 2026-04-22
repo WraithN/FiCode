@@ -1,7 +1,7 @@
 # 分层调试日志系统设计文档
 
 > 日期：2026-04-16  
-> 主题：为 `shun-code` 引入 `debug` / `trace` 两级日志体系，并在 release 构建中编译期移除日志，防止提示词与敏感信息泄露。
+> 主题：为 `fi-code` 引入 `debug` / `trace` 两级日志体系，并在 release 构建中编译期移除日志，防止提示词与敏感信息泄露。
 
 ---
 
@@ -11,7 +11,7 @@
 
 1. **无分层**：只有一个布尔开关，无法区分"业务关键节点"与"底层网络/工具细节"。
 2. **格式不统一**：日志输出风格各异，缺少时间戳和模块前缀，不利于快速定位问题。
-3. **安全顾虑**：若将 `shun-code` 打包为正式版发布，现有的 `--log` 选项可能泄露 system prompt、消息内容等敏感信息。
+3. **安全顾虑**：若将 `fi-code` 打包为正式版发布，现有的 `--log` 选项可能泄露 system prompt、消息内容等敏感信息。
 
 ### 目标
 
@@ -182,7 +182,7 @@ pub log_level: String,
 2. **手动验证**：
    - `cargo run -- --log debug -c "hello"`：验证关键节点信息正确输出，system prompt 只打印一次。
    - `cargo run -- --log trace -c "hello"`：验证每轮都打印 system prompt，且网络和工具细节完整。
-   - `cargo build --release && ./target/debug/shun-code --log debug`：验证 `--log` 参数已被移除并报错。
+   - `cargo build --release && ./target/debug/fi-code --log debug`：验证 `--log` 参数已被移除并报错。
 3. **回归测试**：
    - 运行 `cargo test`，确保现有 29 个测试全部通过。
 

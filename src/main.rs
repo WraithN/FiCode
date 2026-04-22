@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
     {
         use utils::log::{set_log_level, LogLevel};
         set_log_level(LogLevel::from_str(&args.log_level));
-        log_info!("shun-code starting | log_level={}", args.log_level);
+        log_info!("fi-code starting | log_level={}", args.log_level);
     }
 
     // 设置工作目录：命令行参数 > 默认用户主目录
@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
     );
 
     log_info!(
-        "shun-code started | mode={} | workspace={:?}",
+        "fi-code started | mode={} | workspace={:?}",
         if args.interactive {
             "interactive"
         } else if args.command.is_some() {
@@ -86,9 +86,9 @@ async fn main() -> Result<()> {
         workspace
     );
 
-    let config_dir = directories::ProjectDirs::from("", "", "shun-code")
+    let config_dir = directories::ProjectDirs::from("", "", "fi-code")
         .map(|d| d.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".config/shun-code"));
+        .unwrap_or_else(|| PathBuf::from(".config/fi-code"));
     let sessions_dir = config_dir.join("sessions");
     let session_manager = SessionManager::new(sessions_dir.clone());
 

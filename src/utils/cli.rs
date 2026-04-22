@@ -2,7 +2,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "shun-code", version = env!("CARGO_PKG_VERSION"))]
+#[command(name = "fi-code", version = env!("CARGO_PKG_VERSION"))]
 pub struct Args {
     /// Enable debug logging (debug|trace|info|off, default: info)
     #[cfg(debug_assertions)]

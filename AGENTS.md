@@ -6,10 +6,10 @@
 
 ## 1. 项目概览
 
-**shun-code** 是一个基于 Rust 构建的终端 AI Coding Agent CLI 程序。它通过 REPL 方式与用户交互，支持多轮对话、工具调用（文件读写、Bash 执行、网页抓取、代码搜索等）以及会话持久化。
+**fi-code** 是一个基于 Rust 构建的终端 AI Coding Agent CLI 程序。它通过 REPL 方式与用户交互，支持多轮对话、工具调用（文件读写、Bash 执行、网页抓取、代码搜索等）以及会话持久化。
 
 - **语言**：Rust（Edition 2021）
-- **包名**：`shun-code`
+- **包名**：`fi-code`
 - **版本**：`0.1.0`
 - **入口**：`src/main.rs`
 - **运行时**：基于 `tokio` 的异步运行时
@@ -20,7 +20,7 @@
 3. **工具调用**：内置 6 个工具（`bash`、`read`、`write`、`edit`、`web_fetch`、`grep`），Agent 可根据模型返回的 `ToolUse` 自动执行并回传结果。
 4. **会话持久化**：采用 JSONL（JSON Lines）格式将会话增量写入本地磁盘，支持中断后恢复。
 5. **权限校验**：对 Bash 等高危操作进行风险分级（Allow / Ask / Deny），拦截 `sudo`、`rm -rf` 及常见注入攻击。
-6. **配置管理**：支持通过 `~/.config/shun-code/config.json` 或 `config.jsonc` 管理模型和 Provider 设置，支持 JSONC 注释、环境变量占位符（`{env:VAR_NAME}`）以及文件系统事件热重载（500ms 防抖）。
+6. **配置管理**：支持通过 `~/.config/fi-code/config.json` 或 `config.jsonc` 管理模型和 Provider 设置，支持 JSONC 注释、环境变量占位符（`{env:VAR_NAME}`）以及文件系统事件热重载（500ms 防抖）。
 
 ---
 
@@ -101,7 +101,7 @@ src/
 ```bash
 OPENAI_API_KEY=sk-...
 OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL_NAME=gpt-4o
 ```
 
 **Anthropic：**
@@ -109,14 +109,14 @@ OPENAI_MODEL=gpt-4o
 ANTHROPIC_API_KEY=sk-ant-...
 # 或 ANTHROPIC_AUTH_TOKEN
 ANTHROPIC_BASE_URL=https://api.anthropic.com
-ANTHROPIC_MODEL=claude-3-7-sonnet-20250219
+ANTHROPIC_MODEL_NAME=claude-3-7-sonnet-20250219
 ```
 
 #### 方式二：配置文件（环境变量不存在时自动降级）
 
 配置文件路径（按优先级查找）：
-1. `~/.config/shun-code/config.jsonc`
-2. `~/.config/shun-code/config.json`
+1. `~/.config/fi-code/config.jsonc`
+2. `~/.config/fi-code/config.json`
 
 **配置文件格式示例：**
 ```json
@@ -170,14 +170,14 @@ cargo clippy
 ### 4.3 运行时的数据存储
 
 会话数据以 `.jsonl` 格式保存在平台配置目录下：
-- Linux: `~/.config/shun-code/sessions/`
-- macOS: `~/Library/Application Support/shun-code/sessions/`
-- Windows: `%APPDATA%\shun-code\sessions\`
+- Linux: `~/.config/fi-code/sessions/`
+- macOS: `~/Library/Application Support/fi-code/sessions/`
+- Windows: `%APPDATA%\fi-code\sessions\`
 
 配置文件保存在同一配置目录下：
-- Linux: `~/.config/shun-code/config.json` 或 `config.jsonc`
-- macOS: `~/Library/Application Support/shun-code/config.json` 或 `config.jsonc`
-- Windows: `%APPDATA%\shun-code\config.json` 或 `config.jsonc`
+- Linux: `~/.config/fi-code/config.json` 或 `config.jsonc`
+- macOS: `~/Library/Application Support/fi-code/config.json` 或 `config.jsonc`
+- Windows: `%APPDATA%\fi-code\config.json` 或 `config.jsonc`
 
 ---
 
