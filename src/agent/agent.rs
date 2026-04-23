@@ -166,12 +166,9 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
     );
 
     client
-        .stream_message(
-            &system_prompt,
-            &state.messages,
-            &schema,
-            &mut |chunk| process_chunk(chunk, &mut content_blocks, &mut finish_reason),
-        )
+        .stream_message(&system_prompt, &state.messages, &schema, &mut |chunk| {
+            process_chunk(chunk, &mut content_blocks, &mut finish_reason)
+        })
         .await?;
 
     // 从当前消息历史中继承 session_id，确保工具结果消息与对话属于同一会话
@@ -259,12 +256,9 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
             finish_reason = None;
 
             client
-                .stream_message(
-                    &system_prompt,
-                    &state.messages,
-                    &schema,
-                    &mut |chunk| process_chunk(chunk, &mut content_blocks, &mut finish_reason),
-                )
+                .stream_message(&system_prompt, &state.messages, &schema, &mut |chunk| {
+                    process_chunk(chunk, &mut content_blocks, &mut finish_reason)
+                })
                 .await?;
 
             state.messages.push(Message::new(

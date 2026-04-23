@@ -29,12 +29,12 @@ use agent::{agent_loop, LoopState};
 use clap::Parser;
 use config::Config;
 use mcp::manager::McpManager;
-use provider::{Provider, base_client::AIClient};
+use provider::{base_client::AIClient, Provider};
 use session::message::{Message, Part, Role};
 use session::{SessionManager, SessionMeta, SessionStatus};
-use task::{TaskManager, TaskPlan};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use task::{TaskManager, TaskPlan};
 use tools::set_mcp_manager;
 use utils::cli::Args;
 use utils::workspace::set_workspace;
@@ -261,7 +261,11 @@ async fn run_single_command(
 
         let provider_clone = provider.clone();
         let client_factory: Arc<dyn Fn() -> Box<dyn AIClient> + Send + Sync> =
-            Arc::new(move || provider_clone.get_client().expect("Failed to create subagent client"));
+            Arc::new(move || {
+                provider_clone
+                    .get_client()
+                    .expect("Failed to create subagent client")
+            });
 
         let subagent_schema = crate::tools::subagent_tool_schema().await;
         let task_manager = TaskManager::new(
@@ -274,7 +278,9 @@ async fn run_single_command(
             print_task_plan(plan);
         };
 
-        let summaries = task_manager.execute_plan(&mut plan, &mut on_progress).await?;
+        let summaries = task_manager
+            .execute_plan(&mut plan, &mut on_progress)
+            .await?;
 
         let mut summary_text = "所有子任务已完成，结果汇总如下：\n\n".to_string();
         for (idx, summary) in summaries.iter().enumerate() {
@@ -366,7 +372,11 @@ async fn run_interactive(
 
                     let provider_clone = provider.clone();
                     let client_factory: Arc<dyn Fn() -> Box<dyn AIClient> + Send + Sync> =
-                        Arc::new(move || provider_clone.get_client().expect("Failed to create subagent client"));
+                        Arc::new(move || {
+                            provider_clone
+                                .get_client()
+                                .expect("Failed to create subagent client")
+                        });
 
                     let subagent_schema = crate::tools::subagent_tool_schema().await;
                     let task_manager = TaskManager::new(
@@ -379,7 +389,9 @@ async fn run_interactive(
                         print_task_plan(plan);
                     };
 
-                    let summaries = task_manager.execute_plan(&mut plan, &mut on_progress).await?;
+                    let summaries = task_manager
+                        .execute_plan(&mut plan, &mut on_progress)
+                        .await?;
 
                     let mut summary_text = "所有子任务已完成，结果汇总如下：\n\n".to_string();
                     for (idx, summary) in summaries.iter().enumerate() {

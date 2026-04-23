@@ -104,7 +104,9 @@ impl McpManager {
             let mut tools = self.tools.write().await;
             for tool in list_result.tools {
                 let full_name = format!("mcp:{}/{}", name, tool.name);
-                tools.summary.insert(full_name.clone(), tool.description.clone());
+                tools
+                    .summary
+                    .insert(full_name.clone(), tool.description.clone());
                 tools.full.insert(full_name, tool);
             }
         }
@@ -115,10 +117,7 @@ impl McpManager {
     /// 根据配置创建对应类型的客户端（不初始化）。
     /// 注意：这是一个纯函数，不依赖 `self` 的任何字段，因此设计为关联函数。
     /// 返回 `Arc<dyn McpClient>`，以便在锁外安全持有并调用。
-    async fn create_client(
-        name: &str,
-        config: &McpServerConfig,
-    ) -> Result<Arc<dyn McpClient>> {
+    async fn create_client(name: &str, config: &McpServerConfig) -> Result<Arc<dyn McpClient>> {
         match config.server_type {
             McpServerType::Local => {
                 let cmd = config
@@ -144,7 +143,11 @@ impl McpManager {
     /// 列出所有 MCP 工具的轻量信息（full_name -> description）
     pub async fn tools_list(&self) -> Vec<(String, String)> {
         let guard = self.tools.read().await;
-        guard.summary.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        guard
+            .summary
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     /// 获取指定工具的完整 schema
@@ -205,12 +208,9 @@ impl McpManager {
                 // 重连后重新获取 client
                 let client = {
                     let clients = self.clients.read().await;
-                    clients
-                        .get(server_name)
-                        .cloned()
-                        .ok_or_else(|| {
-                            anyhow!("MCP server '{}' not found after reconnect", server_name)
-                        })?
+                    clients.get(server_name).cloned().ok_or_else(|| {
+                        anyhow!("MCP server '{}' not found after reconnect", server_name)
+                    })?
                 };
                 client.call_tool(tool_name, arguments).await
             }

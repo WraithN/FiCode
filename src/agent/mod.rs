@@ -6,4 +6,4 @@ pub mod runner;
 
 pub use agent::{agent_loop, run_one_turn, LoopState};
 pub use prompt::PromptBuilder;
-pub use runner::{AgentRunner, AgentRunResult};
+pub use runner::{AgentRunResult, AgentRunner};

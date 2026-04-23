@@ -117,7 +117,10 @@ impl AgentRunner {
 
         // 非 ToolUse 则结束循环
         if finish_reason != Some(FinishReason::ToolUse) {
-            log_debug!("AgentRunner::run_one_turn | finish_reason={:?}, stopping", finish_reason);
+            log_debug!(
+                "AgentRunner::run_one_turn | finish_reason={:?}, stopping",
+                finish_reason
+            );
             return Ok((false, finish_reason));
         }
 
@@ -164,7 +167,12 @@ impl AgentRunner {
                 }
             }
             ChunkContent::ToolUse(ref tool) => {
-                if let Part::ToolUse { id, name, arguments } = tool {
+                if let Part::ToolUse {
+                    id,
+                    name,
+                    arguments,
+                } = tool
+                {
                     log_debug!(
                         "LLM tool_use | id={} | name={} | args={}",
                         id,

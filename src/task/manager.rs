@@ -6,7 +6,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::agent::{AgentRunner, AgentRunResult};
+use crate::agent::{AgentRunResult, AgentRunner};
 use crate::provider::base_client::AIClient;
 use crate::session::message::{Message, Part, Role};
 use crate::task::{Task, TaskPlan, TaskStatus};
@@ -69,7 +69,9 @@ impl TaskManager {
             let task_name = plan.tasks[i].name.clone();
             let task_desc = plan.tasks[i].description.clone();
 
-            let result = self.execute_single_task(&task_id, &task_name, &task_desc).await;
+            let result = self
+                .execute_single_task(&task_id, &task_name, &task_desc)
+                .await;
 
             // 更新任务结果
             match result {

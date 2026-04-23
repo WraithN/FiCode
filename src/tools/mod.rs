@@ -244,10 +244,7 @@ impl ToolHandler for CreateTaskPlanHandler {
 
         let mut plan = crate::task::TaskPlan::new("");
         for (idx, task_val) in tasks_arr.iter().enumerate() {
-            let name = task_val
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let name = task_val.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let description = task_val
                 .get("description")
                 .and_then(|v| v.as_str())
@@ -262,8 +259,8 @@ impl ToolHandler for CreateTaskPlanHandler {
             ));
         }
 
-        let json = serde_json::to_string(&plan)
-            .map_err(|e| format!("Serialize plan failed: {}", e))?;
+        let json =
+            serde_json::to_string(&plan).map_err(|e| format!("Serialize plan failed: {}", e))?;
         Ok(json)
     }
 }
@@ -731,10 +728,13 @@ mod tests {
     async fn test_subagent_tool_schema_excludes_create_task_plan() {
         let schema = subagent_tool_schema().await;
         let arr = schema.as_array().unwrap();
-        let has_task_plan = arr.iter().any(|v| {
-            v.get("name").and_then(|n| n.as_str()) == Some("create_task_plan")
-        });
-        assert!(!has_task_plan, "subagent schema should not contain create_task_plan");
+        let has_task_plan = arr
+            .iter()
+            .any(|v| v.get("name").and_then(|n| n.as_str()) == Some("create_task_plan"));
+        assert!(
+            !has_task_plan,
+            "subagent schema should not contain create_task_plan"
+        );
     }
 
     /// MCP 端到端验证：tool_schema 合并 + tool_call 路由
@@ -792,9 +792,9 @@ mod tests {
             "expected at least 2 mcp tools in schema, got: {}",
             mcp_tools.len()
         );
-        assert!(mcp_tools.iter().any(|v| {
-            v.get("name").and_then(|n| n.as_str()) == Some("mcp:mock/echo")
-        }));
+        assert!(mcp_tools
+            .iter()
+            .any(|v| { v.get("name").and_then(|n| n.as_str()) == Some("mcp:mock/echo") }));
 
         // 2. 验证 tool_call 正确路由到 MCP
         let mut input = HashMap::new();
