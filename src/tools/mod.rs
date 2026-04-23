@@ -224,6 +224,51 @@ impl ToolHandler for UseSkillHandler {
 }
 
 // =============================================================================
+// CreateTaskPlanHandler：将复杂任务拆分为子任务计划
+// =============================================================================
+
+#[derive(Debug)]
+struct CreateTaskPlanHandler;
+
+impl ToolHandler for CreateTaskPlanHandler {
+    fn call(&self, _name: &str, params: ToolParams) -> Result<String, String> {
+        let input = match &params[..] {
+            [ToolParameter::Json(v)] => v.clone(),
+            _ => return Err("Expected JSON parameters".to_string()),
+        };
+
+        let tasks_arr = input
+            .get("tasks")
+            .and_then(|v| v.as_array())
+            .ok_or("Missing or invalid 'tasks' array")?;
+
+        let mut plan = crate::task::TaskPlan::new("");
+        for (idx, task_val) in tasks_arr.iter().enumerate() {
+            let name = task_val
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let description = task_val
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if name.is_empty() {
+                continue;
+            }
+            plan.tasks.push(crate::task::Task::new(
+                format!("{}", idx + 1),
+                name,
+                description,
+            ));
+        }
+
+        let json = serde_json::to_string(&plan)
+            .map_err(|e| format!("Serialize plan failed: {}", e))?;
+        Ok(json)
+    }
+}
+
+// =============================================================================
 // MCP Manager 全局状态
 // =============================================================================
 // `McpManager` 在程序启动后由 `main.rs` 异步初始化并设置到这里。
@@ -308,6 +353,14 @@ static REGISTRY: LazyLock<ToolsRegistry> = LazyLock::new(|| {
         )
         .expect("register use_skill tool failed");
     registry
+        .register(
+            "create_task_plan",
+            "将复杂任务拆分为多个子任务。仅在任务确实复杂、需要多步骤完成时调用。参数示例：{\"tasks\":[{\"name\":\"分析代码\",\"description\":\"分析现有错误处理模式\"}]}",
+            r#"{"type":"object","properties":{"tasks":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"}},"required":["name","description"]}}},"required":["tasks"]}"#,
+            Box::new(CreateTaskPlanHandler),
+        )
+        .expect("register create_task_plan tool failed");
+    registry
 });
 
 // =============================================================================
@@ -337,6 +390,40 @@ pub async fn tool_schema() -> serde_json::Value {
     }
 
     // mcp_tools：轻量 schema（仅 name + description，input_schema 为空对象）
+    if let Ok(lock) = MCP_MANAGER.read() {
+        if let Some(mcp) = lock.as_ref() {
+            for (full_name, desc) in mcp.tools_list().await {
+                schemas.push(serde_json::json!({
+                    "name": full_name,
+                    "description": desc,
+                    "input_schema": serde_json::Value::Object(serde_json::Map::new()),
+                }));
+            }
+        }
+    }
+
+    serde_json::Value::Array(schemas)
+}
+
+// =============================================================================
+// 生成 Subagent 可用的工具 schema（不含 create_task_plan，避免递归拆分）
+// =============================================================================
+
+pub async fn subagent_tool_schema() -> serde_json::Value {
+    let mut schemas = Vec::new();
+
+    let basic = REGISTRY.tool_schema();
+    if let Some(arr) = basic.as_array() {
+        for tool in arr {
+            if let Some(name) = tool.get("name").and_then(|n| n.as_str()) {
+                if name == "create_task_plan" {
+                    continue;
+                }
+            }
+            schemas.push(tool.clone());
+        }
+    }
+
     if let Ok(lock) = MCP_MANAGER.read() {
         if let Some(mcp) = lock.as_ref() {
             for (full_name, desc) in mcp.tools_list().await {
@@ -617,6 +704,37 @@ mod tests {
             "error should contain 'not found', got: {}",
             err
         );
+    }
+
+    /// 测试 create_task_plan handler 解析任务列表
+    #[test]
+    fn test_create_task_plan_handler() {
+        use crate::tools::tools_type::{ToolHandler, ToolParameter};
+        use serde_json::json;
+
+        let handler = CreateTaskPlanHandler;
+        let input = json!({
+            "tasks": [
+                {"name": "Analyze", "description": "Analyze current code"},
+                {"name": "Refactor", "description": "Refactor errors"}
+            ]
+        });
+        let result = handler.call("create_task_plan", vec![ToolParameter::Json(input)]);
+        assert!(result.is_ok());
+        let json_str = result.unwrap();
+        assert!(json_str.contains("Analyze"));
+        assert!(json_str.contains("Refactor"));
+    }
+
+    /// 测试 subagent_tool_schema 不包含 create_task_plan
+    #[tokio::test]
+    async fn test_subagent_tool_schema_excludes_create_task_plan() {
+        let schema = subagent_tool_schema().await;
+        let arr = schema.as_array().unwrap();
+        let has_task_plan = arr.iter().any(|v| {
+            v.get("name").and_then(|n| n.as_str()) == Some("create_task_plan")
+        });
+        assert!(!has_task_plan, "subagent schema should not contain create_task_plan");
     }
 
     /// MCP 端到端验证：tool_schema 合并 + tool_call 路由
