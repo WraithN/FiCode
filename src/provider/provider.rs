@@ -19,6 +19,7 @@ struct Model {
     model_type: ModelType,
 }
 
+#[derive(Debug, Clone)]
 pub struct Provider {
     model: Option<Model>,
 }

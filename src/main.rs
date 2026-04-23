@@ -29,9 +29,10 @@ use agent::{agent_loop, LoopState};
 use clap::Parser;
 use config::Config;
 use mcp::manager::McpManager;
-use provider::Provider;
-use session::message::{Message, Role};
+use provider::{Provider, base_client::AIClient};
+use session::message::{Message, Part, Role};
 use session::{SessionManager, SessionMeta, SessionStatus};
+use task::{TaskManager, TaskPlan};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tools::set_mcp_manager;
@@ -43,6 +44,42 @@ use utils::workspace::set_workspace;
 // =============================================================================
 
 // `#[tokio::main]` 是属性宏，将 main 函数包装在 tokio 异步运行时中
+const SUBAGENT_SYSTEM_PROMPT: &str = r#"你是一个专注于执行特定子任务的 AI 助手。
+你的任务是完成用户交给你的具体任务，不要偏离主题。
+完成后，请用一段话总结你做了什么、结果是什么。
+"#;
+
+fn print_task_plan(plan: &task::TaskPlan) {
+    println!("\n📋 Task Plan ({} tasks):", plan.tasks.len());
+    for task in &plan.tasks {
+        let icon = match task.status {
+            task::TaskStatus::Pending => "[ ]",
+            task::TaskStatus::InProgress => "🔄",
+            task::TaskStatus::Completed => "✅",
+            task::TaskStatus::Failed => "❌",
+        };
+        println!("  {} {}", icon, task.name);
+    }
+    println!();
+}
+
+fn extract_task_plan_result(messages: &[Message]) -> Option<String> {
+    for msg in messages.iter().rev() {
+        if msg.role == Role::User {
+            for part in &msg.parts {
+                if let Part::ToolResult { content, .. } = part {
+                    if let Ok(plan) = serde_json::from_str::<TaskPlan>(content) {
+                        if !plan.tasks.is_empty() {
+                            return Some(content.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -169,7 +206,6 @@ async fn main() -> Result<()> {
     }
 
     let provider = Provider::new(Arc::clone(&config))?;
-    let client = provider.get_client()?;
 
     // -c 单命令模式
     if let Some(cmd) = args.command {
@@ -177,7 +213,7 @@ async fn main() -> Result<()> {
         if !cmd.is_empty() {
             let mut session = session_manager.create_session(provider.model_name()?)?;
             run_single_command(
-                client.as_ref(),
+                &provider,
                 &session_manager,
                 &sessions_dir,
                 &mut session,
@@ -189,19 +225,17 @@ async fn main() -> Result<()> {
     }
 
     // -i 交互式模式
-    run_interactive(client.as_ref(), &provider, &session_manager, &sessions_dir).await?;
+    run_interactive(&provider, &session_manager, &sessions_dir).await?;
     Ok(())
 }
 
 async fn run_single_command(
-    client: &dyn crate::provider::base_client::AIClient,
+    provider: &Provider,
     session_manager: &SessionManager,
     sessions_dir: &PathBuf,
     session: &mut session::Session,
     query: &str,
 ) -> Result<()> {
-    use crate::session::message::Part;
-
     log_debug!("run_single_command | query_len={}", query.len());
 
     let user_msg = Message::new(
@@ -215,7 +249,54 @@ async fn run_single_command(
     let _ = session_manager.append_message(&session.id, &user_msg);
 
     let mut state = LoopState::new(session.messages.clone());
-    agent_loop(client, &mut state).await?;
+    let client = provider.get_client()?;
+    agent_loop(client.as_ref(), &mut state).await?;
+
+    if let Some(plan_json) = extract_task_plan_result(&state.messages) {
+        let mut plan: TaskPlan = serde_json::from_str(&plan_json)
+            .context("Failed to parse task plan from tool result")?;
+
+        println!("\n📋 检测到任务计划，共 {} 个子任务", plan.tasks.len());
+        print_task_plan(&plan);
+
+        let provider_clone = provider.clone();
+        let client_factory: Arc<dyn Fn() -> Box<dyn AIClient> + Send + Sync> =
+            Arc::new(move || provider_clone.get_client().expect("Failed to create subagent client"));
+
+        let subagent_schema = crate::tools::subagent_tool_schema().await;
+        let task_manager = TaskManager::new(
+            client_factory,
+            SUBAGENT_SYSTEM_PROMPT.to_string(),
+            subagent_schema,
+        );
+
+        let mut on_progress = |plan: &TaskPlan| {
+            print_task_plan(plan);
+        };
+
+        let summaries = task_manager.execute_plan(&mut plan, &mut on_progress).await?;
+
+        let mut summary_text = "所有子任务已完成，结果汇总如下：\n\n".to_string();
+        for (idx, summary) in summaries.iter().enumerate() {
+            let task_name = &plan.tasks[idx].name;
+            summary_text.push_str(&format!(
+                "[任务 {}: {}]\n{}\n\n",
+                idx + 1,
+                task_name,
+                summary.result
+            ));
+        }
+
+        state.messages.push(Message::new(
+            session.id.clone(),
+            Role::User,
+            vec![Part::Text { text: summary_text }],
+        ));
+
+        let client = provider.get_client()?;
+        agent_loop(client.as_ref(), &mut state).await?;
+    }
+
     session.messages = state.messages;
 
     if let Err(e) = tokio::task::spawn_blocking({
@@ -240,7 +321,6 @@ async fn run_single_command(
 }
 
 async fn run_interactive(
-    client: &dyn crate::provider::base_client::AIClient,
     provider: &Provider,
     session_manager: &SessionManager,
     sessions_dir: &PathBuf,
@@ -274,7 +354,54 @@ async fn run_interactive(
                 }
 
                 let mut state = LoopState::new(session.messages.clone());
-                agent_loop(client, &mut state).await?;
+                let client = provider.get_client()?;
+                agent_loop(client.as_ref(), &mut state).await?;
+
+                if let Some(plan_json) = extract_task_plan_result(&state.messages) {
+                    let mut plan: TaskPlan = serde_json::from_str(&plan_json)
+                        .context("Failed to parse task plan from tool result")?;
+
+                    println!("\n📋 检测到任务计划，共 {} 个子任务", plan.tasks.len());
+                    print_task_plan(&plan);
+
+                    let provider_clone = provider.clone();
+                    let client_factory: Arc<dyn Fn() -> Box<dyn AIClient> + Send + Sync> =
+                        Arc::new(move || provider_clone.get_client().expect("Failed to create subagent client"));
+
+                    let subagent_schema = crate::tools::subagent_tool_schema().await;
+                    let task_manager = TaskManager::new(
+                        client_factory,
+                        SUBAGENT_SYSTEM_PROMPT.to_string(),
+                        subagent_schema,
+                    );
+
+                    let mut on_progress = |plan: &TaskPlan| {
+                        print_task_plan(plan);
+                    };
+
+                    let summaries = task_manager.execute_plan(&mut plan, &mut on_progress).await?;
+
+                    let mut summary_text = "所有子任务已完成，结果汇总如下：\n\n".to_string();
+                    for (idx, summary) in summaries.iter().enumerate() {
+                        let task_name = &plan.tasks[idx].name;
+                        summary_text.push_str(&format!(
+                            "[任务 {}: {}]\n{}\n\n",
+                            idx + 1,
+                            task_name,
+                            summary.result
+                        ));
+                    }
+
+                    state.messages.push(Message::new(
+                        session.id.clone(),
+                        Role::User,
+                        vec![Part::Text { text: summary_text }],
+                    ));
+
+                    let client = provider.get_client()?;
+                    agent_loop(client.as_ref(), &mut state).await?;
+                }
+
                 session.messages = state.messages;
 
                 if let Err(e) = tokio::task::spawn_blocking({
