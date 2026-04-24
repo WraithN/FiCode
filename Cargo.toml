@@ -25,6 +25,8 @@ dirs = "5.0"
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 notify = "8"
+ratatui = "0.28"
+crossterm = "0.28"
 jsonc-parser = { version = "0.32", features = ["serde"] }
 axum = "0.7"
 tokio-stream = { version = "0.1", features = ["sync"] }
