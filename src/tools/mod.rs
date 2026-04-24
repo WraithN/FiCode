@@ -387,15 +387,14 @@ pub async fn tool_schema() -> serde_json::Value {
     }
 
     // mcp_tools：轻量 schema（仅 name + description，input_schema 为空对象）
-    if let Ok(lock) = MCP_MANAGER.read() {
-        if let Some(mcp) = lock.as_ref() {
-            for (full_name, desc) in mcp.tools_list().await {
-                schemas.push(serde_json::json!({
-                    "name": full_name,
-                    "description": desc,
-                    "input_schema": serde_json::Value::Object(serde_json::Map::new()),
-                }));
-            }
+    let mcp = MCP_MANAGER.read().ok().and_then(|lock| lock.clone());
+    if let Some(mcp) = mcp {
+        for (full_name, desc) in mcp.tools_list().await {
+            schemas.push(serde_json::json!({
+                "name": full_name,
+                "description": desc,
+                "input_schema": serde_json::Value::Object(serde_json::Map::new()),
+            }));
         }
     }
 
@@ -421,15 +420,14 @@ pub async fn subagent_tool_schema() -> serde_json::Value {
         }
     }
 
-    if let Ok(lock) = MCP_MANAGER.read() {
-        if let Some(mcp) = lock.as_ref() {
-            for (full_name, desc) in mcp.tools_list().await {
-                schemas.push(serde_json::json!({
-                    "name": full_name,
-                    "description": desc,
-                    "input_schema": serde_json::Value::Object(serde_json::Map::new()),
-                }));
-            }
+    let mcp = MCP_MANAGER.read().ok().and_then(|lock| lock.clone());
+    if let Some(mcp) = mcp {
+        for (full_name, desc) in mcp.tools_list().await {
+            schemas.push(serde_json::json!({
+                "name": full_name,
+                "description": desc,
+                "input_schema": serde_json::Value::Object(serde_json::Map::new()),
+            }));
         }
     }
 
