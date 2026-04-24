@@ -55,6 +55,32 @@ fn extract_task_plan_result(messages: &[Message]) -> Option<String> {
     None
 }
 
+async fn run_tui_mode() -> Result<()> {
+    let config = Arc::new(RwLock::new(Config::load()?));
+    let provider = Arc::new(RwLock::new(Provider::new(Arc::clone(&config))?));
+
+    // 启动 Server（后台任务）
+    let server = crate::server::Server::new(
+        Arc::clone(&provider),
+        Arc::clone(&config),
+        None,
+    );
+    let server_handle = tokio::spawn(async move {
+        server.run().await;
+    });
+
+    // 等待 Server 启动
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // 启动 TUI
+    let result = crate::tui::run_tui().await;
+
+    // TUI 退出后关闭 Server
+    server_handle.abort();
+
+    result
+}
+
 pub async fn run() -> Result<()> {
     let args = Args::parse();
 
@@ -69,7 +95,14 @@ pub async fn run() -> Result<()> {
             return Ok(());
         }
         None => {
-            // 继续原有 CLI 逻辑
+            // 检查是否有其他向后兼容的 flag
+            if args.interactive || args.cmd.is_some()
+                || args.session.is_some() || args.models {
+                // 继续原有 CLI 逻辑（什么都不做，继续往下执行）
+            } else {
+                // 默认启动 TUI 模式
+                return run_tui_mode().await;
+            }
         }
     }
 
