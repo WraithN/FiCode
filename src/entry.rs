@@ -219,7 +219,7 @@ async fn run_single_command(
     if !matches!(slash_cmd, crate::commands::slash::SlashCommand::Unknown(ref s) if s.is_empty()) {
         let provider_lock = Arc::new(std::sync::RwLock::new((*provider).clone()));
         let handler = crate::commands::slash::SlashCommandHandler::new(provider_lock, config);
-        handler.execute(slash_cmd)?;
+        handler.execute(slash_cmd).await?;
         return Ok(());
     }
 
@@ -355,7 +355,7 @@ async fn run_interactive(
                         provider_lock,
                         Arc::clone(&config),
                     );
-                    if let Err(e) = handler.execute(slash_cmd) {
+                    if let Err(e) = handler.execute(slash_cmd).await {
                         eprintln!("Error: {}", e);
                     }
                     continue;
