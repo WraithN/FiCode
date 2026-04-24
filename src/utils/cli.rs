@@ -1,9 +1,12 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(name = "fi-code", version = env!("CARGO_PKG_VERSION"))]
 pub struct Args {
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+
     /// Enable debug logging (debug|trace|info|off, default: info)
     #[cfg(debug_assertions)]
     #[arg(
@@ -24,7 +27,7 @@ pub struct Args {
 
     /// Execute a single command and exit
     #[arg(short = 'c', long = "command", value_name = "MESSAGE")]
-    pub command: Option<String>,
+    pub cmd: Option<String>,
 
     /// Show configured providers and models
     #[arg(short = 'm', long = "models")]
@@ -33,4 +36,14 @@ pub struct Args {
     /// Workspace directory (default: home directory)
     #[arg(short = 'w', long = "workspace", value_name = "PATH")]
     pub workspace: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Start the web server
+    Server {
+        /// Port to listen on
+        #[arg(short, long)]
+        port: Option<u16>,
+    },
 }

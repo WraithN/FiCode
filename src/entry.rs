@@ -15,7 +15,7 @@ use crate::session::message::{Message, Part, Role};
 use crate::session::{SessionManager, SessionStatus};
 use crate::task::{TaskManager, TaskPlan};
 use crate::tools::set_mcp_manager;
-use crate::utils::cli::Args;
+use crate::utils::cli::{Args, Commands};
 use crate::utils::workspace::set_workspace;
 use crate::{log_debug, log_info};
 
@@ -58,6 +58,19 @@ fn extract_task_plan_result(messages: &[Message]) -> Option<String> {
 pub async fn run() -> Result<()> {
     let args = Args::parse();
 
+    // 如果指定了子命令
+    match args.command {
+        Some(Commands::Server { port }) => {
+            let config = Arc::new(RwLock::new(Config::load()?));
+            let provider = Arc::new(RwLock::new(Provider::new(Arc::clone(&config))?));
+            crate::server::Server::new(provider, config, port).run().await;
+            return Ok(());
+        }
+        None => {
+            // 继续原有 CLI 逻辑
+        }
+    }
+
     #[cfg(debug_assertions)]
     {
         use crate::utils::log::{set_log_level, LogLevel};
@@ -88,7 +101,7 @@ pub async fn run() -> Result<()> {
         "fi-code started | mode={} | workspace={:?}",
         if args.interactive {
             "interactive"
-        } else if args.command.is_some() {
+        } else if args.cmd.is_some() {
             "command"
         } else if args.session.is_some() {
             "session"
@@ -174,7 +187,7 @@ pub async fn run() -> Result<()> {
     }
 
     // 如果没有显式指定操作模式，提示用户
-    if !args.interactive && args.session.is_none() && args.command.is_none() {
+    if !args.interactive && args.session.is_none() && args.cmd.is_none() {
         println!("Please provide an option. Use -h or --help for more information.");
         return Ok(());
     }
@@ -182,7 +195,7 @@ pub async fn run() -> Result<()> {
     let provider = Arc::new(Provider::new(Arc::clone(&config))?);
 
     // -c 单命令模式
-    if let Some(cmd) = args.command {
+    if let Some(cmd) = args.cmd {
         let cmd = cmd.trim();
         if !cmd.is_empty() {
             let mut session = session_manager.create_session(provider.model_name()?)?;

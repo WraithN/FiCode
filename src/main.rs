@@ -8,6 +8,7 @@ mod mcp;
 mod permission;
 mod provider;
 mod session;
+mod server;
 mod skills;
 mod task;
 mod tools;
