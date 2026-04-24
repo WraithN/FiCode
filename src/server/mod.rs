@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use crate::config::Config;
 use crate::provider::Provider;
 
+pub mod rpc;
 pub mod session;
 
 pub struct Server {
