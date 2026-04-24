@@ -6,6 +6,24 @@ pub struct Config {
     pub model: String,
     pub provider: HashMap<String, ProviderConfig>,
     pub mcp: Option<HashMap<String, McpServerConfig>>,
+    pub server: Option<ServerConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct ServerConfig {
+    pub port: Option<u16>,
+    pub api_token: Option<String>,
+    pub allowed_origins: Option<Vec<String>>,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            port: Some(4040),
+            api_token: None,
+            allowed_origins: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
