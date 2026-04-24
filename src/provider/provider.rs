@@ -99,6 +99,17 @@ impl Provider {
             .ok_or_else(|| anyhow!("Model not set"))
     }
 
+    /// 列出配置中所有可用模型（key, display_name）
+    pub fn list_models(&self, config: &Config) -> Vec<(String, String)> {
+        let mut models = Vec::new();
+        for (_provider_name, provider_cfg) in &config.provider {
+            for (key, model_cfg) in &provider_cfg.models {
+                models.push((key.clone(), model_cfg.name.clone()));
+            }
+        }
+        models
+    }
+
     pub fn get_client(&self) -> Result<Box<dyn AIClient>> {
         let model = self
             .model
