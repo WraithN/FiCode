@@ -4,6 +4,7 @@
 // 负责根据可用工具 schema 动态组装 System Prompt，让 Agent 明确自身能力边界。
 
 use crate::skills::SkillRegistry;
+use crate::utils::workspace::workspace_dir;
 
 const PROMPT_TEMPLATE: &str = r#"You are an autonomous coding assistant running in a terminal environment.
 
@@ -40,6 +41,18 @@ impl PromptBuilder {
     pub fn build(&self, tools_schema: &serde_json::Value, registry: &SkillRegistry) -> String {
         let tools_str = serde_json::to_string_pretty(tools_schema).unwrap_or_default();
         let mut prompt = PROMPT_TEMPLATE.replace("{tools_schema}", &tools_str);
+
+        // 自动注入 AGENTS.md（如果存在）
+        let workspace = workspace_dir();
+        let agents_md_path = workspace.join("AGENTS.md");
+        if agents_md_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&agents_md_path) {
+                if !content.trim().is_empty() {
+                    prompt.push_str("\n\n# Project Context (AGENTS.md)\n");
+                    prompt.push_str(&content);
+                }
+            }
+        }
 
         // 如果注册表非空，追加 Available Skills 段落
         if !registry.entries.is_empty() {
@@ -148,5 +161,53 @@ mod tests {
             !prompt.contains("## Available Skills"),
             "prompt should NOT contain '## Available Skills' when registry is empty"
         );
+    }
+
+    use std::io::Write;
+    use crate::utils::workspace::set_workspace;
+
+    #[test]
+    fn test_prompt_with_agents_md() {
+        let temp_dir = std::env::temp_dir().join("fi-code-test-agents-md");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let agents_path = temp_dir.join("AGENTS.md");
+        let mut file = std::fs::File::create(&agents_path).unwrap();
+        file.write_all(b"# Test Project\n\nThis is a test.").unwrap();
+
+        set_workspace(temp_dir.clone());
+
+        let builder = PromptBuilder::new();
+        let prompt = builder.build(&serde_json::json!([]), &crate::skills::SkillRegistry::new());
+
+        assert!(
+            prompt.contains("# Project Context (AGENTS.md)"),
+            "prompt should contain AGENTS.md header"
+        );
+        assert!(
+            prompt.contains("This is a test."),
+            "prompt should contain AGENTS.md content"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_prompt_without_agents_md() {
+        let temp_dir = std::env::temp_dir().join("fi-code-test-no-agents-md");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        set_workspace(temp_dir.clone());
+
+        let builder = PromptBuilder::new();
+        let prompt = builder.build(&serde_json::json!([]), &crate::skills::SkillRegistry::new());
+
+        assert!(
+            !prompt.contains("# Project Context (AGENTS.md)"),
+            "prompt should NOT contain AGENTS.md header when file missing"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
