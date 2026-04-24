@@ -10,9 +10,16 @@ pub enum SseEvent {
     #[serde(rename = "message")]
     Message { content: String },
     #[serde(rename = "tool_use")]
-    ToolUse { id: String, name: String, arguments: Value },
+    ToolUse {
+        id: String,
+        name: String,
+        arguments: Value,
+    },
     #[serde(rename = "tool_result")]
-    ToolResult { tool_use_id: String, content: String },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
     #[serde(rename = "error")]
     Error { message: String },
     #[serde(rename = "done")]

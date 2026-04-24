@@ -110,10 +110,7 @@ async fn handle_rpc_endpoint(
 }
 
 /// 认证检查
-async fn check_auth(
-    headers: &HeaderMap,
-    config: &Arc<RwLock<Config>>,
-) -> Option<JsonRpcResponse> {
+async fn check_auth(headers: &HeaderMap, config: &Arc<RwLock<Config>>) -> Option<JsonRpcResponse> {
     let cfg = config.read().ok()?;
     let server_cfg = cfg.server.as_ref()?;
     let expected_token = server_cfg.api_token.as_ref()?;
@@ -173,15 +170,19 @@ async fn handle_chat_endpoint(
     let (sse_sender, sse_stream) = create_sse_channel(128);
 
     // 在后台 task 中运行 agent_chat
-    tokio::spawn(run_agent_chat(state, session_id.clone(), req.message, sse_sender));
+    tokio::spawn(run_agent_chat(
+        state,
+        session_id.clone(),
+        req.message,
+        sse_sender,
+    ));
 
     // 返回 SSE 响应
     let stream = sse_stream.map(|event| {
         let data = serde_json::to_string(&event).unwrap_or_default();
         Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default().data(data))
     });
-    axum::response::Sse::new(stream)
-        .into_response()
+    axum::response::Sse::new(stream).into_response()
 }
 
 /// 后台运行 Agent 对话
@@ -214,15 +215,15 @@ async fn run_agent_chat(
 
     // 获取客户端（先读取并释放锁，避免 guard 跨越 await）
     let client_result = match state.provider.read() {
-        Ok(p) => p.get_client().map_err(|e| format!("Failed to create client: {}", e)),
+        Ok(p) => p
+            .get_client()
+            .map_err(|e| format!("Failed to create client: {}", e)),
         Err(_) => Err("Provider lock poisoned".to_string()),
     };
     let client = match client_result {
         Ok(c) => c,
         Err(msg) => {
-            let _ = sse_sender
-                .send(SseEvent::Error { message: msg })
-                .await;
+            let _ = sse_sender.send(SseEvent::Error { message: msg }).await;
             return;
         }
     };

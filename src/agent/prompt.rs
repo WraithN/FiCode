@@ -165,9 +165,14 @@ mod tests {
 
     use crate::utils::workspace::set_workspace;
     use std::io::Write;
+    use std::sync::Mutex;
+
+    // 用于串行化修改全局 workspace 的测试
+    static WORKSPACE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_prompt_with_agents_md() {
+        let _guard = WORKSPACE_TEST_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir().join("fi-code-test-agents-md");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -195,6 +200,7 @@ mod tests {
 
     #[test]
     fn test_prompt_without_agents_md() {
+        let _guard = WORKSPACE_TEST_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir().join("fi-code-test-no-agents-md");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();

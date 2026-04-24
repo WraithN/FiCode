@@ -80,7 +80,10 @@ async fn handle_execute(
     config: Arc<RwLock<Config>>,
 ) -> JsonRpcResponse {
     let id = params.as_ref().and_then(|p| p.get("id")).cloned();
-    let command = match params.and_then(|p| p.get("command").and_then(|v| v.as_str().map(|s| s.to_string()))) {
+    let command = match params.and_then(|p| {
+        p.get("command")
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    }) {
         Some(cmd) => cmd,
         None => return JsonRpcResponse::error(-32602, "Missing 'command' parameter", id),
     };
@@ -92,9 +95,10 @@ async fn handle_execute(
 
     let handler = crate::commands::slash::SlashCommandHandler::new(provider, config);
     match handler.execute(slash_cmd).await {
-        Ok(crate::commands::slash::SlashCommandResult::Handled) => {
-            JsonRpcResponse::success(serde_json::json!({ "success": true, "message": "Executed" }), id)
-        }
+        Ok(crate::commands::slash::SlashCommandResult::Handled) => JsonRpcResponse::success(
+            serde_json::json!({ "success": true, "message": "Executed" }),
+            id,
+        ),
         Ok(crate::commands::slash::SlashCommandResult::Passthrough(_)) => {
             JsonRpcResponse::error(-32602, "Not a command", id)
         }

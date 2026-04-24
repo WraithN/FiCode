@@ -63,7 +63,9 @@ pub async fn run() -> Result<()> {
         Some(Commands::Server { port }) => {
             let config = Arc::new(RwLock::new(Config::load()?));
             let provider = Arc::new(RwLock::new(Provider::new(Arc::clone(&config))?));
-            crate::server::Server::new(provider, config, port).run().await;
+            crate::server::Server::new(provider, config, port)
+                .run()
+                .await;
             return Ok(());
         }
         None => {
