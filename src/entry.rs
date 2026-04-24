@@ -60,11 +60,7 @@ async fn run_tui_mode() -> Result<()> {
     let provider = Arc::new(RwLock::new(Provider::new(Arc::clone(&config))?));
 
     // 启动 Server（后台任务）
-    let server = crate::server::Server::new(
-        Arc::clone(&provider),
-        Arc::clone(&config),
-        None,
-    );
+    let server = crate::server::Server::new(Arc::clone(&provider), Arc::clone(&config), None);
     let server_handle = tokio::spawn(async move {
         server.run().await;
     });
@@ -96,8 +92,7 @@ pub async fn run() -> Result<()> {
         }
         None => {
             // 检查是否有其他向后兼容的 flag
-            if args.interactive || args.cmd.is_some()
-                || args.session.is_some() || args.models {
+            if args.interactive || args.cmd.is_some() || args.session.is_some() || args.models {
                 // 继续原有 CLI 逻辑（什么都不做，继续往下执行）
             } else {
                 // 默认启动 TUI 模式

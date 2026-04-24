@@ -74,14 +74,16 @@ impl TuiApp {
         loop {
             terminal.draw(|frame| ui::draw(frame, self))?;
 
-            let timeout = tick_interval.saturating_sub(
-                std::time::Duration::from_millis(last_tick.elapsed().as_millis() as u64)
-            );
+            let timeout = tick_interval.saturating_sub(std::time::Duration::from_millis(
+                last_tick.elapsed().as_millis() as u64,
+            ));
 
             if crossterm::event::poll(timeout)? {
                 if let Event::Key(key) = event::read()? {
                     if key.kind == KeyEventKind::Press {
-                        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                        if key.code == KeyCode::Char('c')
+                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
                             break;
                         }
                         self.handle_key(key.code).await;
@@ -105,11 +107,17 @@ impl TuiApp {
     async fn handle_key(&mut self, code: KeyCode) {
         match code {
             KeyCode::Enter => self.on_submit().await,
-            KeyCode::Backspace => { self.input.pop(); self.update_dropdown(); }
+            KeyCode::Backspace => {
+                self.input.pop();
+                self.update_dropdown();
+            }
             KeyCode::Up => self.on_up(),
             KeyCode::Down => self.on_down(),
             KeyCode::Esc => self.show_dropdown = false,
-            KeyCode::Char(c) => { self.input.push(c); self.update_dropdown(); }
+            KeyCode::Char(c) => {
+                self.input.push(c);
+                self.update_dropdown();
+            }
             _ => {}
         }
     }
@@ -165,9 +173,9 @@ impl TuiApp {
 
         tokio::spawn(async move {
             let result = client.execute(&command).await;
-            let _ = tx.send(AppEvent::ExecuteComplete(
-                result.map_err(|e| e.to_string())
-            )).await;
+            let _ = tx
+                .send(AppEvent::ExecuteComplete(result.map_err(|e| e.to_string())))
+                .await;
         });
     }
 
@@ -190,9 +198,9 @@ impl TuiApp {
             let result = client.chat(session_id, message, sse_event_tx).await;
             let _ = forward_handle.await;
 
-            let _ = tx.send(AppEvent::ChatComplete(
-                result.map_err(|e| e.to_string())
-            )).await;
+            let _ = tx
+                .send(AppEvent::ChatComplete(result.map_err(|e| e.to_string())))
+                .await;
         });
     }
 

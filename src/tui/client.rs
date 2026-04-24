@@ -40,13 +40,8 @@ impl TuiClient {
             .await?;
 
         match resp.result {
-            Some(result) => Ok(result["message"]
-                .as_str()
-                .unwrap_or("OK")
-                .to_string()),
-            None => Err(anyhow!(
-                resp.error.map(|e| e.message).unwrap_or_default()
-            )),
+            Some(result) => Ok(result["message"].as_str().unwrap_or("OK").to_string()),
+            None => Err(anyhow!(resp.error.map(|e| e.message).unwrap_or_default())),
         }
     }
 
