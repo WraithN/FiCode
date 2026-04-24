@@ -1,1 +1,2 @@
-// Commands module (reserved for future expansion)
+pub mod slash;
+pub use slash::{parse, SlashCommand, SlashCommandHandler, SlashCommandResult};

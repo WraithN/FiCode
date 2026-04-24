@@ -1,8 +1,11 @@
-use anyhow::{anyhow, Context, Result};
-use colored::Colorize;
-use rustyline::DefaultEditor;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+
+use anyhow::{anyhow, Context, Result};
+use clap::Parser;
+use colored::Colorize;
+use rustyline::DefaultEditor;
 
 use crate::agent::{agent_loop, LoopState};
 use crate::config::Config;
@@ -14,8 +17,6 @@ use crate::task::{TaskManager, TaskPlan};
 use crate::tools::set_mcp_manager;
 use crate::utils::cli::Args;
 use crate::utils::workspace::set_workspace;
-use clap::Parser;
-
 use crate::{log_debug, log_info};
 
 const SUBAGENT_SYSTEM_PROMPT: &str = r#"你是一个专注于执行特定子任务的 AI 助手。
@@ -67,8 +68,8 @@ pub async fn run() -> Result<()> {
     // 设置工作目录：命令行参数 > 默认用户主目录
     let workspace = args
         .workspace
-        .clone()
-        .unwrap_or_else(|| dirs::home_dir().expect("无法获取用户主目录"));
+        .or_else(dirs::home_dir)
+        .context("无法获取用户主目录")?;
     if !workspace.exists() {
         std::fs::create_dir_all(&workspace)
             .with_context(|| format!("无法创建工作目录: {:?}", workspace))?;
@@ -225,6 +226,17 @@ async fn run_single_command(
     let client = provider.get_client()?;
     agent_loop(client.as_ref(), &mut state).await?;
 
+    handle_task_plan_and_save(provider, session_manager, sessions_dir, session, state, false).await
+}
+
+async fn handle_task_plan_and_save(
+    provider: Arc<Provider>,
+    session_manager: &SessionManager,
+    sessions_dir: &PathBuf,
+    session: &mut crate::session::Session,
+    mut state: LoopState,
+    interactive: bool,
+) -> Result<()> {
     if let Some(plan_json) = extract_task_plan_result(&state.messages) {
         let mut plan: TaskPlan = serde_json::from_str(&plan_json)
             .context("Failed to parse task plan from tool result")?;
@@ -295,6 +307,9 @@ async fn run_single_command(
                 println!("{}", text);
             }
         }
+        if interactive {
+            println!();
+        }
     }
     Ok(())
 }
@@ -336,78 +351,15 @@ async fn run_interactive(
                 let client = provider.get_client()?;
                 agent_loop(client.as_ref(), &mut state).await?;
 
-                if let Some(plan_json) = extract_task_plan_result(&state.messages) {
-                    let mut plan: TaskPlan = serde_json::from_str(&plan_json)
-                        .context("Failed to parse task plan from tool result")?;
-
-                    println!("\n📋 检测到任务计划，共 {} 个子任务", plan.tasks.len());
-                    print_task_plan(&plan);
-
-                    let provider_clone = provider.clone();
-                    let client_factory: Arc<dyn Fn() -> Box<dyn AIClient> + Send + Sync> =
-                        Arc::new(move || {
-                            provider_clone
-                                .get_client()
-                                .expect("Failed to create subagent client")
-                        });
-
-                    let subagent_schema = crate::tools::subagent_tool_schema().await;
-                    let task_manager = TaskManager::new(
-                        client_factory,
-                        SUBAGENT_SYSTEM_PROMPT.to_string(),
-                        subagent_schema,
-                    );
-
-                    let mut on_progress = |plan: &TaskPlan| {
-                        print_task_plan(plan);
-                    };
-
-                    let summaries = task_manager
-                        .execute_plan(&mut plan, &mut on_progress)
-                        .await?;
-
-                    let mut summary_text = "所有子任务已完成，结果汇总如下：\n\n".to_string();
-                    for (idx, summary) in summaries.iter().enumerate() {
-                        let task_name = &plan.tasks[idx].name;
-                        summary_text.push_str(&format!(
-                            "[任务 {}: {}]\n{}\n\n",
-                            idx + 1,
-                            task_name,
-                            summary.result
-                        ));
-                    }
-
-                    state.messages.push(Message::new(
-                        session.id.clone(),
-                        Role::User,
-                        vec![Part::Text { text: summary_text }],
-                    ));
-
-                    let client = provider.get_client()?;
-                    agent_loop(client.as_ref(), &mut state).await?;
-                }
-
-                session.messages = state.messages;
-
-                if let Err(e) = tokio::task::spawn_blocking({
-                    let sm = SessionManager::new(sessions_dir.clone());
-                    let s = session.clone();
-                    move || sm.save_session(&s)
-                })
-                .await?
-                {
-                    eprintln!("Warning: failed to save session: {}", e);
-                }
-
-                if let Some(last_msg) = session.messages.last() {
-                    if last_msg.role == Role::Assistant {
-                        let text = crate::provider::extract_text(&last_msg.parts);
-                        if !text.is_empty() {
-                            println!("{}", text);
-                        }
-                    }
-                    println!();
-                }
+                handle_task_plan_and_save(
+                    Arc::clone(&provider),
+                    session_manager,
+                    sessions_dir,
+                    &mut session,
+                    state,
+                    true,
+                )
+                .await?;
             }
             Err(rustyline::error::ReadlineError::Interrupted)
             | Err(rustyline::error::ReadlineError::Eof) => break,
@@ -447,7 +399,6 @@ async fn choose_or_create_session(
     println!("  [0] Create new session");
     println!();
     print!("Select session [1]: ");
-    use std::io::Write;
     std::io::stdout().flush()?;
 
     let mut input = String::new();
