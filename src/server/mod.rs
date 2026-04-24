@@ -5,6 +5,7 @@ use crate::provider::Provider;
 
 pub mod rpc;
 pub mod session;
+pub mod sse;
 
 pub struct Server {
     provider: Arc<RwLock<Provider>>,
