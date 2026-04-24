@@ -12,6 +12,7 @@ mod session;
 mod skills;
 mod task;
 mod tools;
+mod tui;
 mod utils;
 
 #[tokio::main]
