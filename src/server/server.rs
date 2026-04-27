@@ -4,7 +4,7 @@ use axum::{
     extract::State,
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use serde::Deserialize;
@@ -19,6 +19,7 @@ use crate::session::message::{Message, Part, Role};
 
 use super::rpc::{handle_rpc, JsonRpcRequest, JsonRpcResponse};
 use super::session::HttpSessionManager;
+use super::session_api;
 use super::sse::{create_sse_channel, format_sse_event, SseEvent, SseSender};
 
 /// 服务器共享状态
@@ -62,6 +63,18 @@ impl Server {
         let app = Router::new()
             .route("/rpc", post(handle_rpc_endpoint))
             .route("/chat", post(handle_chat_endpoint))
+            .route(
+                "/api/sessions",
+                get(session_api::list_sessions).post(session_api::create_session),
+            )
+            .route(
+                "/api/sessions/:id",
+                put(session_api::rename_session).delete(session_api::delete_session),
+            )
+            .route(
+                "/api/sessions/:id/switch",
+                post(session_api::switch_session),
+            )
             .layer(cors_layer(self.state.config.clone()))
             .with_state(self.state.clone());
 
