@@ -1,5 +1,6 @@
 pub mod app;
 pub mod client;
+pub mod theme;
 pub mod ui;
 
 use app::TuiApp;
