@@ -1,3 +1,24 @@
+// MIT License
+// Copyright (c) 2025 fi-code contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::{
     layout::{Alignment, Rect},
@@ -71,6 +92,15 @@ impl Header {
         self.dropdown_selected = 0;
     }
 
+    pub fn close_dropdowns(&mut self) {
+        self.model_dropdown_open = false;
+        self.theme_dropdown_open = false;
+    }
+
+    pub fn has_dropdown_open(&self) -> bool {
+        self.model_dropdown_open || self.theme_dropdown_open
+    }
+
     pub fn on_tick(&mut self) {}
 
     pub fn set_status(&mut self, status: HeaderStatus) {
@@ -79,7 +109,7 @@ impl Header {
 }
 
 impl Component for Header {
-    fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+    fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, _is_focused: bool) {
         let block = Block::default()
             .borders(Borders::BOTTOM)
             .border_style(Style::default().fg(theme.border))

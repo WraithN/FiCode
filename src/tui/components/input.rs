@@ -1,3 +1,24 @@
+// MIT License
+// Copyright (c) 2025 fi-code contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::Rect,
@@ -22,6 +43,7 @@ pub struct Input {
     dropdown_visible: bool,
     dropdown_items: Vec<SlashCommand>,
     dropdown_selected: usize,
+    session_id: Option<String>,
 }
 
 impl Input {
@@ -49,12 +71,16 @@ impl Input {
                 },
             ],
             dropdown_selected: 0,
+            session_id: None,
         }
     }
 
+    pub fn set_session_id(&mut self, id: Option<String>) {
+        self.session_id = id;
+    }
+
     pub fn visible_lines(&self) -> u16 {
-        let line_count = self.content.lines().count() as u16;
-        line_count.clamp(1, 5)
+        2  // 固定 2 行高度
     }
 
     fn insert_char(&mut self, c: char) {
@@ -85,15 +111,32 @@ impl Input {
 }
 
 impl Component for Input {
-    fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+    fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_focused: bool) {
+        // 在输入框上方显示会话 ID
+        let mut y_offset = 0u16;
+        if let Some(ref id) = self.session_id {
+            let session_label = format!("--[Session: {}]---", id);
+            let label_rect = Rect::new(area.x, area.y, area.width, 1);
+            let label = Paragraph::new(session_label)
+                .style(theme.style_muted());
+            frame.render_widget(label, label_rect);
+            y_offset = 1;
+        }
+
         let placeholder = if self.content.is_empty() {
             "Type your message, or paste code..."
         } else {
             ""
         };
 
+        let border_type = if is_focused {
+            ratatui::widgets::BorderType::Double
+        } else {
+            ratatui::widgets::BorderType::Plain
+        };
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(border_type)
             .border_style(Style::default().fg(theme.border))
             .style(theme.input_style());
 
@@ -112,6 +155,15 @@ impl Component for Input {
                 .style(theme.style_primary().bg(theme.bg_surface));
             frame.render_widget(text, inner);
         }
+
+        // 设置闪烁光标位置（支持多行）
+        let text_before_cursor = &self.content[..self.cursor_position];
+        let lines: Vec<&str> = text_before_cursor.split('\n').collect();
+        let cursor_row = lines.len().saturating_sub(1) as u16;
+        let cursor_col = lines.last().unwrap_or(&"").chars().count() as u16;
+        let cursor_x = inner.x + cursor_col;
+        let cursor_y = inner.y + cursor_row;
+        frame.set_cursor_position((cursor_x, cursor_y));
 
         if self.dropdown_visible && !self.dropdown_items.is_empty() {
             self.draw_dropdown(frame, area, theme);

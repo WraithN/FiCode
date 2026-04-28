@@ -1,3 +1,24 @@
+// MIT License
+// Copyright (c) 2025 fi-code contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,8 +67,10 @@ impl TuiApp {
             Arc::new(Theme::github_dark()),
         ];
 
+        let (term_w, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
+
         Self {
-            layout: LayoutManager::new(80, 24),
+            layout: LayoutManager::new(term_w, term_h),
             theme: themes[0].clone(),
             themes,
             theme_index: 0,
@@ -57,7 +80,7 @@ impl TuiApp {
             chat: Chat::new(),
             input: Input::new(),
             status_bar: StatusBar::new(),
-            focus: FocusArea::Main,
+            focus: FocusArea::Input,
             is_generating: false,
             should_quit: false,
             client: TuiClient::new(),
@@ -85,7 +108,14 @@ impl TuiApp {
                 }
                 result = Self::read_crossterm_event() => {
                     if let Ok(event) = result {
-                        self.route_event(event).await;
+                        match &event {
+                            Event::Resize(w, h) => {
+                                self.handle_app_event(AppEvent::Resize(*w, *h)).await;
+                            }
+                            _ => {
+                                self.route_event(event).await;
+                            }
+                        }
                     }
                 }
             }
@@ -106,14 +136,18 @@ impl TuiApp {
     }
 
     fn draw(&mut self, frame: &mut ratatui::Frame) {
+        let area = frame.area();
+        self.layout.resize(area.width, area.height);
         let areas = self.layout.calculate();
         let input_lines = self.input.visible_lines();
-        let (messages_area, input_area) = LayoutManager::split_main(areas.main, input_lines);
+        // 如果有会话 ID，给输入框额外加一行显示
+        let input_extra = if self.header.session_id().is_some() { 1 } else { 0 };
+        let (messages_area, input_area) = LayoutManager::split_main(areas.main, input_lines + input_extra);
 
-        self.header.draw(frame, areas.header, &self.theme);
-        self.chat.draw(frame, messages_area, &self.theme);
-        self.input.draw(frame, input_area, &self.theme);
-        self.status_bar.draw(frame, areas.status_bar, &self.theme);
+        self.header.draw(frame, areas.header, &self.theme, self.focus == FocusArea::Header);
+        self.chat.draw(frame, messages_area, &self.theme, self.focus == FocusArea::Main);
+        self.input.draw(frame, input_area, &self.theme, self.focus == FocusArea::Input);
+        self.status_bar.draw(frame, areas.status_bar, &self.theme, false);
 
         if let Some(overlay_area) = areas.overlay {
             let dim = ratatui::widgets::Block::default()
@@ -122,19 +156,19 @@ impl TuiApp {
 
             match self.layout.panel {
                 PanelState::LeftDrawer => {
-                    self.left_drawer.draw(frame, overlay_area, &self.theme);
+                    self.left_drawer.draw(frame, overlay_area, &self.theme, self.focus == FocusArea::LeftDrawer);
                 }
                 PanelState::RightDrawer => {
-                    self.right_drawer.draw(frame, overlay_area, &self.theme);
+                    self.right_drawer.draw(frame, overlay_area, &self.theme, self.focus == FocusArea::RightDrawer);
                 }
                 _ => {}
             }
         } else {
             if let Some(area) = areas.left_drawer {
-                self.left_drawer.draw(frame, area, &self.theme);
+                self.left_drawer.draw(frame, area, &self.theme, self.focus == FocusArea::LeftDrawer);
             }
             if let Some(area) = areas.right_drawer {
-                self.right_drawer.draw(frame, area, &self.theme);
+                self.right_drawer.draw(frame, area, &self.theme, self.focus == FocusArea::RightDrawer);
             }
         }
     }
@@ -144,52 +178,124 @@ impl TuiApp {
         self.theme = self.themes[self.theme_index].clone();
     }
 
+    fn cycle_focus(&mut self, forward: bool) {
+        let areas = match self.layout.panel {
+            PanelState::None => vec![
+                FocusArea::Main,
+                FocusArea::Input,
+            ],
+            PanelState::LeftDrawer => vec![
+                FocusArea::LeftDrawer,
+                FocusArea::Main,
+                FocusArea::Input,
+            ],
+            PanelState::RightDrawer => vec![
+                FocusArea::Main,
+                FocusArea::Input,
+                FocusArea::RightDrawer,
+            ],
+        };
+
+        let current_idx = areas.iter().position(|a| a == &self.focus).unwrap_or(0);
+        let next_idx = if forward {
+            (current_idx + 1) % areas.len()
+        } else {
+            (current_idx + areas.len() - 1) % areas.len()
+        };
+
+        self.focus = areas[next_idx];
+    }
+
     async fn route_event(&mut self, event: Event) {
         if let Event::Key(key) = event {
             if key.kind != KeyEventKind::Press {
                 return;
             }
 
-            match (key.modifiers, key.code) {
-                (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                    if self.is_generating {
-                        self.handle_app_event(AppEvent::StopGeneration).await;
+            // === 全局 Ctrl+字母快捷键 ===
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                if let KeyCode::Char(c) = key.code {
+                    // 将控制字符（如 \x14）转换回字母（如 't'）
+                    let lower = if c.is_ascii_control() {
+                        (c as u8 + b'a' - 1) as char
                     } else {
-                        self.should_quit = true;
+                        c.to_ascii_lowercase()
+                    };
+
+                    match lower {
+                        'c' => {
+                            if self.is_generating {
+                                self.handle_app_event(AppEvent::StopGeneration).await;
+                            } else {
+                                self.should_quit = true;
+                            }
+                            return;
+                        }
+                        'b' => {
+                            self.handle_app_event(AppEvent::ToggleLeftDrawer).await;
+                            self.focus = FocusArea::LeftDrawer;
+                            return;
+                        }
+                        'h' => {
+                            self.handle_app_event(AppEvent::ToggleRightDrawer).await;
+                            self.focus = FocusArea::RightDrawer;
+                            return;
+                        }
+                        'm' => {
+                            self.header.toggle_model_dropdown();
+                            self.focus = FocusArea::Header;
+                            return;
+                        }
+                        't' => {
+                            self.next_theme();
+                            return;
+                        }
+                        'n' => {
+                            self.header.toggle_model_dropdown();
+                            self.focus = FocusArea::Header;
+                            return;
+                        }
+                        _ => {}
                     }
-                    return;
                 }
-                (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
-                    self.handle_app_event(AppEvent::ToggleLeftDrawer).await;
-                    self.focus = FocusArea::LeftDrawer;
-                    return;
+            }
+
+            // === Tab / Shift+Tab 焦点切换 ===
+            if key.code == KeyCode::Tab && !key.modifiers.contains(KeyModifiers::CONTROL) {
+                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    self.cycle_focus(false);
+                } else {
+                    self.cycle_focus(true);
                 }
-                (KeyModifiers::CONTROL, KeyCode::Char('h')) => {
-                    self.handle_app_event(AppEvent::ToggleRightDrawer).await;
-                    self.focus = FocusArea::RightDrawer;
-                    return;
+                return;
+            }
+
+            // === Esc ===
+            if key.code == KeyCode::Esc && key.modifiers.is_empty() {
+                if self.layout.panel != PanelState::None {
+                    self.layout.close_drawers();
+                } else if self.header.has_dropdown_open() {
+                    self.header.close_dropdowns();
+                } else {
+                    self.focus = FocusArea::Main;
                 }
-                (KeyModifiers::CONTROL, KeyCode::Char('m')) => {
-                    self.header.toggle_model_dropdown();
-                    self.focus = FocusArea::Header;
-                    return;
-                }
-                (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
-                    self.next_theme();
-                    return;
-                }
-                (KeyModifiers::NONE, KeyCode::Esc) => {
-                    if self.layout.panel != PanelState::None {
-                        self.layout.close_drawers();
-                    } else {
-                        self.focus = FocusArea::Main;
-                    }
-                    return;
-                }
-                _ => {}
+                return;
             }
         }
 
+        // 如果焦点在 Main，按下普通字符/Enter/Backspace 时自动切换到 Input
+        if self.focus == FocusArea::Main {
+            if let Event::Key(key) = &event {
+                if key.kind == KeyEventKind::Press
+                    && key.modifiers.is_empty()
+                    && matches!(key.code, KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace)
+                {
+                    self.focus = FocusArea::Input;
+                }
+            }
+        }
+
+        // 分发事件到当前焦点组件
         let app_event = match self.focus {
             FocusArea::Header => self.header.handle_event(&event, true),
             FocusArea::LeftDrawer => self.left_drawer.handle_event(&event, true),
@@ -221,6 +327,7 @@ impl TuiApp {
                 self.chat.handle_sse_event(sse_event);
                 if let SseEvent::Done { session_id } = sse_event {
                     self.header.set_session_id(session_id.clone());
+                    self.input.set_session_id(Some(session_id.clone()));
                 }
             }
             AppEvent::ChatComplete => {
