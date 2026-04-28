@@ -203,6 +203,7 @@ cargo clippy
 4. **模块导出**：每个模块的 `mod.rs` 负责声明子模块并重新导出（`pub use`）常用类型，减少外部调用时的路径层级。
 5. **全局单例**：工具注册表使用 `std::sync::LazyLock` 实现懒加载单例，并通过 `init_tools()` 显式触发初始化。
 6. **Schema 生成**：工具的 JSON Schema 完全由 `ToolsRegistry` 动态生成，新增工具时只需在 `src/tools/mod.rs` 的 `REGISTRY` 初始化闭包中注册，无需手动维护 schema 代码。
+7. **许可证头**：**每次新建 `.rs` 源文件时，必须在文件最顶部写入 MIT 许可证头**。禁止遗漏。已有文件如未包含许可证头，应在修改时补齐。MIT 许可证头模板见第 10 节。
 
 ---
 
@@ -245,3 +246,33 @@ cargo clippy
 - [ ] `Cargo.toml` 或环境变量相关变更需在本文对应章节同步更新。
 - [ ] 新增或修改配置模块功能时，同步更新本文第 4.1 节（配置方式）的示例和说明。
 - [ ] 配置文件格式变更时，同步更新设计文档 `docs/superpowers/specs/` 中的相关 spec。
+- [ ] **新建任何 `.rs` 文件时，必须在文件顶部写入 MIT 许可证头**（模板见第 10 节）。
+
+---
+
+## 10. MIT 许可证头模板
+
+所有新建或修改的 Rust 源文件（`.rs`）均须在文件最顶部粘贴以下许可证头：
+
+```rust
+// MIT License
+// Copyright (c) 2025 fi-code contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+```
