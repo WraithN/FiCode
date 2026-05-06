@@ -21,6 +21,22 @@
 
 use crate::server::sse::SseEvent;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Info,
+    Debug,
+    Trace,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogLine {
+    pub timestamp: String,
+    pub level: LogLevel,
+    pub module: String,
+    pub message: String,
+}
+
 /// 应用级事件枚举，涵盖用户交互、网络回调、界面控制等所有异步信号。
 ///
 /// 设计意图：将终端输入（`crossterm::Event`）与业务事件解耦，
@@ -68,6 +84,10 @@ pub enum AppEvent {
     ShowSystemMessage(String),
     LoadThemes,
     SetThemes(Vec<crate::theme::ThemePreset>),
+    ToggleLogWindow,
+    SetLogHistory(Vec<LogLine>),
+    AppendLog(LogLine),
+    LogDisconnected,
     Quit,
 }
 
