@@ -33,9 +33,12 @@ use crate::tui::event::AppEvent;
 use crate::tui::layout::PanelState;
 use crate::tui::theme::Theme;
 
+/// 底部状态栏组件，始终显示快捷键提示与当前生成状态。
+///
+/// 该组件不可聚焦，仅作为信息展示。
 pub struct StatusBar {
-    is_generating: bool,
-    panel: PanelState,
+    is_generating: bool, // 是否正在生成回复（控制是否显示 Stop 提示）
+    panel: PanelState,   // 当前面板状态（控制 Files/History 按钮显示文字）
 }
 
 impl StatusBar {
@@ -46,16 +49,20 @@ impl StatusBar {
         }
     }
 
+    /// 更新生成状态。
     pub fn set_generating(&mut self, generating: bool) {
         self.is_generating = generating;
     }
 
+    /// 更新面板状态。
     pub fn set_panel(&mut self, panel: PanelState) {
         self.panel = panel;
     }
 }
 
 impl Component for StatusBar {
+    /// 渲染状态栏：左侧显示常用快捷键（Files、History、Model、Theme、New），
+    /// 若正在生成则追加红色的 `[Ctrl+C] Stop` 提示。
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, _is_focused: bool) {
         let mut spans = vec![];
 
@@ -94,10 +101,12 @@ impl Component for StatusBar {
         frame.render_widget(paragraph, area);
     }
 
+    /// 状态栏不处理任何事件。
     fn handle_event(&mut self, _event: &Event, _focus: bool) -> Option<AppEvent> {
         None
     }
 
+    /// 状态栏不可聚焦。
     fn is_focusable(&self) -> bool {
         false
     }

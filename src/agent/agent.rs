@@ -129,6 +129,26 @@ fn process_chunk(
     }
 }
 
+/// 收集所有需要两步发现的 MCP 工具的 schema 文本。
+async fn collect_mcp_schema_texts(content_blocks: &[Part]) -> Vec<String> {
+    let mut schema_texts = Vec::new();
+    for part in content_blocks {
+        let Part::ToolUse { name, .. } = part else { continue };
+        if !name.starts_with("mcp:") {
+            continue;
+        }
+        let Some(mcp) = crate::tools::get_mcp_manager() else { continue };
+        let Some(schema) = mcp.tool_schema(name).await else { continue };
+        let Some(input_schema) = schema.input_schema else { continue };
+        schema_texts.push(format!(
+            "工具 `{}` 的完整参数格式：\n```json\n{}\n```",
+            name,
+            serde_json::to_string_pretty(&input_schema).unwrap_or_default()
+        ));
+    }
+    schema_texts
+}
+
 pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopState) -> Result<bool> {
     let mut content_blocks = Vec::new();
     let mut finish_reason = None;
@@ -241,24 +261,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
     });
 
     if needs_two_step {
-        let mut schema_texts = Vec::new();
-        for part in &content_blocks {
-            if let Part::ToolUse { name, .. } = part {
-                if name.starts_with("mcp:") {
-                    if let Some(mcp) = crate::tools::get_mcp_manager() {
-                        if let Some(schema) = mcp.tool_schema(name).await {
-                            if let Some(input_schema) = schema.input_schema {
-                                schema_texts.push(format!(
-                                    "工具 `{}` 的完整参数格式：\n```json\n{}\n```",
-                                    name,
-                                    serde_json::to_string_pretty(&input_schema).unwrap_or_default()
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let schema_texts = collect_mcp_schema_texts(&content_blocks).await;
 
         if !schema_texts.is_empty() {
             state.messages.push(Message::new(

@@ -241,6 +241,30 @@ impl BasicTool {
         }
     }
 
+    fn grep_file(
+        path: &std::path::Path,
+        re: &regex::Regex,
+        matches: &mut Vec<String>,
+    ) -> Result<(), String> {
+        let Ok(content) = std::fs::read_to_string(path) else { return Ok(()); };
+        let relative = path
+            .strip_prefix(&workspace_dir())
+            .unwrap_or(path)
+            .display()
+            .to_string();
+        for (line_num, line) in content.lines().enumerate() {
+            if !re.is_match(line) {
+                continue;
+            }
+            matches.push(format!("{}:{}: {}", relative, line_num + 1, line));
+            if matches.len() >= 500 {
+                matches.push("... (too many matches)".to_string());
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
     fn grep_recursive(
         dir: &std::path::Path,
         re: &regex::Regex,
@@ -252,23 +276,7 @@ impl BasicTool {
             if path.is_dir() {
                 Self::grep_recursive(&path, re, matches)?;
             } else if path.is_file() {
-                // 忽略二进制文件：read_to_string 失败就跳过
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    let relative = path
-                        .strip_prefix(&workspace_dir())
-                        .unwrap_or(&path)
-                        .display()
-                        .to_string();
-                    for (line_num, line) in content.lines().enumerate() {
-                        if re.is_match(line) {
-                            matches.push(format!("{}:{}: {}", relative, line_num + 1, line));
-                            if matches.len() >= 500 {
-                                matches.push("... (too many matches)".to_string());
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
+                Self::grep_file(&path, re, matches)?;
             }
         }
         Ok(())

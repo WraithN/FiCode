@@ -182,6 +182,30 @@ fn compute_backoff(attempt: u32, base: Duration, max: Duration) -> Duration {
 /// - `request` 必须支持 `try_clone()`。对于基于 `String` / `Bytes` 的 JSON body，
 ///   reqwest 通常可以成功克隆；若 body 是不可克隆的流，则会在首次重试时返回错误。
 /// - 对于非成功但不可重试的 HTTP 响应，直接原样返回，由调用方处理错误 body。
+async fn do_retry_backoff(
+    attempt: u32,
+    config: &RetryConfig,
+    context: &str,
+    detail: &str,
+) {
+    let backoff = compute_backoff(attempt, config.base_delay, config.max_delay);
+    log_trace!(
+        "send_with_retry | attempt={} | {} | backoff={:?}",
+        attempt + 1,
+        context,
+        backoff
+    );
+    eprintln!(
+        "[retry] {} (attempt {}/{}), retry in {:?}: {}",
+        context,
+        attempt + 1,
+        config.max_retries,
+        backoff,
+        detail
+    );
+    tokio::time::sleep(backoff).await;
+}
+
 pub async fn send_with_retry(
     client: &reqwest::Client,
     request: reqwest::Request,
@@ -194,60 +218,28 @@ pub async fn send_with_retry(
             .try_clone()
             .ok_or_else(|| anyhow::anyhow!("Request body is not cloneable, cannot retry"))?;
 
-        match client.execute(req).await {
-            Ok(resp) => {
-                let status = resp.status();
-
-                if status.is_success() {
-                    return Ok(resp);
-                }
-
-                if is_retryable_status(status) && attempt < config.max_retries {
-                    let text = resp.text().await.unwrap_or_default();
-                    let backoff = compute_backoff(attempt, config.base_delay, config.max_delay);
-                    log_trace!(
-                        "send_with_retry | attempt={} | status={} | backoff={:?}",
-                        attempt + 1,
-                        status,
-                        backoff
-                    );
-                    eprintln!(
-                        "[retry] HTTP {} (attempt {}/{}), retry in {:?}: {}",
-                        status,
-                        attempt + 1,
-                        config.max_retries,
-                        backoff,
-                        text
-                    );
-                    tokio::time::sleep(backoff).await;
-                    attempt += 1;
-                    continue;
-                }
-
-                return Ok(resp);
-            }
+        let resp = match client.execute(req).await {
+            Ok(r) => r,
             Err(err) => {
                 if !is_retryable_error(&err) || attempt >= config.max_retries {
                     return Err(err.into());
                 }
-                let backoff = compute_backoff(attempt, config.base_delay, config.max_delay);
-                log_trace!(
-                    "send_with_retry | attempt={} | error={} | backoff={:?}",
-                    attempt + 1,
-                    err,
-                    backoff
-                );
-                eprintln!(
-                    "[retry] network error (attempt {}/{}), retry in {:?}: {}",
-                    attempt + 1,
-                    config.max_retries,
-                    backoff,
-                    err
-                );
-                tokio::time::sleep(backoff).await;
+                do_retry_backoff(attempt, config, "network error", &err.to_string()).await;
                 attempt += 1;
+                continue;
             }
+        };
+
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(resp);
         }
+        if !is_retryable_status(status) || attempt >= config.max_retries {
+            return Ok(resp);
+        }
+        let text = resp.text().await.unwrap_or_default();
+        do_retry_backoff(attempt, config, &format!("HTTP {}", status), &text).await;
+        attempt += 1;
     }
 }
 

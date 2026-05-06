@@ -132,6 +132,123 @@ impl AIClient for OpenAiClient {
 /// - `delta.tool_calls` 存在 => 在内存中累积每个 index 的 (id, name, arguments)
 /// - `finish_reason` 存在 => 若因 tool_calls 结束，先将所有拼好的 tool_use 回传，
 ///   最后统一回传 `ChunkContent::Finish`
+fn update_openai_tool_call_delta(
+    tool: &serde_json::Value,
+    index_to_tool: &mut std::collections::HashMap<usize, (Option<String>, Option<String>, String)>,
+) {
+    let index = tool.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let id = tool
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let name = tool
+        .get("function")
+        .and_then(|f| f.get("name"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let args = tool
+        .get("function")
+        .and_then(|f| f.get("arguments"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    log_trace!(
+        "OpenAI SSE tool_call_delta | index={} | id={:?} | name={:?} | args={}",
+        index,
+        id,
+        name,
+        args
+    );
+
+    let entry = index_to_tool.entry(index).or_insert((None, None, String::new()));
+    if let Some(id) = id {
+        entry.0 = Some(id);
+    }
+    if let Some(name) = name {
+        entry.1 = Some(name);
+    }
+    entry.2.push_str(&args);
+}
+
+fn flush_openai_tool_calls(
+    index_to_tool: &mut std::collections::HashMap<usize, (Option<String>, Option<String>, String)>,
+    on_chunk: &mut dyn FnMut(Chunk),
+) {
+    let mut indices: Vec<usize> = index_to_tool.keys().cloned().collect();
+    indices.sort();
+    for idx in indices {
+        let Some((Some(id), Some(name), args)) = index_to_tool.remove(&idx) else { continue };
+        let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
+        log_debug!(
+            "OpenAI assembled tool_call | id={} | name={} | args={}",
+            id,
+            name,
+            arguments
+        );
+        on_chunk(Chunk {
+            content: ChunkContent::ToolUse(Part::ToolUse {
+                id,
+                name,
+                arguments,
+            }),
+        });
+    }
+}
+
+fn handle_openai_delta(
+    delta: &serde_json::Value,
+    index_to_tool: &mut std::collections::HashMap<usize, (Option<String>, Option<String>, String)>,
+    on_chunk: &mut dyn FnMut(Chunk),
+) {
+    if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
+        if !text.is_empty() {
+            log_trace!(
+                "OpenAI SSE text_delta | len={} | preview={}",
+                text.len(),
+                text.chars().take(80).collect::<String>()
+            );
+            on_chunk(Chunk {
+                content: ChunkContent::Text(text.to_string()),
+            });
+        }
+    }
+    if let Some(tools) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+        for tool in tools {
+            update_openai_tool_call_delta(tool, index_to_tool);
+        }
+    }
+}
+
+fn handle_openai_finish(
+    finish: &str,
+    index_to_tool: &mut std::collections::HashMap<usize, (Option<String>, Option<String>, String)>,
+    on_chunk: &mut dyn FnMut(Chunk),
+) {
+    if finish == "tool_calls" {
+        flush_openai_tool_calls(index_to_tool, on_chunk);
+    }
+    let reason = FinishReason::from_openai(finish);
+    log_debug!("OpenAI finish_reason={:?}", reason);
+    on_chunk(Chunk {
+        content: ChunkContent::Finish(reason),
+    });
+}
+
+fn process_openai_choice(
+    choice: &serde_json::Value,
+    index_to_tool: &mut std::collections::HashMap<usize, (Option<String>, Option<String>, String)>,
+    on_chunk: &mut dyn FnMut(Chunk),
+) {
+    let finish_reason = choice.get("finish_reason").and_then(|v| v.as_str());
+    if let Some(delta) = choice.get("delta") {
+        handle_openai_delta(delta, index_to_tool, on_chunk);
+    }
+    if let Some(finish) = finish_reason {
+        handle_openai_finish(finish, index_to_tool, on_chunk);
+    }
+}
+
 async fn parse_openai_sse<S>(byte_stream: S, on_chunk: &mut (dyn FnMut(Chunk) + Send)) -> Result<()>
 where
     S: Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send + 'static,
@@ -152,121 +269,27 @@ where
             let line = buffer.drain(..=pos).collect::<String>();
             let line = line.trim_end();
 
-            if line.starts_with("data:") {
-                let data = line[5..].trim();
-                if data == "[DONE]" {
-                    log_debug!("OpenAI SSE [DONE]");
-                    continue;
-                }
+            if !line.starts_with("data:") {
+                continue;
+            }
 
-                log_trace!(
-                    "OpenAI SSE raw | {}",
-                    data.chars().take(300).collect::<String>()
-                );
+            let data = line[5..].trim();
+            if data == "[DONE]" {
+                log_debug!("OpenAI SSE [DONE]");
+                continue;
+            }
 
-                let json: serde_json::Value = serde_json::from_str(data)
-                    .with_context(|| format!("Failed to parse OpenAI SSE data: {}", data))?;
+            log_trace!(
+                "OpenAI SSE raw | {}",
+                data.chars().take(300).collect::<String>()
+            );
 
-                // OpenAI 的 choices 数组通常只有一个元素
-                if let Some(choices) = json.get("choices").and_then(|v| v.as_array()) {
-                    for choice in choices {
-                        let finish_reason = choice.get("finish_reason").and_then(|v| v.as_str());
+            let json: serde_json::Value = serde_json::from_str(data)
+                .with_context(|| format!("Failed to parse OpenAI SSE data: {}", data))?;
 
-                        if let Some(delta) = choice.get("delta") {
-                            // 文本增量：直接回传
-                            if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
-                                if !text.is_empty() {
-                                    log_trace!(
-                                        "OpenAI SSE text_delta | len={} | preview={}",
-                                        text.len(),
-                                        text.chars().take(80).collect::<String>()
-                                    );
-                                    on_chunk(Chunk {
-                                        content: ChunkContent::Text(text.to_string()),
-                                    });
-                                }
-                            }
-
-                            // 工具调用增量：仅更新内存状态，暂不回传
-                            if let Some(tools) = delta.get("tool_calls").and_then(|v| v.as_array())
-                            {
-                                for tool in tools {
-                                    let index =
-                                        tool.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
-                                            as usize;
-                                    let id = tool
-                                        .get("id")
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| s.to_string());
-                                    let name = tool
-                                        .get("function")
-                                        .and_then(|f| f.get("name"))
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| s.to_string());
-                                    let args = tool
-                                        .get("function")
-                                        .and_then(|f| f.get("arguments"))
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-
-                                    log_trace!(
-                                        "OpenAI SSE tool_call_delta | index={} | id={:?} | name={:?} | args={}",
-                                        index, id, name, args
-                                    );
-
-                                    let entry = index_to_tool.entry(index).or_insert((
-                                        None,
-                                        None,
-                                        String::new(),
-                                    ));
-                                    if let Some(id) = id {
-                                        entry.0 = Some(id);
-                                    }
-                                    if let Some(name) = name {
-                                        entry.1 = Some(name);
-                                    }
-                                    entry.2.push_str(&args);
-                                }
-                            }
-                        }
-
-                        // 当收到 finish_reason 时，说明所有增量已结束
-                        if let Some(finish) = finish_reason {
-                            // 若因工具调用结束，先将拼好的完整 tool_use 回传
-                            if finish == "tool_calls" {
-                                let mut indices: Vec<usize> =
-                                    index_to_tool.keys().cloned().collect();
-                                indices.sort();
-                                for idx in indices {
-                                    if let Some((Some(id), Some(name), args)) =
-                                        index_to_tool.remove(&idx)
-                                    {
-                                        let arguments =
-                                            serde_json::from_str(&args).unwrap_or(json!({}));
-                                        log_debug!(
-                                            "OpenAI assembled tool_call | id={} | name={} | args={}",
-                                            id, name, arguments
-                                        );
-                                        on_chunk(Chunk {
-                                            content: ChunkContent::ToolUse(Part::ToolUse {
-                                                id,
-                                                name,
-                                                arguments,
-                                            }),
-                                        });
-                                    }
-                                }
-                            }
-
-                            let reason = FinishReason::from_openai(finish);
-                            log_debug!("OpenAI finish_reason={:?}", reason);
-                            on_chunk(Chunk {
-                                content: ChunkContent::Finish(reason),
-                            });
-                        }
-                    }
-                }
+            let Some(choices) = json.get("choices").and_then(|v| v.as_array()) else { continue };
+            for choice in choices {
+                process_openai_choice(choice, &mut index_to_tool, on_chunk);
             }
         }
     }
@@ -316,6 +339,87 @@ struct OpenAiFunctionCall {
 /// - `Role::Assistant`：将其中的 `Part::Text` 和 `Part::Reasoning` 合并为 content；
 ///   `Part::ToolUse` 映射为 `tool_calls` 数组
 /// - `Role::System`：在循环前单独插入 system 消息
+fn build_user_messages(msg: &Message) -> Vec<OpenAiMessage> {
+    let mut text_parts = Vec::new();
+    let mut tool_results = Vec::new();
+
+    for part in &msg.parts {
+        match part {
+            Part::Text { text } => text_parts.push(text.clone()),
+            Part::ToolResult {
+                tool_call_id,
+                content: c,
+                ..
+            } => {
+                tool_results.push(OpenAiMessage {
+                    role: "tool".to_string(),
+                    content: Some(c.clone()),
+                    tool_calls: None,
+                    tool_call_id: Some(tool_call_id.clone()),
+                });
+            }
+            Part::Image { .. } => text_parts.push("[image]".to_string()),
+            _ => {}
+        }
+    }
+
+    let mut result = Vec::new();
+    if !text_parts.is_empty() {
+        result.push(OpenAiMessage {
+            role: "user".to_string(),
+            content: Some(text_parts.join("\n")),
+            tool_calls: None,
+            tool_call_id: None,
+        });
+    }
+    result.extend(tool_results);
+    result
+}
+
+fn build_assistant_message(msg: &Message) -> OpenAiMessage {
+    let mut text_parts = Vec::new();
+    let mut tool_calls = Vec::new();
+
+    for part in &msg.parts {
+        match part {
+            Part::Text { text } => text_parts.push(text.clone()),
+            Part::ToolUse {
+                id,
+                name,
+                arguments,
+            } => {
+                tool_calls.push(OpenAiToolCall {
+                    id: id.clone(),
+                    call_type: "function".to_string(),
+                    function: OpenAiFunctionCall {
+                        name: name.clone(),
+                        arguments: arguments.to_string(),
+                    },
+                });
+            }
+            Part::Reasoning { thinking, .. } => text_parts.push(thinking.clone()),
+            _ => {}
+        }
+    }
+
+    let content_text = if text_parts.is_empty() {
+        None
+    } else {
+        Some(text_parts.join("\n"))
+    };
+
+    OpenAiMessage {
+        role: "assistant".to_string(),
+        content: content_text,
+        tool_calls: if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        },
+        tool_call_id: None,
+    }
+}
+
 fn build_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAiMessage> {
     let mut result = Vec::new();
 
@@ -328,95 +432,8 @@ fn build_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAiMessag
 
     for msg in messages {
         match msg.role {
-            Role::User => {
-                let mut text_parts = Vec::new();
-                let mut tool_results = Vec::new();
-
-                for part in &msg.parts {
-                    match part {
-                        Part::Text { text } => {
-                            text_parts.push(text.clone());
-                        }
-                        Part::ToolResult {
-                            tool_call_id,
-                            content: c,
-                            ..
-                        } => {
-                            tool_results.push(OpenAiMessage {
-                                role: "tool".to_string(),
-                                content: Some(c.clone()),
-                                tool_calls: None,
-                                tool_call_id: Some(tool_call_id.clone()),
-                            });
-                        }
-                        Part::Image { .. } => {
-                            // OpenAI vision 在当前简化路径中以占位符表示
-                            text_parts.push("[image]".to_string());
-                        }
-                        _ => {}
-                    }
-                }
-
-                if !text_parts.is_empty() {
-                    result.push(OpenAiMessage {
-                        role: "user".to_string(),
-                        content: Some(text_parts.join("\n")),
-                        tool_calls: None,
-                        tool_call_id: None,
-                    });
-                }
-
-                for tr in tool_results {
-                    result.push(tr);
-                }
-            }
-            Role::Assistant => {
-                let mut text_parts = Vec::new();
-                let mut tool_calls = Vec::new();
-
-                for part in &msg.parts {
-                    match part {
-                        Part::Text { text } => {
-                            text_parts.push(text.clone());
-                        }
-                        Part::ToolUse {
-                            id,
-                            name,
-                            arguments,
-                        } => {
-                            tool_calls.push(OpenAiToolCall {
-                                id: id.clone(),
-                                call_type: "function".to_string(),
-                                function: OpenAiFunctionCall {
-                                    name: name.clone(),
-                                    arguments: arguments.to_string(),
-                                },
-                            });
-                        }
-                        Part::Reasoning { thinking, .. } => {
-                            text_parts.push(thinking.clone());
-                        }
-                        _ => {}
-                    }
-                }
-
-                let content_text = if text_parts.is_empty() {
-                    None
-                } else {
-                    Some(text_parts.join("\n"))
-                };
-
-                result.push(OpenAiMessage {
-                    role: "assistant".to_string(),
-                    content: content_text,
-                    tool_calls: if tool_calls.is_empty() {
-                        None
-                    } else {
-                        Some(tool_calls)
-                    },
-                    tool_call_id: None,
-                });
-            }
+            Role::User => result.extend(build_user_messages(msg)),
+            Role::Assistant => result.push(build_assistant_message(msg)),
             _ => {}
         }
     }

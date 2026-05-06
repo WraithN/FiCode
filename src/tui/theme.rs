@@ -21,6 +21,10 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
+/// 配色主题，定义 TUI 所有组件的颜色方案。
+///
+/// 采用语义化命名（如 `bg_base`、`text_primary`），便于在不同主题间保持一致性。
+/// 当前内置两套预设：`deep_ocean`（深蓝海洋）和 `github_dark`（GitHub 暗色）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
     pub bg_base: Color,
@@ -42,6 +46,7 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// 深蓝海洋主题：低饱和深色背景，搭配青色品牌色，适合长时间编码。
     pub fn deep_ocean() -> Self {
         Self {
             bg_base: Color::from_u32(0x0d1117),
@@ -63,6 +68,7 @@ impl Theme {
         }
     }
 
+    /// GitHub 暗色主题：基于 deep_ocean 修改品牌色为更亮的蓝色。
     pub fn github_dark() -> Self {
         Self {
             brand: Color::from_u32(0x58a6ff),
@@ -70,46 +76,57 @@ impl Theme {
         }
     }
 
+    /// 基础文本样式：主文字色 + 基础背景色。
     pub fn style_primary(&self) -> Style {
         Style::default().fg(self.text_primary).bg(self.bg_base)
     }
 
+    /// 品牌色样式：用于 AI 标识、当前会话高亮等。
     pub fn style_brand(&self) -> Style {
         Style::default().fg(self.brand)
     }
 
+    /// 用户消息样式：橙色，与 AI 品牌色区分。
     pub fn style_user(&self) -> Style {
         Style::default().fg(self.user)
     }
 
+    /// 成功状态样式：绿色。
     pub fn style_success(&self) -> Style {
         Style::default().fg(self.success)
     }
 
+    /// 错误状态样式：红色。
     pub fn style_error(&self) -> Style {
         Style::default().fg(self.error)
     }
 
+    /// 选中高亮样式：反色显示，用于列表选中项。
     pub fn style_selection(&self) -> Style {
         Style::default().fg(self.selection_fg).bg(self.selection_bg)
     }
 
+    /// 弱化文本样式：用于次要信息、占位符。
     pub fn style_muted(&self) -> Style {
         Style::default().fg(self.text_muted)
     }
 
+    /// 标题栏区域样式：使用表面背景色区分层级。
     pub fn header_style(&self) -> Style {
         self.style_primary().bg(self.bg_surface)
     }
 
+    /// 抽屉区域样式：与标题栏一致，形成侧边栏视觉。
     pub fn drawer_style(&self) -> Style {
         self.style_primary().bg(self.bg_surface)
     }
 
+    /// 输入框区域样式：表面背景色。
     pub fn input_style(&self) -> Style {
         self.style_primary().bg(self.bg_surface)
     }
 
+    /// 状态栏区域样式：弱化文字，保持底部不突兀。
     pub fn status_bar_style(&self) -> Style {
         self.style_muted().bg(self.bg_base)
     }

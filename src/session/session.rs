@@ -144,21 +144,20 @@ impl SessionManager {
             let entry = entry?;
             let path = entry.path();
             // 只处理 .jsonl 扩展名的文件
-            if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
-                if let Some(id) = path.file_stem().and_then(|s| s.to_str()) {
-                    if let Ok(session) = self.load_session(id) {
-                        metas.push(SessionMeta {
-                            id: session.id,
-                            project_path: session.project_path,
-                            created_at: session.created_at,
-                            updated_at: session.updated_at,
-                            model: session.model,
-                            status: session.status,
-                            message_count: session.messages.len(),
-                        });
-                    }
-                }
+            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
             }
+            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            let Ok(session) = self.load_session(id) else { continue };
+            metas.push(SessionMeta {
+                id: session.id,
+                project_path: session.project_path,
+                created_at: session.created_at,
+                updated_at: session.updated_at,
+                model: session.model,
+                status: session.status,
+                message_count: session.messages.len(),
+            });
         }
         metas.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(metas)
@@ -214,22 +213,18 @@ impl SessionManager {
                     current_message = Some(MessageBuilder::new(id, session_id, role, created_at));
                 }
                 "part" => {
-                    if let Some(ref mut builder) = current_message {
-                        if let Some(part_value) = record.fields.get("part").cloned() {
-                            if let Ok(part) = serde_json::from_value::<Part>(part_value) {
-                                builder.add_part(part);
-                            }
-                        }
-                    }
+                    let Some(builder) = current_message.as_mut() else { continue };
+                    let Some(part_value) = record.fields.get("part").cloned() else { continue };
+                    let Ok(part) = serde_json::from_value::<Part>(part_value) else { continue };
+                    builder.add_part(part);
                 }
                 "message_end" => {
-                    if let Some(builder) = current_message.take() {
-                        let token_count = record.fields.get("token_count").and_then(|v| v.as_u64());
-                        let cost = record.fields.get("cost").and_then(|v| v.as_f64());
-                        let msg = builder.finalize(token_count, cost);
-                        if let Some(ref mut s) = session {
-                            s.messages.push(msg);
-                        }
+                    let Some(builder) = current_message.take() else { continue };
+                    let token_count = record.fields.get("token_count").and_then(|v| v.as_u64());
+                    let cost = record.fields.get("cost").and_then(|v| v.as_f64());
+                    let msg = builder.finalize(token_count, cost);
+                    if let Some(ref mut s) = session {
+                        s.messages.push(msg);
                     }
                 }
                 _ => {

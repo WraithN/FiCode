@@ -32,6 +32,13 @@ pub mod left_drawer;
 pub mod right_drawer;
 pub mod status_bar;
 
+/// 所有 TUI 组件必须实现的公共 trait。
+///
+/// 采用"渲染-事件-更新"三段式架构：
+/// - `draw`：每帧调用，负责在指定 `Rect` 内绘制自身。
+/// - `handle_event`：接收终端事件，返回可选的 `AppEvent` 以通知上层处理业务逻辑。
+/// - `update`：接收应用事件，用于同步外部状态（如会话列表刷新、SSE 消息到达）。
+/// - `is_focusable`：标识该组件是否可接收焦点（如状态栏不可聚焦）。
 pub trait Component {
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_focused: bool);
     fn handle_event(&mut self, event: &Event, focus: bool) -> Option<AppEvent>;

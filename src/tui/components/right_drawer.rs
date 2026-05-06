@@ -32,20 +32,22 @@ use crate::tui::components::Component;
 use crate::tui::event::AppEvent;
 use crate::tui::theme::Theme;
 
+/// 会话元信息。
 #[derive(Debug, Clone)]
 pub struct SessionMeta {
     pub id: String,
     pub name: String,
     pub last_active: String,
     pub message_count: usize,
-    pub is_current: bool,
+    pub is_current: bool, // 是否为当前活跃会话
 }
 
+/// 右侧会话历史抽屉组件，展示所有历史会话，支持切换与会话管理。
 pub struct RightDrawer {
     sessions: Vec<SessionMeta>,
     selected_index: usize,
-    filter: String,
-    filter_active: bool,
+    filter: String,       // 预留：会话名称过滤
+    filter_active: bool,  // 预留：是否处于过滤模式
 }
 
 impl RightDrawer {
@@ -58,6 +60,7 @@ impl RightDrawer {
         }
     }
 
+    /// 设置会话列表并重置选中位置。
     pub fn set_sessions(&mut self, sessions: Vec<SessionMeta>) {
         self.sessions = sessions;
         self.selected_index = 0;
@@ -65,6 +68,8 @@ impl RightDrawer {
 }
 
 impl Component for RightDrawer {
+    /// 渲染会话历史抽屉：显示会话名称、消息数量、当前会话指示器（●），
+    /// 选中项使用反色高亮，当前会话使用品牌色。
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_focused: bool) {
         let border_type = if is_focused {
             ratatui::widgets::BorderType::Double
@@ -110,6 +115,7 @@ impl Component for RightDrawer {
         frame.render_widget(paragraph, inner);
     }
 
+    /// 处理导航事件：上下方向键移动选中，Enter 触发切换会话事件。
     fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<AppEvent> {
         if let Event::Key(key) = event {
             if key.kind != KeyEventKind::Press {

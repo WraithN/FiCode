@@ -32,26 +32,29 @@ use crate::tui::components::Component;
 use crate::tui::event::AppEvent;
 use crate::tui::theme::Theme;
 
+/// 模型信息结构。
 #[derive(Debug, Clone)]
 pub struct ModelInfo {
     pub name: String,
     pub capabilities: Vec<String>,
 }
 
+/// 顶部状态栏的当前状态。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HeaderStatus {
-    Ready,
-    Generating,
-    Streaming,
+    Ready,      // 空闲
+    Generating, // 正在生成
+    Streaming,  // 正在流式传输
 }
 
+/// 顶部标题栏组件，展示 Logo、当前模型、运行状态，以及模型下拉菜单。
 pub struct Header {
     current_model: String,
     session_id: Option<String>,
-    model_dropdown_open: bool,
-    theme_dropdown_open: bool,
-    dropdown_selected: usize,
-    models: Vec<ModelInfo>,
+    model_dropdown_open: bool,   // 模型下拉菜单是否展开
+    theme_dropdown_open: bool,   // 主题下拉菜单是否展开（预留）
+    dropdown_selected: usize,    // 下拉菜单当前选中项
+    models: Vec<ModelInfo>,      // 可选模型列表
     status: HeaderStatus,
 }
 
@@ -103,12 +106,14 @@ impl Header {
 
     pub fn on_tick(&mut self) {}
 
+    /// 更新状态栏显示的状态。
     pub fn set_status(&mut self, status: HeaderStatus) {
         self.status = status;
     }
 }
 
 impl Component for Header {
+    /// 渲染标题栏：左侧显示 Logo、模型名、状态指示器；若下拉菜单打开则叠加渲染菜单。
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, _is_focused: bool) {
         let block = Block::default()
             .borders(Borders::BOTTOM)
@@ -149,6 +154,7 @@ impl Component for Header {
         }
     }
 
+    /// 处理标题栏事件：当下拉菜单打开时，拦截方向键、Enter、Esc 进行菜单导航。
     fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<AppEvent> {
         if let Event::Key(key) = event {
             if key.kind != KeyEventKind::Press {
@@ -189,6 +195,7 @@ impl Component for Header {
 }
 
 impl Header {
+    /// 渲染模型下拉菜单：在标题栏下方弹出，显示可选模型列表与当前选中高亮。
     fn draw_model_dropdown(&self, frame: &mut Frame, header_area: Rect, theme: &Theme) {
         let items: Vec<Line> = self
             .models

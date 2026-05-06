@@ -258,9 +258,17 @@ impl ToolHandler for CreateTaskPlanHandler {
             _ => return Err("Expected JSON parameters".to_string()),
         };
 
-        let tasks_arr = input
-            .get("tasks")
-            .and_then(|v| v.as_array())
+        // 兼容某些模型将 JSON 数组序列化为字符串传递的情况
+        let tasks_value = input.get("tasks").ok_or("Missing or invalid 'tasks' array")?;
+        let tasks_arr: serde_json::Value = if let Some(arr) = tasks_value.as_array() {
+            serde_json::Value::Array(arr.clone())
+        } else if let Some(s) = tasks_value.as_str() {
+            serde_json::from_str(s).map_err(|_| "Missing or invalid 'tasks' array".to_string())?
+        } else {
+            return Err("Missing or invalid 'tasks' array".to_string());
+        };
+        let tasks_arr = tasks_arr
+            .as_array()
             .ok_or("Missing or invalid 'tasks' array")?;
 
         let mut plan = crate::task::TaskPlan::new("");
@@ -432,10 +440,13 @@ pub async fn subagent_tool_schema() -> serde_json::Value {
     let basic = REGISTRY.tool_schema();
     if let Some(arr) = basic.as_array() {
         for tool in arr {
-            if let Some(name) = tool.get("name").and_then(|n| n.as_str()) {
-                if name == "create_task_plan" {
-                    continue;
-                }
+            let is_task_plan = tool
+                .get("name")
+                .and_then(|n| n.as_str())
+                .map(|name| name == "create_task_plan")
+                .unwrap_or(false);
+            if is_task_plan {
+                continue;
             }
             schemas.push(tool.clone());
         }
@@ -502,59 +513,64 @@ pub async fn tool_call(
 // 现在直接返回结构化的 `Vec<Part>`，省去上层再做一次格式转换。
 // 因 MCP 调用需要异步，此函数已升级为 `async`。
 
+async fn execute_single_tool_call(
+    id: &str,
+    name: &str,
+    arguments: &serde_json::Value,
+) -> (String, bool) {
+    let input: HashMap<String, serde_json::Value> = match arguments {
+        serde_json::Value::Object(map) => {
+            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        }
+        _ => HashMap::new(),
+    };
+
+    match tool_call(name, &input).await {
+        Ok(output) => {
+            log_trace!(
+                "execute_tool_call raw output | name={} | output={}",
+                name,
+                output
+            );
+            println!("{}", &output[..output.len().min(200)]);
+            log_debug!(
+                "execute_tool_call success | name={} | output_len={}",
+                name,
+                output.len()
+            );
+            (output, false)
+        }
+        Err(e) => {
+            log_trace!("execute_tool_call raw error | name={} | err={}", name, e);
+            eprintln!("Tool call error: {}", e);
+            log_debug!("execute_tool_call error | name={} | err={}", name, e);
+            (format!("Error: {}", e), true)
+        }
+    }
+}
+
 pub async fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
     use colored::Colorize;
 
     let mut results = Vec::new();
 
     for part in parts {
-        // 只处理 ToolUse 类型的 Part
-        if let Part::ToolUse {
+        let Part::ToolUse {
             id,
             name,
             arguments,
-        } = part
-        {
-            println!("{}", format!("${}", name).yellow());
-            log_debug!("execute_tool_call | name={} | args={}", name, arguments);
+        } = part else { continue };
 
-            // `arguments` 是 serde_json::Value，需要转成 HashMap 才能传给 `tool_call`
-            let input: HashMap<String, serde_json::Value> = match arguments {
-                serde_json::Value::Object(map) => {
-                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                }
-                _ => HashMap::new(),
-            };
+        println!("{}", format!("${}", name).yellow());
+        log_debug!("execute_tool_call | name={} | args={}", name, arguments);
 
-            let (content, is_error) = match tool_call(name, &input).await {
-                Ok(output) => {
-                    log_trace!(
-                        "execute_tool_call raw output | name={} | output={}",
-                        name,
-                        output
-                    );
-                    println!("{}", &output[..output.len().min(200)]);
-                    log_debug!(
-                        "execute_tool_call success | name={} | output_len={}",
-                        name,
-                        output.len()
-                    );
-                    (output, false)
-                }
-                Err(e) => {
-                    log_trace!("execute_tool_call raw error | name={} | err={}", name, e);
-                    eprintln!("Tool call error: {}", e);
-                    log_debug!("execute_tool_call error | name={} | err={}", name, e);
-                    (format!("Error: {}", e), true)
-                }
-            };
+        let (content, is_error) = execute_single_tool_call(id, name, arguments).await;
 
-            results.push(Part::ToolResult {
-                tool_call_id: id.clone(),
-                content,
-                is_error,
-            });
-        }
+        results.push(Part::ToolResult {
+            tool_call_id: id.clone(),
+            content,
+            is_error,
+        });
     }
     results
 }
@@ -740,6 +756,23 @@ mod tests {
         let json_str = result.unwrap();
         assert!(json_str.contains("Analyze"));
         assert!(json_str.contains("Refactor"));
+    }
+
+    /// 测试 create_task_plan handler 兼容字符串形式的 tasks 数组
+    #[test]
+    fn test_create_task_plan_handler_string_tasks() {
+        use crate::tools::tools_type::{ToolHandler, ToolParameter};
+        use serde_json::json;
+
+        let handler = CreateTaskPlanHandler;
+        let input = json!({
+            "tasks": "[{\"name\": \"Test\", \"description\": \"Test desc\"}]"
+        });
+        let result = handler.call("create_task_plan", vec![ToolParameter::Json(input)]);
+        assert!(result.is_ok());
+        let json_str = result.unwrap();
+        assert!(json_str.contains("Test"));
+        assert!(json_str.contains("Test desc"));
     }
 
     /// 测试 subagent_tool_schema 不包含 create_task_plan

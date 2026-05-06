@@ -37,6 +37,7 @@ use crate::session::{SessionManager, SessionStatus};
 use crate::task::{TaskManager, TaskPlan};
 use crate::tools::set_mcp_manager;
 use crate::utils::cli::{Args, Commands};
+use crate::commands::slash::{SlashCommand, SlashCommandHandler};
 use crate::utils::workspace::set_workspace;
 use crate::{log_debug, log_info};
 
@@ -170,31 +171,7 @@ pub async fn run() -> Result<()> {
 
     // -s 优先级最高
     if let Some(session_arg) = args.session {
-        if let Some(selector) = session_arg {
-            let session = session_manager.find_session(&selector)?;
-            SessionManager::print_session(&session);
-        } else {
-            let sessions = session_manager.list_sessions()?;
-            if sessions.is_empty() {
-                println!("No sessions found.");
-            } else {
-                println!("Recent sessions:");
-                for (i, s) in sessions.iter().enumerate() {
-                    println!(
-                        "  [{}] {} | {} | {} messages | {}",
-                        i,
-                        &s.id[..s.id.len().min(8)],
-                        s.project_path,
-                        s.message_count,
-                        if s.status == SessionStatus::Active {
-                            "active"
-                        } else {
-                            "archived"
-                        }
-                    );
-                }
-            }
-        }
+        handle_session_arg(session_arg, &session_manager)?;
         return Ok(());
     }
 
@@ -268,6 +245,41 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
+fn print_sessions_list(session_manager: &SessionManager) -> Result<()> {
+    let sessions = session_manager.list_sessions()?;
+    if sessions.is_empty() {
+        println!("No sessions found.");
+        return Ok(());
+    }
+    println!("Recent sessions:");
+    for (i, s) in sessions.iter().enumerate() {
+        let status = if s.status == SessionStatus::Active {
+            "active"
+        } else {
+            "archived"
+        };
+        println!(
+            "  [{}] {} | {} | {} messages | {}",
+            i,
+            &s.id[..s.id.len().min(8)],
+            s.project_path,
+            s.message_count,
+            status
+        );
+    }
+    Ok(())
+}
+
+fn handle_session_arg(session_arg: Option<String>, session_manager: &SessionManager) -> Result<()> {
+    if let Some(selector) = session_arg {
+        let session = session_manager.find_session(&selector)?;
+        SessionManager::print_session(&session);
+    } else {
+        print_sessions_list(session_manager)?;
+    }
+    Ok(())
+}
+
 async fn run_single_command(
     provider: Arc<Provider>,
     session_manager: &SessionManager,
@@ -280,9 +292,9 @@ async fn run_single_command(
 
     // 拦截 slash 指令
     let slash_cmd = crate::commands::slash::parse(query);
-    if !matches!(slash_cmd, crate::commands::slash::SlashCommand::Unknown(ref s) if s.is_empty()) {
+    if !matches!(slash_cmd, SlashCommand::Unknown(ref s) if s.is_empty()) {
         let provider_lock = Arc::new(std::sync::RwLock::new((*provider).clone()));
-        let handler = crate::commands::slash::SlashCommandHandler::new(provider_lock, config);
+        let handler = SlashCommandHandler::new(provider_lock, config);
         handler.execute(slash_cmd).await?;
         return Ok(());
     }
@@ -420,17 +432,7 @@ async fn run_interactive(
                 editor.add_history_entry(query)?;
 
                 // 拦截 slash 指令
-                let slash_cmd = crate::commands::slash::parse(query);
-                if !matches!(slash_cmd, crate::commands::slash::SlashCommand::Unknown(ref s) if s.is_empty())
-                {
-                    let provider_lock = Arc::new(std::sync::RwLock::new((*provider).clone()));
-                    let handler = crate::commands::slash::SlashCommandHandler::new(
-                        provider_lock,
-                        Arc::clone(&config),
-                    );
-                    if let Err(e) = handler.execute(slash_cmd).await {
-                        eprintln!("Error: {}", e);
-                    }
+                if try_execute_slash(query, &provider, &config).await {
                     continue;
                 }
 
@@ -469,6 +471,27 @@ async fn run_interactive(
         }
     }
     Ok(())
+}
+
+async fn try_execute_slash(
+    query: &str,
+    provider: &Arc<Provider>,
+    config: &Arc<RwLock<Config>>,
+) -> bool {
+    let slash_cmd = crate::commands::slash::parse(query);
+    let is_unknown = matches!(
+        slash_cmd,
+        SlashCommand::Unknown(ref s) if s.is_empty()
+    );
+    if is_unknown {
+        return false;
+    }
+    let provider_lock = Arc::new(std::sync::RwLock::new((**provider).clone()));
+    let handler = SlashCommandHandler::new(provider_lock, Arc::clone(config));
+    if let Err(e) = handler.execute(slash_cmd).await {
+        eprintln!("Error: {}", e);
+    }
+    true
 }
 
 async fn choose_or_create_session(

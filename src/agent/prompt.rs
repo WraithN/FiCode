@@ -36,13 +36,17 @@ You have access to the following tools (described in JSON Schema):
 
 Rules:
 1. Analyze the user's request carefully before acting.
-2. If a task requires file inspection, use `read` or `grep`.
-3. If a task requires changing files, use `write` or `edit`.
-4. If a task requires running commands (builds, tests, etc.), use `bash`.
-5. When you need to fetch documentation from the web, use `web_fetch`.
-6. Always prefer concrete actions over long explanations.
-7. When you invoke a tool, wait for its result before proceeding to the next step.
-8. If no tool is needed, reply directly to the user in a concise and helpful manner.
+2. If the user is just greeting or chatting casually, reply directly without using any tools.
+3. If a task requires file inspection, use `read` or `grep`.
+4. If a task requires changing files, use `write` or `edit`.
+5. If a task requires running commands (builds, tests, etc.), use `bash`.
+6. When you need to fetch documentation from the web, use `web_fetch`.
+7. Always prefer concrete actions over long explanations.
+8. When you invoke a tool, wait for its result before proceeding to the next step.
+9. If no tool is needed, reply directly to the user in a concise and helpful manner.
+10. Always respond in the same language as the user's input.
+11. When the user asks you to write code, save it to a file using `write` first. Do not run the code before writing it.
+12. Do not output tool calls as plain text. Use the proper tool_call mechanism provided by the API.
 "#;
 
 /// 系统提示词构建器。

@@ -141,6 +141,61 @@ impl AIClient for AnthropicClient {
 /// - `Part::ToolUse` -> `{"type": "tool_use", "id", "name", "input"}`
 /// - `Part::ToolResult` -> `{"type": "tool_result", "tool_use_id", "content", "is_error"}`
 /// - `Part::Reasoning` -> 暂映射为 text block 以保留内容
+fn convert_image_source_to_anthropic(source: &ImageSource) -> serde_json::Value {
+    match source {
+        ImageSource::Base64 { media_type, data } => json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": data
+            }
+        }),
+        ImageSource::Path { path } => json!({
+            "type": "image",
+            "source": {
+                "type": "url",
+                "url": format!("file://{}", path)
+            }
+        }),
+        ImageSource::Url { url } => json!({
+            "type": "image",
+            "source": {
+                "type": "url",
+                "url": url
+            }
+        }),
+    }
+}
+
+fn convert_part_to_anthropic(part: &Part) -> serde_json::Value {
+    match part {
+        Part::Text { text } => json!({"type": "text", "text": text}),
+        Part::Image { source } => convert_image_source_to_anthropic(source),
+        Part::ToolUse { id, name, arguments } => json!({
+            "type": "tool_use",
+            "id": id,
+            "name": name,
+            "input": arguments
+        }),
+        Part::ToolResult {
+            tool_call_id,
+            content: c,
+            is_error,
+        } => json!({
+            "type": "tool_result",
+            "tool_use_id": tool_call_id,
+            "content": c,
+            "is_error": is_error
+        }),
+        Part::Reasoning { thinking, .. } => {
+            // Anthropic extended thinking 可能使用不同的 block 类型；
+            // 当前为了保留内容，先映射为普通文本块
+            json!({"type": "text", "text": thinking})
+        }
+    }
+}
+
 fn build_messages(messages: &[Message]) -> Vec<serde_json::Value> {
     let mut result = Vec::new();
     for msg in messages {
@@ -151,74 +206,7 @@ fn build_messages(messages: &[Message]) -> Vec<serde_json::Value> {
             Role::Developer => "developer",
         };
 
-        let mut content = Vec::new();
-        for part in &msg.parts {
-            let value = match part {
-                Part::Text { text } => {
-                    json!({"type": "text", "text": text})
-                }
-                Part::Image { source } => match source {
-                    ImageSource::Base64 { media_type, data } => {
-                        json!({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": data
-                            }
-                        })
-                    }
-                    ImageSource::Path { path } => {
-                        json!({
-                            "type": "image",
-                            "source": {
-                                "type": "url",
-                                "url": format!("file://{}", path)
-                            }
-                        })
-                    }
-                    ImageSource::Url { url } => {
-                        json!({
-                            "type": "image",
-                            "source": {
-                                "type": "url",
-                                "url": url
-                            }
-                        })
-                    }
-                },
-                Part::ToolUse {
-                    id,
-                    name,
-                    arguments,
-                } => {
-                    json!({
-                        "type": "tool_use",
-                        "id": id,
-                        "name": name,
-                        "input": arguments
-                    })
-                }
-                Part::ToolResult {
-                    tool_call_id,
-                    content: c,
-                    is_error,
-                } => {
-                    json!({
-                        "type": "tool_result",
-                        "tool_use_id": tool_call_id,
-                        "content": c,
-                        "is_error": is_error
-                    })
-                }
-                Part::Reasoning { thinking, .. } => {
-                    // Anthropic extended thinking 可能使用不同的 block 类型；
-                    // 当前为了保留内容，先映射为普通文本块
-                    json!({"type": "text", "text": thinking})
-                }
-            };
-            content.push(value);
-        }
+        let content: Vec<_> = msg.parts.iter().map(convert_part_to_anthropic).collect();
 
         if !content.is_empty() {
             result.push(json!({"role": role_str, "content": content}));
@@ -240,6 +228,128 @@ fn build_messages(messages: &[Message]) -> Vec<serde_json::Value> {
 /// - `content_block_delta` + `input_json_delta` => 累积工具参数 JSON
 /// - `content_block_stop`                       => 拼装完整 ToolUse 并回传
 /// - `message_delta` 中的 `stop_reason`         => `ChunkContent::Finish`
+fn handle_content_block_start(
+    json: &serde_json::Value,
+    index_to_tool: &mut std::collections::HashMap<usize, (String, String, String)>,
+) {
+    let Some(block) = json.get("content_block") else { return };
+    let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if block_type != "tool_use" {
+        return;
+    }
+    let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let id = block
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let name = block
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    log_debug!(
+        "Anthropic SSE tool_use_start | index={} | id={} | name={}",
+        index,
+        id,
+        name
+    );
+    index_to_tool.insert(index, (id, name, String::new()));
+}
+
+fn handle_text_delta(delta: &serde_json::Value, on_chunk: &mut dyn FnMut(Chunk)) {
+    let Some(text) = delta.get("text").and_then(|v| v.as_str()) else { return };
+    log_trace!(
+        "Anthropic SSE text_delta | len={} | preview={}",
+        text.len(),
+        text.chars().take(80).collect::<String>()
+    );
+    on_chunk(Chunk {
+        content: ChunkContent::Text(text.to_string()),
+    });
+}
+
+fn handle_thinking_delta(delta: &serde_json::Value, on_chunk: &mut dyn FnMut(Chunk)) {
+    let Some(text) = delta.get("thinking").and_then(|v| v.as_str()) else { return };
+    log_trace!(
+        "Anthropic SSE thinking_delta | len={} | preview={}",
+        text.len(),
+        text.chars().take(80).collect::<String>()
+    );
+    on_chunk(Chunk {
+        content: ChunkContent::Think(text.to_string()),
+    });
+}
+
+fn handle_input_json_delta(
+    json: &serde_json::Value,
+    delta: &serde_json::Value,
+    index_to_tool: &mut std::collections::HashMap<usize, (String, String, String)>,
+) {
+    let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let Some((_, _, args)) = index_to_tool.get_mut(&index) else { return };
+    let Some(partial) = delta.get("partial_json").and_then(|v| v.as_str()) else { return };
+    log_trace!(
+        "Anthropic SSE input_json_delta | index={} | partial={}",
+        index,
+        partial
+    );
+    args.push_str(partial);
+}
+
+fn handle_content_block_delta(
+    json: &serde_json::Value,
+    index_to_tool: &mut std::collections::HashMap<usize, (String, String, String)>,
+    on_chunk: &mut dyn FnMut(Chunk),
+) {
+    let Some(delta) = json.get("delta") else { return };
+    let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    match delta_type {
+        "text_delta" => handle_text_delta(delta, on_chunk),
+        "thinking_delta" => handle_thinking_delta(delta, on_chunk),
+        "input_json_delta" => handle_input_json_delta(json, delta, index_to_tool),
+        _ => {}
+    }
+}
+
+fn handle_content_block_stop(
+    json: &serde_json::Value,
+    index_to_tool: &mut std::collections::HashMap<usize, (String, String, String)>,
+    on_chunk: &mut dyn FnMut(Chunk),
+) {
+    let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let Some((id, name, args)) = index_to_tool.remove(&index) else { return };
+    let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
+    log_debug!(
+        "Anthropic assembled tool_call | id={} | name={} | args={}",
+        id,
+        name,
+        arguments
+    );
+    on_chunk(Chunk {
+        content: ChunkContent::ToolUse(Part::ToolUse {
+            id,
+            name,
+            arguments,
+        }),
+    });
+}
+
+fn handle_message_delta(json: &serde_json::Value, on_chunk: &mut dyn FnMut(Chunk)) {
+    let Some(stop) = json
+        .get("delta")
+        .and_then(|d| d.get("stop_reason"))
+        .and_then(|v| v.as_str())
+    else {
+        return;
+    };
+    let reason = FinishReason::from_anthropic(stop);
+    log_debug!("Anthropic finish_reason={:?}", reason);
+    on_chunk(Chunk {
+        content: ChunkContent::Finish(reason),
+    });
+}
+
 async fn parse_anthropic_sse<S>(
     byte_stream: S,
     on_chunk: &mut (dyn FnMut(Chunk) + Send),
@@ -265,137 +375,42 @@ where
 
             if line.starts_with("event:") {
                 current_event_type = Some(line[6..].trim().to_string());
-            } else if line.starts_with("data:") {
-                let data = line[5..].trim();
-                if data == "[DONE]" {
-                    log_debug!("Anthropic SSE [DONE]");
-                    continue;
-                }
-
-                let event_type = current_event_type.take().unwrap_or_default();
-                log_trace!(
-                    "Anthropic SSE raw | event={} | {}",
-                    event_type,
-                    data.chars().take(300).collect::<String>()
-                );
-
-                let json: serde_json::Value = serde_json::from_str(data)
-                    .with_context(|| format!("Failed to parse Anthropic SSE data: {}", data))?;
-
-                match event_type.as_str() {
-                    "content_block_start" => {
-                        if let Some(block) = json.get("content_block") {
-                            let block_type =
-                                block.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                            if block_type == "tool_use" {
-                                let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
-                                    as usize;
-                                let id = block
-                                    .get("id")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let name = block
-                                    .get("name")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                log_debug!(
-                                    "Anthropic SSE tool_use_start | index={} | id={} | name={}",
-                                    index,
-                                    id,
-                                    name
-                                );
-                                index_to_tool.insert(index, (id, name, String::new()));
-                            }
-                        }
-                    }
-                    "content_block_delta" => {
-                        if let Some(delta) = json.get("delta") {
-                            let delta_type =
-                                delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                            match delta_type {
-                                "text_delta" => {
-                                    if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
-                                        log_trace!(
-                                            "Anthropic SSE text_delta | len={} | preview={}",
-                                            text.len(),
-                                            text.chars().take(80).collect::<String>()
-                                        );
-                                        on_chunk(Chunk {
-                                            content: ChunkContent::Text(text.to_string()),
-                                        });
-                                    }
-                                }
-                                "thinking_delta" => {
-                                    if let Some(text) =
-                                        delta.get("thinking").and_then(|v| v.as_str())
-                                    {
-                                        log_trace!(
-                                            "Anthropic SSE thinking_delta | len={} | preview={}",
-                                            text.len(),
-                                            text.chars().take(80).collect::<String>()
-                                        );
-                                        on_chunk(Chunk {
-                                            content: ChunkContent::Think(text.to_string()),
-                                        });
-                                    }
-                                }
-                                "input_json_delta" => {
-                                    let index =
-                                        json.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
-                                            as usize;
-                                    if let Some((_, _, args)) = index_to_tool.get_mut(&index) {
-                                        if let Some(partial) =
-                                            delta.get("partial_json").and_then(|v| v.as_str())
-                                        {
-                                            log_trace!("Anthropic SSE input_json_delta | index={} | partial={}", index, partial);
-                                            args.push_str(partial);
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    "content_block_stop" => {
-                        let index =
-                            json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                        if let Some((id, name, args)) = index_to_tool.remove(&index) {
-                            let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
-                            log_debug!(
-                                "Anthropic assembled tool_call | id={} | name={} | args={}",
-                                id,
-                                name,
-                                arguments
-                            );
-                            on_chunk(Chunk {
-                                content: ChunkContent::ToolUse(Part::ToolUse {
-                                    id,
-                                    name,
-                                    arguments,
-                                }),
-                            });
-                        }
-                    }
-                    "message_delta" => {
-                        if let Some(stop) = json
-                            .get("delta")
-                            .and_then(|d| d.get("stop_reason"))
-                            .and_then(|v| v.as_str())
-                        {
-                            let reason = FinishReason::from_anthropic(stop);
-                            log_debug!("Anthropic finish_reason={:?}", reason);
-                            on_chunk(Chunk {
-                                content: ChunkContent::Finish(reason),
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            } else if line.is_empty() {
-                // SSE 空行表示一个事件结束，重置 event 类型
+                continue;
+            }
+            if line.is_empty() {
                 current_event_type = None;
+                continue;
+            }
+            if !line.starts_with("data:") {
+                continue;
+            }
+
+            let data = line[5..].trim();
+            if data == "[DONE]" {
+                log_debug!("Anthropic SSE [DONE]");
+                continue;
+            }
+
+            let event_type = current_event_type.take().unwrap_or_default();
+            log_trace!(
+                "Anthropic SSE raw | event={} | {}",
+                event_type,
+                data.chars().take(300).collect::<String>()
+            );
+
+            let json: serde_json::Value = serde_json::from_str(data)
+                .with_context(|| format!("Failed to parse Anthropic SSE data: {}", data))?;
+
+            match event_type.as_str() {
+                "content_block_start" => handle_content_block_start(&json, &mut index_to_tool),
+                "content_block_delta" => {
+                    handle_content_block_delta(&json, &mut index_to_tool, on_chunk)
+                }
+                "content_block_stop" => {
+                    handle_content_block_stop(&json, &mut index_to_tool, on_chunk)
+                }
+                "message_delta" => handle_message_delta(&json, on_chunk),
+                _ => {}
             }
         }
     }

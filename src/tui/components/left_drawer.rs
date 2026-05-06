@@ -32,18 +32,20 @@ use crate::tui::components::Component;
 use crate::tui::event::AppEvent;
 use crate::tui::theme::Theme;
 
+/// 文件树节点。
 #[derive(Debug, Clone)]
 pub struct FileNode {
     pub path: String,
     pub name: String,
     pub is_dir: bool,
-    pub depth: usize,
+    pub depth: usize, // 缩进深度，用于层级可视化
 }
 
+/// 左侧文件抽屉组件，展示项目文件树，支持上下导航与选中。
 pub struct LeftDrawer {
     files: Vec<FileNode>,
     selected_index: usize,
-    expanded_folders: std::collections::HashSet<String>,
+    expanded_folders: std::collections::HashSet<String>, // 预留：记录已展开的文件夹
 }
 
 impl LeftDrawer {
@@ -55,6 +57,7 @@ impl LeftDrawer {
         }
     }
 
+    /// 设置文件列表并重置选中位置到顶部。
     pub fn set_files(&mut self, files: Vec<FileNode>) {
         self.files = files;
         self.selected_index = 0;
@@ -62,6 +65,8 @@ impl LeftDrawer {
 }
 
 impl Component for LeftDrawer {
+    /// 渲染文件抽屉：绘制边框与标题，按深度缩进显示文件/文件夹图标列表，
+    /// 当前选中项使用反色高亮。
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_focused: bool) {
         let border_type = if is_focused {
             ratatui::widgets::BorderType::Double
@@ -102,6 +107,7 @@ impl Component for LeftDrawer {
         frame.render_widget(paragraph, inner);
     }
 
+    /// 处理导航事件：上下方向键移动选中，Enter 触发选中文件事件。
     fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<AppEvent> {
         if let Event::Key(key) = event {
             if key.kind != KeyEventKind::Press {

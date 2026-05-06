@@ -21,6 +21,7 @@
 
 use ratatui::layout::Rect;
 
+/// 面板状态：左右抽屉互斥，同时只能打开一个或都不打开。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelState {
     None,
@@ -28,12 +29,18 @@ pub enum PanelState {
     RightDrawer,
 }
 
+/// 布局管理器，负责根据终端尺寸计算各组件的 `Rect` 区域。
+///
+/// 支持两种模式：
+/// - 宽屏（≥80 列）：抽屉与主区域并排。
+/// - 窄屏（<80 列）：抽屉以 overlay 浮层形式覆盖在主区域上方。
 pub struct LayoutManager {
-    pub terminal_size: (u16, u16),
-    pub panel: PanelState,
-    pub narrow_mode: bool,
+    pub terminal_size: (u16, u16), // (宽, 高)
+    pub panel: PanelState,         // 当前打开的面板
+    pub narrow_mode: bool,         // 是否为窄屏模式
 }
 
+/// 计算出的各区域坐标与尺寸。
 #[derive(Debug)]
 pub struct LayoutAreas {
     pub header: Rect,
@@ -41,10 +48,11 @@ pub struct LayoutAreas {
     pub main: Rect,
     pub right_drawer: Option<Rect>,
     pub status_bar: Rect,
-    pub overlay: Option<Rect>,
+    pub overlay: Option<Rect>, // 窄屏模式下的抽屉浮层
 }
 
 impl LayoutManager {
+    /// 创建布局管理器，初始无抽屉，并根据宽度判定是否进入窄屏模式。
     pub fn new(width: u16, height: u16) -> Self {
         let narrow_mode = width < 80;
         Self {
@@ -54,11 +62,13 @@ impl LayoutManager {
         }
     }
 
+    /// 终端尺寸变化时更新内部状态。
     pub fn resize(&mut self, width: u16, height: u16) {
         self.terminal_size = (width, height);
         self.narrow_mode = width < 80;
     }
 
+    /// 切换左侧抽屉（若已打开则关闭，否则打开左侧并关闭右侧）。
     pub fn toggle_left(&mut self) {
         self.panel = match self.panel {
             PanelState::LeftDrawer => PanelState::None,
@@ -66,6 +76,7 @@ impl LayoutManager {
         };
     }
 
+    /// 切换右侧抽屉（若已打开则关闭，否则打开右侧并关闭左侧）。
     pub fn toggle_right(&mut self) {
         self.panel = match self.panel {
             PanelState::RightDrawer => PanelState::None,
@@ -73,10 +84,14 @@ impl LayoutManager {
         };
     }
 
+    /// 关闭所有抽屉。
     pub fn close_drawers(&mut self) {
         self.panel = PanelState::None;
     }
 
+    /// 根据当前状态计算每个组件应占据的 `Rect`。
+    ///
+    /// 固定行高：header = 3，status_bar = 1，剩余为 main 区域。
     pub fn calculate(&self) -> LayoutAreas {
         let (width, height) = self.terminal_size;
         let header_height = 3u16;
@@ -130,6 +145,10 @@ impl LayoutManager {
         }
     }
 
+    /// 将主区域纵向切分为消息区（上）和输入区（下）。
+    ///
+    /// `input_lines` 为输入框内容行数，会被限制在 1~4 行之间，
+    /// 再加上 2 行用于边框，得到输入区总高度。
     pub fn split_main(main: Rect, input_lines: u16) -> (Rect, Rect) {
         let input_height = input_lines.clamp(1, 4) + 2;
         let messages_height = main.height.saturating_sub(input_height);
