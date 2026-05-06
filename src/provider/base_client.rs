@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use crate::log_info;
 use crate::log_trace;
 use crate::session::message::Part;
 use anyhow::Result;
@@ -195,7 +196,7 @@ async fn do_retry_backoff(
         context,
         backoff
     );
-    eprintln!(
+    log_info!(
         "[retry] {} (attempt {}/{}), retry in {:?}: {}",
         context,
         attempt + 1,

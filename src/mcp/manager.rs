@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::config::models::{McpServerConfig, McpServerType};
+use crate::log_info;
 
 use super::client::McpClient;
 use super::transport::{LocalClient, RemoteClient};
@@ -95,7 +96,7 @@ impl McpManager {
                         .insert(name.clone(), McpServerStatus::Healthy);
                 }
                 Err(e) => {
-                    eprintln!(
+                    log_info!(
                         "Warning: MCP server '{}' initialization failed: {}",
                         name, e
                     );
@@ -223,7 +224,7 @@ impl McpManager {
         match client.call_tool(tool_name, arguments.clone()).await {
             Ok(r) => Ok(r),
             Err(e) => {
-                eprintln!("MCP call failed: {}, triggering reconnect...", e);
+                log_info!("MCP call failed: {}, triggering reconnect...", e);
                 self.reconnect(server_name).await?;
 
                 // 重连后重新获取 client
@@ -261,11 +262,11 @@ impl McpManager {
                     let mut status = self.status.write().await;
                     status.insert(server_name.to_string(), McpServerStatus::Healthy);
 
-                    println!("MCP server '{}' reconnected successfully", server_name);
+                    log_info!("MCP server '{}' reconnected successfully", server_name);
                     return Ok(());
                 }
                 Err(e) => {
-                    eprintln!(
+                    log_info!(
                         "MCP server '{}' reconnect failed (attempt {}/{}): {}",
                         server_name, attempt, self.max_retries, e
                     );

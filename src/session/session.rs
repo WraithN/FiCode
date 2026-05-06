@@ -19,6 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use crate::log_info;
+
 // =============================================================================
 // session 模块：会话持久化与管理
 // =============================================================================
@@ -187,14 +189,14 @@ impl SessionManager {
             let line = match line {
                 Ok(l) => l,
                 Err(e) => {
-                    eprintln!("Warning: failed to read line {}: {}", line_no + 1, e);
+                    log_info!("Warning: failed to read line {}: {}", line_no + 1, e);
                     continue;
                 }
             };
             let record: Record = match serde_json::from_str(&line) {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("Warning: failed to parse line {}: {}", line_no + 1, e);
+                    log_info!("Warning: failed to parse line {}: {}", line_no + 1, e);
                     continue;
                 }
             };
@@ -228,7 +230,7 @@ impl SessionManager {
                     }
                 }
                 _ => {
-                    eprintln!("Warning: unknown record type on line {}", line_no + 1);
+                    log_info!("Warning: unknown record type on line {}", line_no + 1);
                 }
             }
         }

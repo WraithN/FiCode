@@ -52,23 +52,23 @@ pub struct TuiApp {
     preview_theme_backup: Option<(usize, Arc<Theme>)>,
 
     // === 各区域 UI 组件 ===
-    header: Header,           // 顶部标题栏（Logo、模型、状态）
-    left_drawer: LeftDrawer,  // 左侧文件抽屉
-    right_drawer: RightDrawer,// 右侧会话历史抽屉
-    chat: Chat,               // 中间聊天消息区
-    input: Input,             // 底部输入框
-    status_bar: StatusBar,    // 最底部快捷键提示栏
+    header: Header,            // 顶部标题栏（Logo、模型、状态）
+    left_drawer: LeftDrawer,   // 左侧文件抽屉
+    right_drawer: RightDrawer, // 右侧会话历史抽屉
+    chat: Chat,                // 中间聊天消息区
+    input: Input,              // 底部输入框
+    status_bar: StatusBar,     // 最底部快捷键提示栏
     log_window: LogWindow,     // 日志浮窗
 
     // === 应用状态 ===
-    focus: FocusArea,         // 当前焦点所在区域
-    is_generating: bool,      // 是否正在等待模型生成回复
-    should_quit: bool,        // 是否退出主循环
+    focus: FocusArea,    // 当前焦点所在区域
+    is_generating: bool, // 是否正在等待模型生成回复
+    should_quit: bool,   // 是否退出主循环
 
     // === 后端通信与事件通道 ===
-    client: TuiClient,                    // HTTP 客户端，对接本地 4040 端口服务
-    event_tx: mpsc::Sender<AppEvent>,     // 事件发送端（克隆给异步任务使用）
-    event_rx: mpsc::Receiver<AppEvent>,   // 事件接收端（主循环消费）
+    client: TuiClient,                  // HTTP 客户端，对接本地 4040 端口服务
+    event_tx: mpsc::Sender<AppEvent>,   // 事件发送端（克隆给异步任务使用）
+    event_rx: mpsc::Receiver<AppEvent>, // 事件接收端（主循环消费）
 }
 
 impl TuiApp {
@@ -76,7 +76,10 @@ impl TuiApp {
     pub fn new() -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
         let presets = crate::theme::ThemePreset::all_presets();
-        let themes: Vec<Arc<Theme>> = presets.iter().map(|p| Arc::new(Theme::from_preset(p))).collect();
+        let themes: Vec<Arc<Theme>> = presets
+            .iter()
+            .map(|p| Arc::new(Theme::from_preset(p)))
+            .collect();
 
         let (term_w, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
 
@@ -123,10 +126,10 @@ impl TuiApp {
             terminal.draw(|frame| self.draw(frame))?;
 
             tokio::select! {
-            _ = interval.tick() => self.handle_app_event(AppEvent::Tick).await,
-            Some(event) = self.event_rx.recv() => self.handle_app_event(event).await,
-            result = Self::read_crossterm_event() => self.handle_crossterm_result(result).await,
-        }
+                _ = interval.tick() => self.handle_app_event(AppEvent::Tick).await,
+                Some(event) = self.event_rx.recv() => self.handle_app_event(event).await,
+                result = Self::read_crossterm_event() => self.handle_crossterm_result(result).await,
+            }
         }
 
         Ok(())
@@ -160,15 +163,36 @@ impl TuiApp {
         let areas = self.layout.calculate();
         let input_lines = self.input.visible_lines();
         // 如果有会话 ID，给输入框额外加一行显示
-        let input_extra = if self.header.session_id().is_some() { 1 } else { 0 };
-        let (messages_area, input_area) = LayoutManager::split_main(areas.main, input_lines + input_extra);
+        let input_extra = if self.header.session_id().is_some() {
+            1
+        } else {
+            0
+        };
+        let (messages_area, input_area) =
+            LayoutManager::split_main(areas.main, input_lines + input_extra);
 
-        self.header.draw(frame, areas.header, &self.theme, self.focus == FocusArea::Header);
-        self.chat.draw(frame, messages_area, &self.theme, self.focus == FocusArea::Main);
-        self.input.draw(frame, input_area, &self.theme, self.focus == FocusArea::Input);
+        self.header.draw(
+            frame,
+            areas.header,
+            &self.theme,
+            self.focus == FocusArea::Header,
+        );
+        self.chat.draw(
+            frame,
+            messages_area,
+            &self.theme,
+            self.focus == FocusArea::Main,
+        );
+        self.input.draw(
+            frame,
+            input_area,
+            &self.theme,
+            self.focus == FocusArea::Input,
+        );
         self.input.set_last_drawn_area(input_area);
         self.input.update_dropdown_area(input_area);
-        self.status_bar.draw(frame, areas.status_bar, &self.theme, false);
+        self.status_bar
+            .draw(frame, areas.status_bar, &self.theme, false);
 
         if let Some(log_area) = areas.log_window {
             self.log_window.draw(frame, log_area, &self.theme, false);
@@ -181,19 +205,39 @@ impl TuiApp {
 
             match self.layout.panel {
                 PanelState::LeftDrawer => {
-                    self.left_drawer.draw(frame, overlay_area, &self.theme, self.focus == FocusArea::LeftDrawer);
+                    self.left_drawer.draw(
+                        frame,
+                        overlay_area,
+                        &self.theme,
+                        self.focus == FocusArea::LeftDrawer,
+                    );
                 }
                 PanelState::RightDrawer => {
-                    self.right_drawer.draw(frame, overlay_area, &self.theme, self.focus == FocusArea::RightDrawer);
+                    self.right_drawer.draw(
+                        frame,
+                        overlay_area,
+                        &self.theme,
+                        self.focus == FocusArea::RightDrawer,
+                    );
                 }
                 _ => {}
             }
         } else {
             if let Some(area) = areas.left_drawer {
-                self.left_drawer.draw(frame, area, &self.theme, self.focus == FocusArea::LeftDrawer);
+                self.left_drawer.draw(
+                    frame,
+                    area,
+                    &self.theme,
+                    self.focus == FocusArea::LeftDrawer,
+                );
             }
             if let Some(area) = areas.right_drawer {
-                self.right_drawer.draw(frame, area, &self.theme, self.focus == FocusArea::RightDrawer);
+                self.right_drawer.draw(
+                    frame,
+                    area,
+                    &self.theme,
+                    self.focus == FocusArea::RightDrawer,
+                );
             }
         }
     }
@@ -212,20 +256,13 @@ impl TuiApp {
     /// - 右侧抽屉打开时：Main ↔ Input ↔ RightDrawer
     fn cycle_focus(&mut self, forward: bool) {
         let areas = match self.layout.panel {
-            PanelState::None => vec![
-                FocusArea::Main,
-                FocusArea::Input,
-            ],
-            PanelState::LeftDrawer => vec![
-                FocusArea::LeftDrawer,
-                FocusArea::Main,
-                FocusArea::Input,
-            ],
-            PanelState::RightDrawer => vec![
-                FocusArea::Main,
-                FocusArea::Input,
-                FocusArea::RightDrawer,
-            ],
+            PanelState::None => vec![FocusArea::Main, FocusArea::Input],
+            PanelState::LeftDrawer => {
+                vec![FocusArea::LeftDrawer, FocusArea::Main, FocusArea::Input]
+            }
+            PanelState::RightDrawer => {
+                vec![FocusArea::Main, FocusArea::Input, FocusArea::RightDrawer]
+            }
         };
 
         let current_idx = areas.iter().position(|a| a == &self.focus).unwrap_or(0);
@@ -300,7 +337,7 @@ impl TuiApp {
         if key.modifiers.contains(KeyModifiers::SHIFT) {
             self.cycle_focus(false); // Shift+Tab 反向切换
         } else {
-            self.cycle_focus(true);  // Tab 正向切换
+            self.cycle_focus(true); // Tab 正向切换
         }
     }
 
@@ -333,7 +370,10 @@ impl TuiApp {
         if key.kind != KeyEventKind::Press || !key.modifiers.is_empty() {
             return;
         }
-        if !matches!(key.code, KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace) {
+        if !matches!(
+            key.code,
+            KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace
+        ) {
             return;
         }
         self.focus = FocusArea::Input;
@@ -454,7 +494,9 @@ impl TuiApp {
                 if self.layout.panel == crate::tui::layout::PanelState::LeftDrawer {
                     self.focus = FocusArea::LeftDrawer;
                     let client = self.client.clone();
-                    tokio::spawn(async move { let _ = client.get_file_tree(".").await; });
+                    tokio::spawn(async move {
+                        let _ = client.get_file_tree(".").await;
+                    });
                 }
             }
             AppEvent::ToggleRightDrawer => {
@@ -481,7 +523,9 @@ impl TuiApp {
                 let tx = self.event_tx.clone();
                 let id = id.clone();
                 tokio::spawn(async move {
-                    let Ok(_) = client.switch_session(&id).await else { return };
+                    let Ok(_) = client.switch_session(&id).await else {
+                        return;
+                    };
                     let _ = tx.send(AppEvent::ChatComplete).await;
                 });
             }
@@ -491,7 +535,10 @@ impl TuiApp {
             AppEvent::SetCommands(ref commands) => {
                 self.input.set_commands(commands.clone());
             }
-            AppEvent::ExecuteSlashCommand { ref name, ref args_hint } => {
+            AppEvent::ExecuteSlashCommand {
+                ref name,
+                ref args_hint,
+            } => {
                 self.handle_execute_slash_command(name, args_hint);
             }
             AppEvent::ShowSystemMessage(ref msg) => {
@@ -505,7 +552,10 @@ impl TuiApp {
             }
             AppEvent::SetThemes(ref presets) => {
                 self.theme_presets = presets.clone();
-                self.themes = presets.iter().map(|p| Arc::new(Theme::from_preset(p))).collect();
+                self.themes = presets
+                    .iter()
+                    .map(|p| Arc::new(Theme::from_preset(p)))
+                    .collect();
                 let items: Vec<(String, String)> = presets
                     .iter()
                     .map(|p| (p.name.clone(), p.description.clone()))
@@ -532,7 +582,9 @@ impl TuiApp {
                     let client = self.client.clone();
                     let theme_name = self.theme_presets[index].name.clone();
                     tokio::spawn(async move {
-                        let _ = client.execute_command("theme", Some(theme_name), None).await;
+                        let _ = client
+                            .execute_command("theme", Some(theme_name), None)
+                            .await;
                     });
                 }
                 self.input.close_submenu();
@@ -631,10 +683,26 @@ impl TuiApp {
                 }
                 Err(_) => {
                     let fallback = vec![
-                        CommandMeta { name: "clear".into(), description: "Clear conversation".into(), args_hint: None },
-                        CommandMeta { name: "model".into(), description: "Switch model".into(), args_hint: Some("[model_key]".into()) },
-                        CommandMeta { name: "init".into(), description: "Generate AGENTS.md".into(), args_hint: None },
-                        CommandMeta { name: "help".into(), description: "Show help".into(), args_hint: None },
+                        CommandMeta {
+                            name: "clear".into(),
+                            description: "Clear conversation".into(),
+                            args_hint: None,
+                        },
+                        CommandMeta {
+                            name: "model".into(),
+                            description: "Switch model".into(),
+                            args_hint: Some("[model_key]".into()),
+                        },
+                        CommandMeta {
+                            name: "init".into(),
+                            description: "Generate AGENTS.md".into(),
+                            args_hint: None,
+                        },
+                        CommandMeta {
+                            name: "help".into(),
+                            description: "Show help".into(),
+                            args_hint: None,
+                        },
                     ];
                     let _ = tx.send(AppEvent::SetCommands(fallback)).await;
                 }
@@ -649,17 +717,20 @@ impl TuiApp {
         tokio::spawn(async move {
             match client.get_logs(200).await {
                 Ok(entries) => {
-                    let lines: Vec<crate::tui::event::LogLine> = entries.into_iter().map(|e| crate::tui::event::LogLine {
-                        timestamp: e.timestamp,
-                        level: match e.level.as_str() {
-                            "DEBUG" => crate::tui::event::LogLevel::Debug,
-                            "TRACE" => crate::tui::event::LogLevel::Trace,
-                            "ERROR" => crate::tui::event::LogLevel::Error,
-                            _ => crate::tui::event::LogLevel::Info,
-                        },
-                        module: e.module,
-                        message: e.message,
-                    }).collect();
+                    let lines: Vec<crate::tui::event::LogLine> = entries
+                        .into_iter()
+                        .map(|e| crate::tui::event::LogLine {
+                            timestamp: e.timestamp,
+                            level: match e.level.as_str() {
+                                "DEBUG" => crate::tui::event::LogLevel::Debug,
+                                "TRACE" => crate::tui::event::LogLevel::Trace,
+                                "ERROR" => crate::tui::event::LogLevel::Error,
+                                _ => crate::tui::event::LogLevel::Info,
+                            },
+                            module: e.module,
+                            message: e.message,
+                        })
+                        .collect();
                     let _ = tx.send(AppEvent::SetLogHistory(lines)).await;
                 }
                 Err(_) => {}
@@ -697,7 +768,8 @@ impl TuiApp {
     fn handle_execute_slash_command(&mut self, name: &str, _args_hint: &Option<String>) {
         if name == "theme" {
             self.input.enter_submenu_mode();
-            let items: Vec<(String, String)> = self.theme_presets
+            let items: Vec<(String, String)> = self
+                .theme_presets
                 .iter()
                 .map(|p| (p.name.clone(), p.description.clone()))
                 .collect();
@@ -722,13 +794,16 @@ impl TuiApp {
                             let _ = tx.send(AppEvent::ShowSystemMessage(output.message)).await;
                         }
                         if let Some(meta) = output.metadata {
-                            if let Some(model) = meta.get("current_model").and_then(|v| v.as_str()) {
+                            if let Some(model) = meta.get("current_model").and_then(|v| v.as_str())
+                            {
                                 let _ = tx.send(AppEvent::SelectModel(model.to_string())).await;
                             }
                         }
                     }
                     Err(e) => {
-                        let _ = tx.send(AppEvent::ShowSystemMessage(format!("Error: {}", e))).await;
+                        let _ = tx
+                            .send(AppEvent::ShowSystemMessage(format!("Error: {}", e)))
+                            .await;
                     }
                 }
             });

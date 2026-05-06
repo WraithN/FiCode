@@ -73,10 +73,11 @@ pub fn set_global_log_broadcaster(b: Arc<LogBroadcaster>) {
 }
 
 pub fn send_log(level: &str, module: &str, message: String) {
-    let prefix = log_prefix(level, module);
-    eprintln!("{} {}", prefix, message);
     if let Some(broadcaster) = GLOBAL_LOG_BROADCASTER.get() {
         broadcaster.send(level, module, message);
+    } else {
+        let prefix = log_prefix(level, module);
+        eprintln!("{} {}", prefix, message);
     }
 }
 

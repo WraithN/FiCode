@@ -23,6 +23,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::log_info;
 use crate::skills::{
     loader::load_skill_metadata_and_body,
     registry::{cache_skills_dir, cleanup_stale_entries, save_registry},
@@ -110,7 +111,7 @@ pub fn scan_source_dir(
     let dir_entries = match fs::read_dir(source_dir) {
         Ok(entries) => entries,
         Err(e) => {
-            eprintln!(
+            log_info!(
                 "Warning: failed to read source directory {:?}: {}",
                 source_dir, e
             );
@@ -141,7 +142,7 @@ pub fn scan_source_dir(
                 let symlink_path = cache_dir.join(&id);
                 if symlink_path.exists() {
                     if let Err(e) = fs::remove_file(&symlink_path) {
-                        eprintln!(
+                        log_info!(
                             "Warning: failed to remove existing symlink {:?}: {}",
                             symlink_path, e
                         );
@@ -150,7 +151,7 @@ pub fn scan_source_dir(
                 }
 
                 if let Err(e) = create_symlink(&path, &symlink_path) {
-                    eprintln!(
+                    log_info!(
                         "Warning: failed to create symlink {:?} -> {:?}: {}",
                         symlink_path, path, e
                     );
@@ -167,7 +168,7 @@ pub fn scan_source_dir(
                 });
             }
             Err(e) => {
-                eprintln!("Warning: failed to load skill from {:?}: {}", path, e);
+                log_info!("Warning: failed to load skill from {:?}: {}", path, e);
             }
         }
     }

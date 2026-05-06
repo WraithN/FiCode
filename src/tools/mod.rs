@@ -20,6 +20,7 @@
 // SOFTWARE.
 
 use crate::log_debug;
+use crate::log_info;
 use crate::log_trace;
 use crate::mcp::manager::McpManager;
 use crate::session::message::Part;
@@ -532,7 +533,6 @@ async fn execute_single_tool_call(
                 name,
                 output
             );
-            println!("{}", &output[..output.len().min(200)]);
             log_debug!(
                 "execute_tool_call success | name={} | output_len={}",
                 name,
@@ -542,7 +542,6 @@ async fn execute_single_tool_call(
         }
         Err(e) => {
             log_trace!("execute_tool_call raw error | name={} | err={}", name, e);
-            eprintln!("Tool call error: {}", e);
             log_debug!("execute_tool_call error | name={} | err={}", name, e);
             (format!("Error: {}", e), true)
         }
@@ -561,7 +560,7 @@ pub async fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
             arguments,
         } = part else { continue };
 
-        println!("{}", format!("${}", name).yellow());
+        log_info!("calling tool: ${}", name);
         log_debug!("execute_tool_call | name={} | args={}", name, arguments);
 
         let (content, is_error) = execute_single_tool_call(id, name, arguments).await;

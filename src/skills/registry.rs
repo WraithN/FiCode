@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use crate::log_info;
 use std::fs;
 use std::path::PathBuf;
 
@@ -138,7 +139,7 @@ pub fn cleanup_stale_entries(registry: &mut SkillRegistry) {
 
     // 如果没有过期条目，直接返回
     if to_remove_indices.is_empty() {
-        println!("cleanup_stale_entries: 0 entries removed");
+        log_info!("cleanup_stale_entries: 0 entries removed");
         return;
     }
 
@@ -150,7 +151,7 @@ pub fn cleanup_stale_entries(registry: &mut SkillRegistry) {
         // 尝试删除过期的 symlink 文件（如果它还存在的话）
         if entry.symlink_path.exists() {
             if let Err(e) = fs::remove_file(&entry.symlink_path) {
-                eprintln!(
+                log_info!(
                     "Warning: failed to remove stale symlink {:?}: {}",
                     entry.symlink_path, e
                 );
@@ -158,7 +159,7 @@ pub fn cleanup_stale_entries(registry: &mut SkillRegistry) {
         }
     }
 
-    println!("cleanup_stale_entries: {} entries removed", removed_count);
+    log_info!("cleanup_stale_entries: {} entries removed", removed_count);
 }
 
 // =============================================================================

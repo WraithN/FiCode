@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::log_info;
 use super::models::Config;
 
 impl Config {
@@ -108,17 +109,17 @@ fn try_reload_config(
     drop(last);
 
     let Ok(new_config) = Config::load() else {
-        eprintln!("Warning: 配置热重载失败");
+        log_info!("Warning: 配置热重载失败");
         return;
     };
 
     let Ok(mut cfg) = config.write() else {
-        eprintln!("Warning: 配置锁中毒，无法更新");
+        log_info!("Warning: 配置锁中毒，无法更新");
         return;
     };
 
     *cfg = new_config;
-    println!("配置已热重载");
+    log_info!("配置已热重载");
 }
 
 pub fn spawn_watcher(config: Arc<RwLock<Config>>) -> Result<impl notify::Watcher> {
