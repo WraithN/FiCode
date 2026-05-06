@@ -48,6 +48,8 @@ pub struct TuiApp {
     theme: Arc<Theme>,
     themes: Vec<Arc<Theme>>,
     theme_index: usize,
+    theme_presets: Vec<crate::theme::ThemePreset>,
+    preview_theme_backup: Option<(usize, Arc<Theme>)>,
 
     // === 各区域 UI 组件 ===
     header: Header,           // 顶部标题栏（Logo、模型、状态）
@@ -72,10 +74,8 @@ impl TuiApp {
     /// 创建应用实例，初始化默认主题、布局与各个子组件。
     pub fn new() -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
-        let themes = vec![
-            Arc::new(Theme::deep_ocean()),
-            Arc::new(Theme::github_dark()),
-        ];
+        let presets = crate::theme::ThemePreset::all_presets();
+        let themes: Vec<Arc<Theme>> = presets.iter().map(|p| Arc::new(Theme::from_preset(p))).collect();
 
         let (term_w, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
 
@@ -84,6 +84,8 @@ impl TuiApp {
             theme: themes[0].clone(),
             themes,
             theme_index: 0,
+            theme_presets: presets,
+            preview_theme_backup: None,
             header: Header::new(),
             left_drawer: LeftDrawer::new(),
             right_drawer: RightDrawer::new(),
@@ -293,8 +295,11 @@ impl TuiApp {
         }
     }
 
-    /// 处理 Esc 键：优先级为关闭抽屉 > 关闭下拉菜单 > 回到 Main 区域。
-    fn handle_esc_key(&mut self) {
+    /// 处理 Esc 键：优先级为关闭子菜单 > 关闭抽屉 > 关闭下拉菜单 > 回到 Main 区域。
+    fn handle_esc_key(&mut self) -> Option<AppEvent> {
+        if self.input.is_submenu_open() {
+            return Some(AppEvent::CancelThemePreview);
+        }
         if self.layout.panel != PanelState::None {
             self.layout.close_drawers();
         } else if self.header.has_dropdown_open() {
@@ -302,6 +307,7 @@ impl TuiApp {
         } else {
             self.focus = FocusArea::Main;
         }
+        None
     }
 
     /// 当用户在 Main（聊天区）直接按键时，自动将焦点转移到输入框。
@@ -348,7 +354,9 @@ impl TuiApp {
                 }
 
                 if key.code == KeyCode::Esc && key.modifiers.is_empty() {
-                    self.handle_esc_key();
+                    if let Some(ev) = self.handle_esc_key() {
+                        self.handle_app_event(ev).await;
+                    }
                     return;
                 }
 
@@ -472,6 +480,50 @@ impl TuiApp {
             AppEvent::ClearChat => {
                 self.chat.clear_messages();
             }
+            AppEvent::LoadThemes => {
+                self.spawn_load_themes();
+            }
+            AppEvent::SetThemes(ref presets) => {
+                self.theme_presets = presets.clone();
+                self.themes = presets.iter().map(|p| Arc::new(Theme::from_preset(p))).collect();
+                let items: Vec<(String, String)> = presets
+                    .iter()
+                    .map(|p| (p.name.clone(), p.description.clone()))
+                    .collect();
+                self.input.set_submenu_items(items);
+                if self.theme_index >= self.themes.len() && !self.themes.is_empty() {
+                    self.theme_index = 0;
+                    self.theme = self.themes[0].clone();
+                }
+            }
+            AppEvent::PreviewTheme(index) => {
+                if index < self.themes.len() {
+                    if self.preview_theme_backup.is_none() {
+                        self.preview_theme_backup = Some((self.theme_index, self.theme.clone()));
+                    }
+                    self.theme = self.themes[index].clone();
+                }
+            }
+            AppEvent::SelectTheme(index) => {
+                if index < self.themes.len() {
+                    self.theme_index = index;
+                    self.theme = self.themes[index].clone();
+                    self.preview_theme_backup = None;
+                    let client = self.client.clone();
+                    let theme_name = self.theme_presets[index].name.clone();
+                    tokio::spawn(async move {
+                        let _ = client.execute_command("theme", Some(theme_name), None).await;
+                    });
+                }
+                self.input.close_submenu();
+            }
+            AppEvent::CancelThemePreview => {
+                if let Some((idx, theme)) = self.preview_theme_backup.take() {
+                    self.theme_index = idx;
+                    self.theme = theme;
+                }
+                self.input.close_submenu();
+            }
             _ => {}
         }
 
@@ -551,10 +603,36 @@ impl TuiApp {
         });
     }
 
+    /// 异步加载主题列表。
+    fn spawn_load_themes(&self) {
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+        tokio::spawn(async move {
+            match client.list_themes().await {
+                Ok(presets) => {
+                    let _ = tx.send(AppEvent::SetThemes(presets)).await;
+                }
+                Err(_) => {}
+            }
+        });
+    }
+
     /// 处理斜杠命令执行：有参数时等待补全，无参数时直接执行。
-    fn handle_execute_slash_command(&mut self, name: &str, args_hint: &Option<String>) {
+    /// /theme 命令特殊处理：直接进入主题子菜单。
+    fn handle_execute_slash_command(&mut self, name: &str, _args_hint: &Option<String>) {
+        if name == "theme" {
+            self.input.enter_submenu_mode();
+            let items: Vec<(String, String)> = self.theme_presets
+                .iter()
+                .map(|p| (p.name.clone(), p.description.clone()))
+                .collect();
+            self.input.set_submenu_items(items);
+            self.spawn_load_themes();
+            return;
+        }
+
         self.input.set_content(format!("/{}", name));
-        if args_hint.is_some() {
+        if _args_hint.is_some() {
             self.input.set_cursor_position(self.input.content().len());
             self.input.close_dropdown();
         } else {

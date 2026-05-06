@@ -76,6 +76,28 @@ impl Theme {
         }
     }
 
+    /// 从共享的 ThemePreset 构建 Theme。
+    pub fn from_preset(preset: &crate::theme::ThemePreset) -> Self {
+        Self {
+            bg_base: Color::from_u32(preset.bg_base),
+            bg_surface: Color::from_u32(preset.bg_surface),
+            bg_overlay: Color::from_u32(preset.bg_overlay),
+            border: Color::from_u32(preset.border),
+            text_primary: Color::from_u32(preset.text_primary),
+            text_secondary: Color::from_u32(preset.text_secondary),
+            text_muted: Color::from_u32(preset.text_muted),
+            text_placeholder: Color::from_u32(preset.text_placeholder),
+            brand: Color::from_u32(preset.brand),
+            user: Color::from_u32(preset.user),
+            success: Color::from_u32(preset.success),
+            warning: Color::from_u32(preset.warning),
+            error: Color::from_u32(preset.error),
+            selection_bg: Color::from_u32(preset.selection_bg),
+            selection_fg: Color::from_u32(preset.selection_fg),
+            accent_hover: Color::from_u32(preset.accent_hover),
+        }
+    }
+
     /// 基础文本样式：主文字色 + 基础背景色。
     pub fn style_primary(&self) -> Style {
         Style::default().fg(self.text_primary).bg(self.bg_base)

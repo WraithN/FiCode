@@ -300,4 +300,20 @@ impl TuiClient {
             None => Err(anyhow::anyhow!(resp.error.unwrap_or_default())),
         }
     }
+
+    /// 获取所有可用主题预设列表
+    pub async fn list_themes(&self) -> Result<Vec<crate::theme::ThemePreset>> {
+        let resp = self
+            .client
+            .get(format!("{}/api/themes", self.base_url))
+            .send()
+            .await?
+            .json::<ApiResponse<Vec<crate::theme::ThemePreset>>>()
+            .await?;
+
+        match resp.data {
+            Some(data) => Ok(data),
+            None => Err(anyhow::anyhow!(resp.error.unwrap_or_default())),
+        }
+    }
 }

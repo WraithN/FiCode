@@ -44,6 +44,11 @@ pub struct Input {
     last_drawn_area: Option<Rect>,
     dropdown_area: Option<Rect>,
     commands_loaded: bool,
+    // 子菜单（主题选择）
+    submenu_mode: bool,
+    submenu_items: Vec<(String, String)>, // (name, description)
+    submenu_selected: usize,
+    submenu_loaded: bool,
 }
 
 impl Input {
@@ -58,6 +63,10 @@ impl Input {
             last_drawn_area: None,
             dropdown_area: None,
             commands_loaded: false,
+            submenu_mode: false,
+            submenu_items: Vec::new(),
+            submenu_selected: 0,
+            submenu_loaded: false,
         }
     }
 
@@ -78,18 +87,46 @@ impl Input {
         self.dropdown_visible
     }
 
+    pub fn enter_submenu_mode(&mut self) {
+        self.submenu_mode = true;
+        self.submenu_selected = 0;
+        self.dropdown_visible = true;
+    }
+
+    pub fn set_submenu_items(&mut self, items: Vec<(String, String)>) {
+        self.submenu_items = items;
+        self.submenu_loaded = true;
+    }
+
+    pub fn close_submenu(&mut self) {
+        self.submenu_mode = false;
+        self.dropdown_visible = false;
+    }
+
+    pub fn is_submenu_open(&self) -> bool {
+        self.submenu_mode && self.dropdown_visible
+    }
+
     pub fn set_last_drawn_area(&mut self, area: Rect) {
         self.last_drawn_area = Some(area);
     }
 
     pub fn update_dropdown_area(&mut self, input_area: Rect) {
-        if !self.dropdown_visible || self.dropdown_items.is_empty() {
+        if !self.dropdown_visible {
             self.dropdown_area = None;
             return;
         }
-        let items_len = self.dropdown_items.len() as u16;
+        let items_len = if self.submenu_mode {
+            self.submenu_items.len() as u16
+        } else {
+            self.dropdown_items.len() as u16
+        };
+        if items_len == 0 {
+            self.dropdown_area = None;
+            return;
+        }
         let height = items_len + 2;
-        let width = 40u16.min(input_area.width);
+        let width = input_area.width;
         let x = input_area.x;
         let y = input_area.y.saturating_sub(height);
         self.dropdown_area = Some(Rect::new(x, y, width, height));
@@ -233,32 +270,64 @@ impl Component for Input {
                 }
 
                 if self.dropdown_visible {
-                    match key.code {
-                        KeyCode::Up => {
-                            if self.dropdown_selected > 0 {
-                                self.dropdown_selected -= 1;
+                    if self.submenu_mode {
+                        match key.code {
+                            KeyCode::Up => {
+                                if self.submenu_selected > 0 {
+                                    self.submenu_selected -= 1;
+                                }
+                                return Some(AppEvent::PreviewTheme(self.submenu_selected));
                             }
-                            return None;
-                        }
-                        KeyCode::Down => {
-                            if self.dropdown_selected < self.dropdown_items.len().saturating_sub(1) {
-                                self.dropdown_selected += 1;
+                            KeyCode::Down => {
+                                if self.submenu_selected < self.submenu_items.len().saturating_sub(1) {
+                                    self.submenu_selected += 1;
+                                }
+                                return Some(AppEvent::PreviewTheme(self.submenu_selected));
                             }
-                            return None;
-                        }
-                        KeyCode::Enter => {
-                            if let Some(cmd) = self.dropdown_items.get(self.dropdown_selected) {
-                                return Some(AppEvent::ExecuteSlashCommand {
-                                    name: cmd.name.clone(),
-                                    args_hint: cmd.args_hint.clone(),
-                                });
+                            KeyCode::Enter => {
+                                if self.submenu_selected < self.submenu_items.len() {
+                                    let idx = self.submenu_selected;
+                                    self.close_submenu();
+                                    return Some(AppEvent::SelectTheme(idx));
+                                }
+                            }
+                            KeyCode::Esc => {
+                                self.close_submenu();
+                                return Some(AppEvent::CancelThemePreview);
+                            }
+                            _ => {
+                                self.close_submenu();
+                                return Some(AppEvent::CancelThemePreview);
                             }
                         }
-                        KeyCode::Esc => {
-                            self.dropdown_visible = false;
-                            return None;
+                    } else {
+                        match key.code {
+                            KeyCode::Up => {
+                                if self.dropdown_selected > 0 {
+                                    self.dropdown_selected -= 1;
+                                }
+                                return None;
+                            }
+                            KeyCode::Down => {
+                                if self.dropdown_selected < self.dropdown_items.len().saturating_sub(1) {
+                                    self.dropdown_selected += 1;
+                                }
+                                return None;
+                            }
+                            KeyCode::Enter => {
+                                if let Some(cmd) = self.dropdown_items.get(self.dropdown_selected) {
+                                    return Some(AppEvent::ExecuteSlashCommand {
+                                        name: cmd.name.clone(),
+                                        args_hint: cmd.args_hint.clone(),
+                                    });
+                                }
+                            }
+                            KeyCode::Esc => {
+                                self.dropdown_visible = false;
+                                return None;
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
 
@@ -303,43 +372,83 @@ impl Component for Input {
                 if !self.dropdown_visible {
                     return None;
                 }
-                match mouse.kind {
-                    crossterm::event::MouseEventKind::ScrollUp => {
-                        if self.dropdown_selected > 0 {
-                            self.dropdown_selected -= 1;
-                        }
-                        None
-                    }
-                    crossterm::event::MouseEventKind::ScrollDown => {
-                        if self.dropdown_selected < self.dropdown_items.len().saturating_sub(1) {
-                            self.dropdown_selected += 1;
-                        }
-                        None
-                    }
-                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                        if let Some(area) = self.dropdown_area {
-                            let mx = mouse.column;
-                            let my = mouse.row;
-                            if mx >= area.x && mx < area.x + area.width
-                                && my >= area.y && my < area.y + area.height
-                            {
-                                let item_y = my.saturating_sub(area.y + 1);
-                                let index = item_y as usize;
-                                if index < self.dropdown_items.len() {
-                                    self.dropdown_selected = index;
-                                    let cmd = &self.dropdown_items[index];
-                                    return Some(AppEvent::ExecuteSlashCommand {
-                                        name: cmd.name.clone(),
-                                        args_hint: cmd.args_hint.clone(),
-                                    });
-                                }
-                            } else {
-                                self.dropdown_visible = false;
+                if self.submenu_mode {
+                    match mouse.kind {
+                        crossterm::event::MouseEventKind::ScrollUp => {
+                            if self.submenu_selected > 0 {
+                                self.submenu_selected -= 1;
                             }
+                            Some(AppEvent::PreviewTheme(self.submenu_selected))
                         }
-                        None
+                        crossterm::event::MouseEventKind::ScrollDown => {
+                            if self.submenu_selected < self.submenu_items.len().saturating_sub(1) {
+                                self.submenu_selected += 1;
+                            }
+                            Some(AppEvent::PreviewTheme(self.submenu_selected))
+                        }
+                        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                            if let Some(area) = self.dropdown_area {
+                                let mx = mouse.column;
+                                let my = mouse.row;
+                                if mx >= area.x && mx < area.x + area.width
+                                    && my >= area.y && my < area.y + area.height
+                                {
+                                    let item_y = my.saturating_sub(area.y + 1);
+                                    let index = item_y as usize;
+                                    if index < self.submenu_items.len() {
+                                        self.submenu_selected = index;
+                                        let idx = self.submenu_selected;
+                                        self.close_submenu();
+                                        return Some(AppEvent::SelectTheme(idx));
+                                    }
+                                } else {
+                                    self.close_submenu();
+                                    return Some(AppEvent::CancelThemePreview);
+                                }
+                            }
+                            None
+                        }
+                        _ => None,
                     }
-                    _ => None,
+                } else {
+                    match mouse.kind {
+                        crossterm::event::MouseEventKind::ScrollUp => {
+                            if self.dropdown_selected > 0 {
+                                self.dropdown_selected -= 1;
+                            }
+                            None
+                        }
+                        crossterm::event::MouseEventKind::ScrollDown => {
+                            if self.dropdown_selected < self.dropdown_items.len().saturating_sub(1) {
+                                self.dropdown_selected += 1;
+                            }
+                            None
+                        }
+                        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                            if let Some(area) = self.dropdown_area {
+                                let mx = mouse.column;
+                                let my = mouse.row;
+                                if mx >= area.x && mx < area.x + area.width
+                                    && my >= area.y && my < area.y + area.height
+                                {
+                                    let item_y = my.saturating_sub(area.y + 1);
+                                    let index = item_y as usize;
+                                    if index < self.dropdown_items.len() {
+                                        self.dropdown_selected = index;
+                                        let cmd = &self.dropdown_items[index];
+                                        return Some(AppEvent::ExecuteSlashCommand {
+                                            name: cmd.name.clone(),
+                                            args_hint: cmd.args_hint.clone(),
+                                        });
+                                    }
+                                } else {
+                                    self.dropdown_visible = false;
+                                }
+                            }
+                            None
+                        }
+                        _ => None,
+                    }
                 }
             }
             _ => None,
@@ -350,6 +459,48 @@ impl Component for Input {
 impl Input {
     /// 渲染斜杠命令下拉菜单：显示在输入框上方，包含命令名与描述。
     fn draw_dropdown(&self, frame: &mut Frame, input_area: Rect, theme: &Theme) {
+        if self.submenu_mode {
+            self.draw_submenu(frame, input_area, theme);
+        } else {
+            self.draw_command_dropdown(frame, input_area, theme);
+        }
+    }
+
+    fn draw_submenu(&self, frame: &mut Frame, input_area: Rect, theme: &Theme) {
+        let items: Vec<Line> = self
+            .submenu_items
+            .iter()
+            .enumerate()
+            .map(|(i, (name, desc))| {
+                let style = if i == self.submenu_selected {
+                    theme.style_selection()
+                } else {
+                    theme.style_primary()
+                };
+                Line::from(vec![
+                    Span::styled(name.clone(), style.add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" - {}", desc), style),
+                ])
+            })
+            .collect();
+
+        let height = items.len() as u16 + 2;
+        let width = input_area.width;
+        let x = input_area.x;
+        let y = input_area.y.saturating_sub(height);
+
+        let area = Rect::new(x, y, width, height);
+
+        let paragraph = Paragraph::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border))
+                .style(theme.drawer_style()),
+        );
+        frame.render_widget(paragraph, area);
+    }
+
+    fn draw_command_dropdown(&self, frame: &mut Frame, input_area: Rect, theme: &Theme) {
         let items: Vec<Line> = self
             .dropdown_items
             .iter()
@@ -371,7 +522,7 @@ impl Input {
             .collect();
 
         let height = items.len() as u16 + 2;
-        let width = 40u16.min(input_area.width);
+        let width = input_area.width;
         let x = input_area.x;
         let y = input_area.y.saturating_sub(height);
 

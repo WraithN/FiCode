@@ -32,6 +32,7 @@ mod server;
 mod session;
 mod skills;
 mod task;
+mod theme;
 mod tools;
 mod tui;
 mod utils;

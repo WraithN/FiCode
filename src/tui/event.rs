@@ -39,6 +39,8 @@ pub enum AppEvent {
     ToggleThemeDropdown,
     SelectModel(String),
     SelectTheme(usize),
+    PreviewTheme(usize),   // 预览主题（方向键移动时触发，未确认）
+    CancelThemePreview,    // 取消主题预览（Esc 时恢复原来主题）
     NewSession,
     NewSessionWithName(String),
     NewSessionFromTemplate(SessionTemplate),
@@ -64,6 +66,8 @@ pub enum AppEvent {
     LoadCommands,
     SetCommands(Vec<crate::commands::registry::CommandMeta>),
     ShowSystemMessage(String),
+    LoadThemes,
+    SetThemes(Vec<crate::theme::ThemePreset>),
     Quit,
 }
 

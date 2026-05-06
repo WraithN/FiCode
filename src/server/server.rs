@@ -21,6 +21,7 @@
 
 use std::sync::{Arc, RwLock};
 
+use anyhow::anyhow;
 use axum::{
     extract::State,
     http::{header, HeaderMap, HeaderValue, StatusCode},
@@ -54,6 +55,8 @@ pub struct AppState {
     pub config: Arc<RwLock<Config>>,
     pub sessions: Arc<HttpSessionManager>,
     pub commands: Arc<CommandRegistry>,
+    pub themes: Vec<crate::theme::ThemePreset>,
+    pub current_theme: Arc<RwLock<String>>,
 }
 
 pub struct Server {
@@ -129,12 +132,52 @@ impl Server {
             Box::new(InitCommandHandler),
         );
 
+        // 注册 /theme 命令处理器
+        let current_theme = Arc::new(RwLock::new("deep_ocean".to_string()));
+        let current_theme_for_handler = current_theme.clone();
+        struct ThemeHandler {
+            current_theme: Arc<RwLock<String>>,
+        }
+
+        #[async_trait::async_trait]
+        impl CommandHandler for ThemeHandler {
+            async fn execute(
+                &self,
+                args: Option<String>,
+                _ctx: &CommandContext,
+            ) -> anyhow::Result<CommandOutput> {
+                if let Some(theme_name) = args.filter(|s| !s.is_empty()) {
+                    let mut current = self.current_theme.write().map_err(|_| anyhow!("主题锁中毒"))?;
+                    *current = theme_name.clone();
+                    Ok(CommandOutput::text(format!("✅ 已切换主题: {}", theme_name)))
+                } else {
+                    let current = self.current_theme.read().map_err(|_| anyhow!("主题锁中毒"))?;
+                    Ok(CommandOutput::text(format!("当前主题: {}", *current)))
+                }
+            }
+        }
+
+        commands.register(
+            CommandMeta {
+                name: "theme".into(),
+                description: "Switch theme".into(),
+                args_hint: Some("[theme_name]".into()),
+            },
+            Box::new(ThemeHandler {
+                current_theme: current_theme_for_handler,
+            }),
+        );
+
+        let themes = crate::theme::ThemePreset::all_presets();
+
         Self {
             state: AppState {
                 provider,
                 config,
                 sessions,
                 commands: Arc::new(commands),
+                themes,
+                current_theme,
             },
             port,
         }
@@ -160,6 +203,7 @@ impl Server {
             .route("/api/files/content", get(file_api::file_content))
             .route("/api/commands", get(handle_list_commands))
             .route("/api/commands/:name/execute", post(handle_execute_command))
+            .route("/api/themes", get(handle_list_themes))
             .layer(cors_layer(self.state.config.clone()))
             .with_state(self.state.clone());
 
@@ -315,6 +359,13 @@ async fn handle_execute_command(
         Ok(output) => Json(ApiResponse::success(output)),
         Err(e) => Json(ApiResponse::error(e.to_string(), "COMMAND_ERROR")),
     }
+}
+
+/// 列出所有可用主题
+async fn handle_list_themes(
+    State(state): State<AppState>,
+) -> Json<ApiResponse<Vec<crate::theme::ThemePreset>>> {
+    Json(ApiResponse::success(state.themes.clone()))
 }
 
 async fn send_last_assistant_text(messages: &[Message], sse_sender: &SseSender) {
