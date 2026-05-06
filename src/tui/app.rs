@@ -29,8 +29,8 @@ use tokio::sync::mpsc;
 use crate::commands::registry::CommandMeta;
 use crate::server::sse::SseEvent;
 use crate::tui::components::{
-    chat::Chat, header::Header, input::Input, left_drawer::LeftDrawer, right_drawer::RightDrawer,
-    status_bar::StatusBar, Component,
+    chat::Chat, header::Header, input::Input, left_drawer::LeftDrawer, log_window::LogWindow,
+    right_drawer::RightDrawer, status_bar::StatusBar, Component,
 };
 use crate::tui::event::{AppEvent, FocusArea};
 use crate::tui::layout::{LayoutManager, PanelState};
@@ -58,6 +58,7 @@ pub struct TuiApp {
     chat: Chat,               // 中间聊天消息区
     input: Input,             // 底部输入框
     status_bar: StatusBar,    // 最底部快捷键提示栏
+    log_window: LogWindow,     // 日志浮窗
 
     // === 应用状态 ===
     focus: FocusArea,         // 当前焦点所在区域
@@ -92,6 +93,7 @@ impl TuiApp {
             chat: Chat::new(),
             input: Input::new(),
             status_bar: StatusBar::new(),
+            log_window: LogWindow::new(),
             focus: FocusArea::Input,
             is_generating: false,
             should_quit: false,
@@ -167,6 +169,10 @@ impl TuiApp {
         self.input.set_last_drawn_area(input_area);
         self.input.update_dropdown_area(input_area);
         self.status_bar.draw(frame, areas.status_bar, &self.theme, false);
+
+        if let Some(log_area) = areas.log_window {
+            self.log_window.draw(frame, log_area, &self.theme, false);
+        }
 
         if let Some(overlay_area) = areas.overlay {
             let dim = ratatui::widgets::Block::default()
@@ -282,6 +288,9 @@ impl TuiApp {
                 self.focus = FocusArea::Header;
             }
             't' => self.next_theme(),
+            'l' => {
+                self.handle_app_event(AppEvent::ToggleLogWindow).await;
+            }
             _ => {}
         }
     }
@@ -295,8 +304,11 @@ impl TuiApp {
         }
     }
 
-    /// 处理 Esc 键：优先级为关闭子菜单 > 关闭抽屉 > 关闭下拉菜单 > 回到 Main 区域。
+    /// 处理 Esc 键：优先级为关闭日志窗口 > 关闭子菜单 > 关闭抽屉 > 关闭下拉菜单 > 回到 Main 区域。
     fn handle_esc_key(&mut self) -> Option<AppEvent> {
+        if self.log_window.is_visible() {
+            return Some(AppEvent::ToggleLogWindow);
+        }
         if self.input.is_submenu_open() {
             return Some(AppEvent::CancelThemePreview);
         }
@@ -383,6 +395,14 @@ impl TuiApp {
     /// 若组件返回 `Some(AppEvent)`，说明组件产生了更高层级的应用事件（如提交消息、切换会话），
     /// 需要再交给 `handle_app_event` 统一处理。
     async fn dispatch_event(&mut self, event: Event) {
+        // 如果日志窗口可见，先让它处理滚动事件
+        if self.log_window.is_visible() {
+            if let Some(app_event) = self.log_window.handle_event(&event, true) {
+                self.handle_app_event(app_event).await;
+                return;
+            }
+        }
+
         let app_event = match self.focus {
             FocusArea::Header => self.header.handle_event(&event, true),
             FocusArea::LeftDrawer => self.left_drawer.handle_event(&event, true),
@@ -524,6 +544,24 @@ impl TuiApp {
                 }
                 self.input.close_submenu();
             }
+            AppEvent::ToggleLogWindow => {
+                let visible = !self.log_window.is_visible();
+                self.log_window.set_visible(visible);
+                self.layout.log_window = visible;
+                if visible {
+                    self.spawn_load_logs();
+                    self.spawn_log_stream();
+                }
+            }
+            AppEvent::SetLogHistory(ref lines) => {
+                self.log_window.set_lines(lines.clone());
+            }
+            AppEvent::AppendLog(ref line) => {
+                self.log_window.append(line.clone());
+            }
+            AppEvent::LogDisconnected => {
+                self.log_window.set_disconnected(true);
+            }
             _ => {}
         }
 
@@ -537,6 +575,7 @@ impl TuiApp {
         self.left_drawer.update(&event);
         self.right_drawer.update(&event);
         self.status_bar.update(&event);
+        self.log_window.update(&event);
     }
 
     /// 启动聊天 SSE 流。
@@ -599,6 +638,42 @@ impl TuiApp {
                     ];
                     let _ = tx.send(AppEvent::SetCommands(fallback)).await;
                 }
+            }
+        });
+    }
+
+    /// 异步加载日志历史列表。
+    fn spawn_load_logs(&self) {
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+        tokio::spawn(async move {
+            match client.get_logs(200).await {
+                Ok(entries) => {
+                    let lines: Vec<crate::tui::event::LogLine> = entries.into_iter().map(|e| crate::tui::event::LogLine {
+                        timestamp: e.timestamp,
+                        level: match e.level.as_str() {
+                            "DEBUG" => crate::tui::event::LogLevel::Debug,
+                            "TRACE" => crate::tui::event::LogLevel::Trace,
+                            "ERROR" => crate::tui::event::LogLevel::Error,
+                            _ => crate::tui::event::LogLevel::Info,
+                        },
+                        module: e.module,
+                        message: e.message,
+                    }).collect();
+                    let _ = tx.send(AppEvent::SetLogHistory(lines)).await;
+                }
+                Err(_) => {}
+            }
+        });
+    }
+
+    /// 订阅日志 SSE 实时流。
+    fn spawn_log_stream(&self) {
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+        tokio::spawn(async move {
+            if let Err(_) = client.subscribe_logs(tx.clone()).await {
+                let _ = tx.send(AppEvent::LogDisconnected).await;
             }
         });
     }
