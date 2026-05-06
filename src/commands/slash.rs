@@ -20,9 +20,11 @@
 // SOFTWARE.
 
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use colored::Colorize;
 use std::sync::{Arc, RwLock};
 
+use crate::commands::registry::{CommandContext, CommandHandler, CommandOutput, OutputType};
 use crate::config::Config;
 use crate::provider::Provider;
 use crate::session::message::{Message, Part, Role};
@@ -77,9 +79,26 @@ impl SlashCommandHandler {
     }
 
     pub async fn execute(&self, cmd: SlashCommand) -> Result<SlashCommandResult> {
+        let ctx = CommandContext {
+            provider: self.provider.clone(),
+            config: self.config.clone(),
+            session_id: None,
+        };
+
         match cmd {
-            SlashCommand::Model(model_key) => self.handle_model(model_key).await,
-            SlashCommand::Init => self.handle_init().await,
+            SlashCommand::Model(model_key) => {
+                let output = ModelCommandHandler.execute(model_key, &ctx).await?;
+                match output.r#type {
+                    OutputType::Error => eprintln!("{}", output.message),
+                    _ => println!("{}", output.message),
+                }
+                Ok(SlashCommandResult::Handled)
+            }
+            SlashCommand::Init => {
+                let output = InitCommandHandler.execute(None, &ctx).await?;
+                println!("{}", output.message);
+                Ok(SlashCommandResult::Handled)
+            }
             SlashCommand::Unknown(name) if name.is_empty() => {
                 unreachable!()
             }
@@ -93,39 +112,76 @@ impl SlashCommandHandler {
             }
         }
     }
+}
 
-    async fn handle_model(&self, model_key: Option<String>) -> Result<SlashCommandResult> {
-        let cfg = self.config.read().map_err(|_| anyhow!("配置锁中毒"))?;
-        let mut provider = self
+/// /model 命令处理器
+pub struct ModelCommandHandler;
+
+#[async_trait]
+impl CommandHandler for ModelCommandHandler {
+    async fn execute(&self, args: Option<String>, ctx: &CommandContext) -> Result<CommandOutput> {
+        let cfg = ctx.config.read().map_err(|_| anyhow!("配置锁中毒"))?;
+        let mut provider = ctx
             .provider
             .write()
             .map_err(|_| anyhow!("Provider锁中毒"))?;
 
-        if let Some(key) = model_key {
+        // 辅助闭包：构造模型列表文本
+        let build_list = |cfg: &Config| -> Result<String> {
+            let models = ctx
+                .provider
+                .read()
+                .map_err(|_| anyhow!("Provider锁中毒"))?
+                .list_models(cfg);
+            if models.is_empty() {
+                return Ok("❌ 配置文件中未找到任何模型\n".to_string());
+            }
+            let mut output = String::from("可用模型列表：\n");
+            for (i, (mkey, display)) in models.iter().enumerate() {
+                let mut limit_str = String::new();
+                for (_pname, pcfg) in &cfg.provider {
+                    if let Some(mcfg) = pcfg.models.get(mkey) {
+                        limit_str = format!(
+                            " (context: {}, output: {})",
+                            mcfg.limit.context, mcfg.limit.output
+                        );
+                        break;
+                    }
+                }
+                output.push_str(&format!("  [{}] {} — {}{}\n", i + 1, mkey, display, limit_str));
+            }
+            Ok(output)
+        };
+
+        if let Some(key) = args {
             if provider.list_models(&cfg).iter().any(|(k, _)| k == &key) {
                 provider.set_model(&key, &cfg)?;
-                println!("✅ 已切换模型: {}", key);
+                Ok(CommandOutput::text(format!("✅ 已切换模型: {}", key)))
             } else {
-                eprintln!("❌ 没有此模型: {}", key);
-                // drop provider lock before print_model_list
+                let mut msg = format!("❌ 没有此模型: {}\n", key);
                 drop(provider);
-                self.print_model_list(&cfg)?;
+                msg.push_str(&build_list(&cfg)?);
+                Ok(CommandOutput::error(msg))
             }
         } else {
             drop(provider);
-            self.print_model_list(&cfg)?;
+            Ok(CommandOutput::text(build_list(&cfg)?))
         }
-        Ok(SlashCommandResult::Handled)
     }
+}
 
-    async fn handle_init(&self) -> Result<SlashCommandResult> {
+/// /init 命令处理器
+pub struct InitCommandHandler;
+
+#[async_trait]
+impl CommandHandler for InitCommandHandler {
+    async fn execute(&self, _args: Option<String>, ctx: &CommandContext) -> Result<CommandOutput> {
         use crate::agent::runner::AgentRunner;
         use crate::tools::tool_schema;
         use crate::utils::workspace::workspace_dir;
 
         let workspace = workspace_dir();
         let agents_path = workspace.join("AGENTS.md");
-        println!("{} 正在分析项目结构，生成 AGENTS.md...", "🔍".yellow());
 
         let system_prompt = r#"你是一个项目文档助手。请深入分析当前项目的结构、技术栈、代码风格和重要约定，生成一份 AGENTS.md 文件。AGENTS.md 的目标是帮助 AI 编程助手快速理解项目背景。
 
@@ -147,7 +203,7 @@ impl SlashCommandHandler {
             agents_path.display()
         );
 
-        let client = self
+        let client = ctx
             .provider
             .read()
             .map_err(|_| anyhow!("Provider锁中毒"))?
@@ -171,44 +227,17 @@ impl SlashCommandHandler {
         });
 
         if has_write || agents_path.exists() {
-            println!(
+            Ok(CommandOutput::text(format!(
                 "{} AGENTS.md 已生成: {}",
                 "✅".green(),
                 agents_path.display()
-            );
+            )))
         } else {
-            println!("{} AGENTS.md 可能未生成，请检查对话结果", "⚠️".yellow());
+            Ok(CommandOutput::text(format!(
+                "{} AGENTS.md 可能未生成，请检查对话结果",
+                "⚠️".yellow()
+            )))
         }
-
-        Ok(SlashCommandResult::Handled)
-    }
-
-    fn print_model_list(&self, cfg: &Config) -> Result<()> {
-        let models = self
-            .provider
-            .read()
-            .map_err(|_| anyhow!("Provider锁中毒"))?
-            .list_models(cfg);
-        if models.is_empty() {
-            println!("{} 配置文件中未找到任何模型", "❌".red());
-            return Ok(());
-        }
-
-        println!("可用模型列表：");
-        for (i, (key, display)) in models.iter().enumerate() {
-            let mut limit_str = String::new();
-            for (_pname, pcfg) in &cfg.provider {
-                if let Some(mcfg) = pcfg.models.get(key) {
-                    limit_str = format!(
-                        " (context: {}, output: {})",
-                        mcfg.limit.context, mcfg.limit.output
-                    );
-                    break;
-                }
-            }
-            println!("  [{}] {} — {}{}", i + 1, key, display, limit_str);
-        }
-        Ok(())
     }
 }
 
