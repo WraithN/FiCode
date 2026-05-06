@@ -38,6 +38,7 @@ pub struct LayoutManager {
     pub terminal_size: (u16, u16), // (宽, 高)
     pub panel: PanelState,         // 当前打开的面板
     pub narrow_mode: bool,         // 是否为窄屏模式
+    pub log_window: bool,          // 是否显示日志窗口
 }
 
 /// 计算出的各区域坐标与尺寸。
@@ -49,6 +50,7 @@ pub struct LayoutAreas {
     pub right_drawer: Option<Rect>,
     pub status_bar: Rect,
     pub overlay: Option<Rect>, // 窄屏模式下的抽屉浮层
+    pub log_window: Option<Rect>, // 日志窗口
 }
 
 impl LayoutManager {
@@ -59,6 +61,7 @@ impl LayoutManager {
             terminal_size: (width, height),
             panel: PanelState::None,
             narrow_mode,
+            log_window: false,
         }
     }
 
@@ -106,9 +109,18 @@ impl LayoutManager {
                 PanelState::None => 0,
             };
 
+            let mut main = Rect::new(0, header_height, width, main_height);
+            let log_window = if self.log_window {
+                let log_height = (main.height as f32 * 0.6) as u16;
+                main.height = main.height.saturating_sub(log_height);
+                Some(Rect::new(main.x, main.y + main.height, main.width, log_height))
+            } else {
+                None
+            };
+
             LayoutAreas {
                 header: Rect::new(0, 0, width, header_height),
-                main: Rect::new(0, header_height, width, main_height),
+                main,
                 status_bar: Rect::new(0, height - status_height, width, status_height),
                 left_drawer: None,
                 right_drawer: None,
@@ -118,6 +130,7 @@ impl LayoutManager {
                     overlay_width,
                     main_height,
                 )),
+                log_window,
             }
         } else {
             let drawer_width = ((width as f32 * 0.28) as u16).clamp(24, 40);
@@ -132,15 +145,25 @@ impl LayoutManager {
                 PanelState::None => (0, 0, width),
             };
 
+            let mut main = Rect::new(main_x, header_height, main_width, main_height);
+            let log_window = if self.log_window {
+                let log_height = (main.height as f32 * 0.6) as u16;
+                main.height = main.height.saturating_sub(log_height);
+                Some(Rect::new(main.x, main.y + main.height, main.width, log_height))
+            } else {
+                None
+            };
+
             LayoutAreas {
                 header: Rect::new(0, 0, width, header_height),
                 left_drawer: (self.panel == PanelState::LeftDrawer)
                     .then(|| Rect::new(left_x, header_height, drawer_width, main_height)),
-                main: Rect::new(main_x, header_height, main_width, main_height),
+                main,
                 right_drawer: (self.panel == PanelState::RightDrawer)
                     .then(|| Rect::new(right_x, header_height, drawer_width, main_height)),
                 status_bar: Rect::new(0, height - status_height, width, status_height),
                 overlay: None,
+                log_window,
             }
         }
     }
@@ -221,5 +244,19 @@ mod tests {
         assert_eq!(messages.height, 15);
         assert_eq!(messages.width, 100);
         assert_eq!(input.width, 100);
+    }
+
+    #[test]
+    fn test_log_window_split() {
+        let mut layout = LayoutManager::new(100, 30);
+        layout.log_window = true;
+        let areas = layout.calculate();
+        assert!(areas.log_window.is_some());
+        let log = areas.log_window.unwrap();
+        let main = areas.main;
+        assert_eq!(main.height + log.height, 30 - 3 - 1); // minus header + status
+        assert!(log.height > main.height);
+        assert_eq!(log.y, main.y + main.height);
+        assert_eq!(log.width, main.width);
     }
 }
