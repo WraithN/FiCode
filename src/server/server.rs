@@ -57,6 +57,7 @@ pub struct AppState {
     pub commands: Arc<CommandRegistry>,
     pub themes: Vec<crate::theme::ThemePreset>,
     pub current_theme: Arc<RwLock<String>>,
+    pub log_broadcaster: Option<Arc<crate::utils::log_store::LogBroadcaster>>,
 }
 
 pub struct Server {
@@ -178,9 +179,15 @@ impl Server {
                 commands: Arc::new(commands),
                 themes,
                 current_theme,
+                log_broadcaster: None,
             },
             port,
         }
+    }
+
+    pub fn with_log_broadcaster(mut self, broadcaster: Arc<crate::utils::log_store::LogBroadcaster>) -> Self {
+        self.state.log_broadcaster = Some(broadcaster);
+        self
     }
 
     pub async fn run(self) {
@@ -204,6 +211,8 @@ impl Server {
             .route("/api/commands", get(handle_list_commands))
             .route("/api/commands/:name/execute", post(handle_execute_command))
             .route("/api/themes", get(handle_list_themes))
+            .route("/api/logs", get(crate::server::log_api::handle_list_logs))
+            .route("/api/logs/stream", get(crate::server::log_api::handle_log_stream))
             .layer(cors_layer(self.state.config.clone()))
             .with_state(self.state.clone());
 

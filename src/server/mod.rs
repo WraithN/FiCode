@@ -20,6 +20,7 @@
 // SOFTWARE.
 
 pub mod file_api;
+pub mod log_api;
 pub mod models;
 pub mod rpc;
 pub mod server;
