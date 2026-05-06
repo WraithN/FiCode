@@ -29,6 +29,8 @@ use tokio::sync::mpsc;
 use crate::commands::registry::{CommandMeta, CommandOutput};
 use crate::server::rpc::{JsonRpcRequest, JsonRpcResponse};
 use crate::server::sse::SseEvent;
+use crate::tui::event::{AppEvent, LogLevel, LogLine};
+use crate::utils::log_store::LogEntry;
 
 /// 单个会话的元信息。
 #[derive(Debug, Deserialize)]
@@ -315,5 +317,59 @@ impl TuiClient {
             Some(data) => Ok(data),
             None => Err(anyhow::anyhow!(resp.error.unwrap_or_default())),
         }
+    }
+
+    pub async fn get_logs(&self, limit: usize) -> Result<Vec<LogEntry>> {
+        let resp = self
+            .client
+            .get(format!("{}/api/logs?limit={}", self.base_url, limit))
+            .send()
+            .await?
+            .json::<ApiResponse<Vec<LogEntry>>>()
+            .await?;
+
+        match resp.data {
+            Some(data) => Ok(data),
+            None => Err(anyhow::anyhow!(resp.error.unwrap_or_default())),
+        }
+    }
+
+
+    pub async fn subscribe_logs(&self, tx: mpsc::Sender<AppEvent>) -> Result<()> {
+        let url = format!("{}/api/logs/stream", self.base_url);
+        let response = self.client.get(&url).send().await?;
+
+        let mut stream = response.bytes_stream();
+        let mut buf = String::new();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            buf.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(pos) = buf.find("\n\n") {
+                let event = buf[..pos].to_string();
+                buf = buf[pos + 2..].to_string();
+
+                if let Some(data) = event.strip_prefix("data: ") {
+                    if let Ok(entry) = serde_json::from_str::<LogEntry>(data.trim()) {
+                        let line = LogLine {
+                            timestamp: entry.timestamp,
+                            level: match entry.level.as_str() {
+                                "DEBUG" => LogLevel::Debug,
+                                "TRACE" => LogLevel::Trace,
+                                "ERROR" => LogLevel::Error,
+                                _ => LogLevel::Info,
+                            },
+                            module: entry.module,
+                            message: entry.message,
+                        };
+                        let _ = tx.send(AppEvent::AppendLog(line)).await;
+                    }
+                }
+            }
+        }
+
+        let _ = tx.send(AppEvent::LogDisconnected).await;
+        Ok(())
     }
 }
