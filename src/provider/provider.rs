@@ -45,6 +45,12 @@ pub struct Provider {
     model: Option<Model>,
 }
 
+impl Default for Provider {
+    fn default() -> Self {
+        Self { model: None }
+    }
+}
+
 impl Provider {
     pub fn new(config: Arc<RwLock<Config>>) -> Result<Self> {
         // 1. 优先尝试环境变量

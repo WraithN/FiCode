@@ -19,5 +19,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+pub mod registry;
+pub use registry::{
+    CommandContext, CommandHandler, CommandMeta, CommandOutput, CommandRegistry, OutputType,
+};
+
 pub mod slash;
 pub use slash::{parse, SlashCommand, SlashCommandHandler, SlashCommandResult};
