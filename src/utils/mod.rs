@@ -21,4 +21,5 @@
 
 pub mod cli;
 pub mod log;
+pub mod log_store;
 pub mod workspace;

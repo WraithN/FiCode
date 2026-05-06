@@ -20,6 +20,8 @@
 // SOFTWARE.
 
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, OnceLock};
+use crate::utils::log_store::LogBroadcaster;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
@@ -64,13 +66,28 @@ pub fn log_prefix(level: &str, module: &str) -> String {
     format!("{} [{:<5}] [{:<30.30}]", now, level, module)
 }
 
+static GLOBAL_LOG_BROADCASTER: OnceLock<Arc<LogBroadcaster>> = OnceLock::new();
+
+pub fn set_global_log_broadcaster(b: Arc<LogBroadcaster>) {
+    let _ = GLOBAL_LOG_BROADCASTER.set(b);
+}
+
+pub fn send_log(level: &str, module: &str, message: String) {
+    let prefix = log_prefix(level, module);
+    eprintln!("{} {}", prefix, message);
+    if let Some(broadcaster) = GLOBAL_LOG_BROADCASTER.get() {
+        broadcaster.send(level, module, message);
+    }
+}
+
 #[macro_export]
 macro_rules! log_info {
     ($($arg:tt)*) => {
         #[cfg(debug_assertions)]
         {
             if $crate::utils::log::current_log_level().enabled($crate::utils::log::LogLevel::Info) {
-                eprintln!("{} {}", $crate::utils::log::log_prefix("INFO", module_path!()), format!($($arg)*));
+                let msg = format!($($arg)*);
+                $crate::utils::log::send_log("INFO", module_path!(), msg);
             }
         }
     };
@@ -82,7 +99,8 @@ macro_rules! log_debug {
         #[cfg(debug_assertions)]
         {
             if $crate::utils::log::current_log_level().enabled($crate::utils::log::LogLevel::Debug) {
-                eprintln!("{} {}", $crate::utils::log::log_prefix("DEBUG", module_path!()), format!($($arg)*));
+                let msg = format!($($arg)*);
+                $crate::utils::log::send_log("DEBUG", module_path!(), msg);
             }
         }
     };
@@ -94,7 +112,8 @@ macro_rules! log_trace {
         #[cfg(debug_assertions)]
         {
             if $crate::utils::log::current_log_level().enabled($crate::utils::log::LogLevel::Trace) {
-                eprintln!("{} {}", $crate::utils::log::log_prefix("TRACE", module_path!()), format!($($arg)*));
+                let msg = format!($($arg)*);
+                $crate::utils::log::send_log("TRACE", module_path!(), msg);
             }
         }
     };
