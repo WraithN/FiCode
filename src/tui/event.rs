@@ -21,6 +21,10 @@
 
 use crate::server::sse::SseEvent;
 
+/// 应用级事件枚举，涵盖用户交互、网络回调、界面控制等所有异步信号。
+///
+/// 设计意图：将终端输入（`crossterm::Event`）与业务事件解耦，
+/// 使组件只需关心自身业务，无需直接处理底层终端细节。
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     Tick,
@@ -55,22 +59,29 @@ pub enum AppEvent {
     OpenFile(String),
     PreviewFile(String),
     AddToContext(String),
+    ClearChat,
+    ExecuteSlashCommand { name: String, args_hint: Option<String> },
+    LoadCommands,
+    SetCommands(Vec<crate::commands::registry::CommandMeta>),
+    ShowSystemMessage(String),
     Quit,
 }
 
+/// 当前焦点所在的 UI 区域，用于决定键盘事件下发给哪个组件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusArea {
-    Header,
-    Main,
-    Input,
-    LeftDrawer,
-    RightDrawer,
+    Header,       // 顶部标题栏
+    Main,         // 聊天消息区
+    Input,        // 底部输入框
+    LeftDrawer,   // 左侧文件抽屉
+    RightDrawer,  // 右侧会话历史抽屉
 }
 
+/// 新建会话时可选择的模板类型。
 #[derive(Debug, Clone)]
 pub enum SessionTemplate {
-    Empty,
-    FromLastContext,
-    CodeReview,
-    Debug,
+    Empty,            // 空白会话
+    FromLastContext,  // 继承上文
+    CodeReview,       // 代码审查模板
+    Debug,            // 调试模板
 }
