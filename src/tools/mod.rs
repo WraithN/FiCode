@@ -23,6 +23,7 @@ use crate::log_debug;
 use crate::log_info;
 use crate::log_trace;
 use crate::mcp::manager::McpManager;
+use crate::provider::Provider;
 use crate::session::message::Part;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, RwLock};
@@ -34,6 +35,7 @@ use std::sync::{Arc, LazyLock, RwLock};
 // 例如 `basic_tools` 对应 `src/tools/basic_tools.rs`
 
 pub mod basic_tools;
+pub mod task;
 pub mod tools_registry;
 pub mod tools_type;
 
@@ -272,7 +274,7 @@ impl ToolHandler for CreateTaskPlanHandler {
             .as_array()
             .ok_or("Missing or invalid 'tasks' array")?;
 
-        let mut plan = crate::task::TaskPlan::new("");
+        let mut plan = task::TaskPlan::new("");
         for (idx, task_val) in tasks_arr.iter().enumerate() {
             let name = task_val.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let description = task_val
@@ -282,7 +284,7 @@ impl ToolHandler for CreateTaskPlanHandler {
             if name.is_empty() {
                 continue;
             }
-            plan.tasks.push(crate::task::Task::new(
+            plan.tasks.push(task::Task::new(
                 format!("{}", idx + 1),
                 name,
                 description,
@@ -292,6 +294,20 @@ impl ToolHandler for CreateTaskPlanHandler {
         let json =
             serde_json::to_string(&plan).map_err(|e| format!("Serialize plan failed: {}", e))?;
         Ok(json)
+    }
+}
+
+// =============================================================================
+// HandleTaskPlanHandler：将复杂任务拆分为子任务并自动执行
+// =============================================================================
+// 实际执行逻辑在 tool_call 中通过异步拦截完成，这里只注册占位。
+
+#[derive(Debug)]
+struct HandleTaskPlanHandler;
+
+impl ToolHandler for HandleTaskPlanHandler {
+    fn call(&self, _name: &str, _params: ToolParams) -> Result<String, String> {
+        Err("This tool is handled internally by async executor".to_string())
     }
 }
 
@@ -310,6 +326,22 @@ pub fn set_mcp_manager(manager: Arc<McpManager>) {
 
 pub fn get_mcp_manager() -> Option<Arc<McpManager>> {
     MCP_MANAGER.read().unwrap().clone()
+}
+
+// =============================================================================
+// Task Provider 全局状态
+// =============================================================================
+// `Provider` 在程序启动后由 entry.rs 或 server 设置，供 handle_task_plan 工具使用。
+
+static TASK_PROVIDER: RwLock<Option<Arc<RwLock<Provider>>>> = RwLock::new(None);
+
+pub fn set_task_provider(provider: Arc<RwLock<Provider>>) {
+    let mut lock = TASK_PROVIDER.write().unwrap();
+    *lock = Some(provider);
+}
+
+pub fn get_task_provider() -> Option<Arc<RwLock<Provider>>> {
+    TASK_PROVIDER.read().unwrap().clone()
 }
 
 // =============================================================================
@@ -388,6 +420,14 @@ static REGISTRY: LazyLock<ToolsRegistry> = LazyLock::new(|| {
         )
         .expect("register create_task_plan tool failed");
     registry
+        .register(
+            "handle_task_plan",
+            "将复杂任务拆分为多个子任务并自动执行。仅在任务确实复杂、需要多步骤完成时调用。工具会返回所有子任务的执行结果汇总。参数示例：{\"tasks\":[{\"name\":\"分析代码\",\"description\":\"分析现有错误处理模式\"}]}",
+            r#"{"type":"object","properties":{"tasks":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"}},"required":["name","description"]}}},"required":["tasks"]}"#,
+            Box::new(HandleTaskPlanHandler),
+        )
+        .expect("register handle_task_plan tool failed");
+    registry
 });
 
 // =============================================================================
@@ -441,12 +481,12 @@ pub async fn subagent_tool_schema() -> serde_json::Value {
     let basic = REGISTRY.tool_schema();
     if let Some(arr) = basic.as_array() {
         for tool in arr {
-            let is_task_plan = tool
+            let is_excluded = tool
                 .get("name")
                 .and_then(|n| n.as_str())
-                .map(|name| name == "create_task_plan")
+                .map(|name| name == "create_task_plan" || name == "handle_task_plan")
                 .unwrap_or(false);
-            if is_task_plan {
+            if is_excluded {
                 continue;
             }
             schemas.push(tool.clone());
@@ -487,6 +527,11 @@ pub async fn tool_call(
     name: &str,
     input: &HashMap<String, serde_json::Value>,
 ) -> Result<String, String> {
+    if name == "handle_task_plan" {
+        let provider = get_task_provider().ok_or("Task provider not initialized")?;
+        return task::tool::execute_handle_task_plan(provider, input).await;
+    }
+
     if name.starts_with("mcp:") {
         let input_json = serde_json::to_value(input).unwrap_or_default();
         let mcp = get_mcp_manager().ok_or("MCP manager not initialized".to_string())?;
@@ -785,6 +830,31 @@ mod tests {
         assert!(
             !has_task_plan,
             "subagent schema should not contain create_task_plan"
+        );
+    }
+
+    /// 测试 subagent_tool_schema 不包含 handle_task_plan
+    #[tokio::test]
+    async fn test_subagent_tool_schema_excludes_handle_task_plan() {
+        let schema = subagent_tool_schema().await;
+        let arr = schema.as_array().unwrap();
+        let has_handle_task = arr
+            .iter()
+            .any(|v| v.get("name").and_then(|n| n.as_str()) == Some("handle_task_plan"));
+        assert!(
+            !has_handle_task,
+            "subagent schema should not contain handle_task_plan"
+        );
+    }
+
+    /// 测试注册表包含 handle_task_plan
+    #[test]
+    fn test_list_tools_includes_handle_task_plan() {
+        let list = REGISTRY.list_tools().unwrap();
+        assert!(
+            list.contains("handle_task_plan"),
+            "registry should contain handle_task_plan tool, got: {}",
+            list
         );
     }
 

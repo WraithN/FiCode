@@ -31,51 +31,14 @@ use rustyline::DefaultEditor;
 use crate::agent::{agent_loop, LoopState};
 use crate::config::Config;
 use crate::mcp::manager::McpManager;
-use crate::provider::{base_client::AIClient, Provider};
+use crate::provider::Provider;
 use crate::session::message::{Message, Part, Role};
 use crate::session::{SessionManager, SessionStatus};
-use crate::task::{TaskManager, TaskPlan};
 use crate::tools::set_mcp_manager;
 use crate::utils::cli::{Args, Commands};
 use crate::commands::slash::{SlashCommand, SlashCommandHandler};
 use crate::utils::workspace::set_workspace;
 use crate::{log_debug, log_info};
-
-const SUBAGENT_SYSTEM_PROMPT: &str = r#"你是一个专注于执行特定子任务的 AI 助手。
-你的任务是完成用户交给你的具体任务，不要偏离主题。
-完成后，请用一段话总结你做了什么、结果是什么。
-"#;
-
-fn print_task_plan(plan: &crate::task::TaskPlan) {
-    println!("\n📋 Task Plan ({} tasks):", plan.tasks.len());
-    for task in &plan.tasks {
-        let icon = match task.status {
-            crate::task::TaskStatus::Pending => "[ ]",
-            crate::task::TaskStatus::InProgress => "🔄",
-            crate::task::TaskStatus::Completed => "✅",
-            crate::task::TaskStatus::Failed => "❌",
-        };
-        println!("  {} {}", icon, task.name);
-    }
-    println!();
-}
-
-fn extract_task_plan_result(messages: &[Message]) -> Option<String> {
-    for msg in messages.iter().rev() {
-        if msg.role == Role::User {
-            for part in &msg.parts {
-                if let Part::ToolResult { content, .. } = part {
-                    if let Ok(plan) = serde_json::from_str::<TaskPlan>(content) {
-                        if !plan.tasks.is_empty() {
-                            return Some(content.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
 
 async fn run_tui_mode() -> Result<()> {
     let config = Arc::new(RwLock::new(Config::load()?));
@@ -219,6 +182,7 @@ pub async fn run() -> Result<()> {
     }
 
     let provider = Arc::new(Provider::new(Arc::clone(&config))?);
+    crate::tools::set_task_provider(Arc::new(RwLock::new((*provider).clone())));
 
     // -c 单命令模式
     if let Some(cmd) = args.cmd {
@@ -329,64 +293,13 @@ async fn run_single_command(
 }
 
 async fn handle_task_plan_and_save(
-    provider: Arc<Provider>,
+    _provider: Arc<Provider>,
     session_manager: &SessionManager,
     sessions_dir: &PathBuf,
     session: &mut crate::session::Session,
-    mut state: LoopState,
+    state: LoopState,
     interactive: bool,
 ) -> Result<()> {
-    if let Some(plan_json) = extract_task_plan_result(&state.messages) {
-        let mut plan: TaskPlan = serde_json::from_str(&plan_json)
-            .context("Failed to parse task plan from tool result")?;
-
-        println!("\n📋 检测到任务计划，共 {} 个子任务", plan.tasks.len());
-        print_task_plan(&plan);
-
-        let provider_clone = provider.clone();
-        let client_factory: Arc<dyn Fn() -> Box<dyn AIClient> + Send + Sync> =
-            Arc::new(move || {
-                provider_clone
-                    .get_client()
-                    .expect("Failed to create subagent client")
-            });
-
-        let subagent_schema = crate::tools::subagent_tool_schema().await;
-        let task_manager = TaskManager::new(
-            client_factory,
-            SUBAGENT_SYSTEM_PROMPT.to_string(),
-            subagent_schema,
-        );
-
-        let mut on_progress = |plan: &TaskPlan| {
-            print_task_plan(plan);
-        };
-
-        let summaries = task_manager
-            .execute_plan(&mut plan, &mut on_progress)
-            .await?;
-
-        let mut summary_text = "所有子任务已完成，结果汇总如下：\n\n".to_string();
-        for (idx, summary) in summaries.iter().enumerate() {
-            let task_name = &plan.tasks[idx].name;
-            summary_text.push_str(&format!(
-                "[任务 {}: {}]\n{}\n\n",
-                idx + 1,
-                task_name,
-                summary.result
-            ));
-        }
-
-        state.messages.push(Message::new(
-            session.id.clone(),
-            Role::User,
-            vec![Part::Text { text: summary_text }],
-        ));
-
-        let client = provider.get_client()?;
-        agent_loop(client.as_ref(), &mut state).await?;
-    }
-
     session.messages = state.messages;
 
     if let Err(e) = tokio::task::spawn_blocking({
@@ -419,6 +332,7 @@ async fn run_interactive(
     sessions_dir: &PathBuf,
     config: Arc<RwLock<Config>>,
 ) -> Result<()> {
+    crate::tools::set_task_provider(Arc::new(RwLock::new((*provider).clone())));
     let mut session = choose_or_create_session(session_manager, provider.model_name()?).await?;
     let prompt_prefix = format!("{} >> ", &session.id[..session.id.len().min(8)]);
     let mut editor = DefaultEditor::new()?;

@@ -27,10 +27,16 @@
 use anyhow::Result;
 use std::sync::Arc;
 
+/// 子 Agent 默认系统提示词
+pub const DEFAULT_SUBAGENT_PROMPT: &str = r#"你是一个专注于执行特定子任务的 AI 助手。
+你的任务是完成用户交给你的具体任务，不要偏离主题。
+完成后，请用一段话总结你做了什么、结果是什么。
+"#;
+
 use crate::agent::{AgentRunResult, AgentRunner};
 use crate::provider::base_client::AIClient;
 use crate::session::message::{Message, Part, Role};
-use crate::task::{Task, TaskPlan, TaskStatus};
+use crate::tools::task::{Task, TaskPlan, TaskStatus};
 
 // =============================================================================
 // 任务执行摘要

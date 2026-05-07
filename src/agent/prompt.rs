@@ -47,6 +47,7 @@ Rules:
 10. Always respond in the same language as the user's input.
 11. When the user asks you to write code, save it to a file using `write` first. Do not run the code before writing it.
 12. Do not output tool calls as plain text. Use the proper tool_call mechanism provided by the API.
+13. If a task is complex and requires multiple steps, use `handle_task_plan` to automatically split and execute subtasks. Do not use `create_task_plan` directly.
 "#;
 
 /// 系统提示词构建器。

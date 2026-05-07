@@ -24,6 +24,24 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
+/// 消息详情块，用于展示模型的思考过程和工具调用
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DetailBlock {
+    Text { text: String },
+    Reasoning { thinking: String },
+    ToolUse {
+        id: String,
+        name: String,
+        arguments: String,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
+}
+
 /// SSE 事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -41,6 +59,8 @@ pub enum SseEvent {
         tool_use_id: String,
         content: String,
     },
+    #[serde(rename = "details")]
+    MessageDetails { blocks: Vec<DetailBlock> },
     #[serde(rename = "error")]
     Error { message: String },
     #[serde(rename = "done")]

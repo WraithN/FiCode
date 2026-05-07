@@ -31,7 +31,6 @@ mod provider;
 mod server;
 mod session;
 mod skills;
-mod task;
 mod tools;
 mod tui;
 mod utils;

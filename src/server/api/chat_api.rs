@@ -27,10 +27,12 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::Arc;
 use tokio_stream::StreamExt;
 
 use crate::agent::{agent_loop, LoopState};
 use crate::session::message::{Message, Part, Role};
+use crate::tools::set_task_provider;
 
 use super::super::server::{check_auth, AppState};
 use super::super::transport::rpc::JsonRpcResponse;
@@ -104,10 +106,46 @@ async fn send_last_assistant_text(messages: &[Message], sse_sender: &SseSender) 
         })
         .collect::<Vec<_>>()
         .join("");
-    if text.is_empty() {
-        return;
+    if !text.is_empty() {
+        let _ = sse_sender.send(SseEvent::Message { content: text }).await;
     }
-    let _ = sse_sender.send(SseEvent::Message { content: text }).await;
+
+    // 发送结构化详情（思考过程、工具调用等）
+    let blocks: Vec<crate::server::transport::sse::DetailBlock> = last_msg
+        .parts
+        .iter()
+        .filter_map(|p| match p {
+            Part::Reasoning { thinking, .. } => {
+                Some(crate::server::transport::sse::DetailBlock::Reasoning {
+                    thinking: thinking.clone(),
+                })
+            }
+            Part::ToolUse { id, name, arguments } => {
+                let args_str = serde_json::to_string_pretty(arguments).unwrap_or_default();
+                Some(crate::server::transport::sse::DetailBlock::ToolUse {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments: args_str,
+                })
+            }
+            Part::ToolResult {
+                tool_call_id,
+                content,
+                is_error,
+            } => Some(crate::server::transport::sse::DetailBlock::ToolResult {
+                tool_use_id: tool_call_id.clone(),
+                content: content.clone(),
+                is_error: *is_error,
+            }),
+            _ => None,
+        })
+        .collect();
+
+    if !blocks.is_empty() {
+        let _ = sse_sender
+            .send(SseEvent::MessageDetails { blocks })
+            .await;
+    }
 }
 
 /// 后台运行 Agent 对话
@@ -117,6 +155,9 @@ async fn run_agent_chat(
     message: String,
     sse_sender: SseSender,
 ) {
+    // 设置全局 Provider，供 handle_task_plan 工具使用
+    set_task_provider(Arc::clone(&state.provider));
+
     // 获取或创建 LoopState
     let mut loop_state = match state.sessions.get(&session_id) {
         Some(state) => state,

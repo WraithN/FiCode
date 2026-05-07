@@ -28,7 +28,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::server::transport::sse::SseEvent;
+use crate::server::transport::sse::{DetailBlock, SseEvent};
 use crate::tui::components::Component;
 use crate::tui::event::AppEvent;
 use crate::tui::theme::Theme;
@@ -38,6 +38,10 @@ use crate::tui::theme::Theme;
 pub struct Message {
     pub role: MessageRole,
     pub content: String,
+    /// 结构化详情（思考过程、工具调用等）
+    pub details: Option<Vec<DetailBlock>>,
+    /// 详情是否展开
+    pub details_expanded: bool,
 }
 
 /// 消息发送者角色。
@@ -71,6 +75,8 @@ fn append_assistant_message(messages: &mut Vec<Message>, content: &str) {
     messages.push(Message {
         role: MessageRole::Assistant,
         content: content.to_string(),
+        details: None,
+        details_expanded: false,
     });
 }
 
@@ -89,6 +95,8 @@ impl Chat {
         self.messages.push(Message {
             role: MessageRole::User,
             content: content.to_string(),
+            details: None,
+            details_expanded: false,
         });
     }
 
@@ -97,6 +105,8 @@ impl Chat {
         self.messages.push(Message {
             role: MessageRole::System,
             content: content.to_string(),
+            details: None,
+            details_expanded: false,
         });
     }
 
@@ -118,10 +128,19 @@ impl Chat {
             SseEvent::Message { content } => {
                 append_assistant_message(&mut self.messages, content);
             }
+            SseEvent::MessageDetails { blocks } => {
+                if let Some(last) = self.messages.last_mut() {
+                    if last.role == MessageRole::Assistant {
+                        last.details = Some(blocks.clone());
+                    }
+                }
+            }
             SseEvent::Error { message } => {
                 self.messages.push(Message {
                     role: MessageRole::Error,
                     content: message.clone(),
+                    details: None,
+                    details_expanded: false,
                 });
             }
             _ => {}
@@ -183,6 +202,84 @@ impl Component for Chat {
                 lines.push(Line::from(Span::styled(text_line, theme.style_primary())));
             }
 
+            // 渲染可折叠的详细过程
+            if let Some(details) = &msg.details {
+                let count = details.len();
+                let fold_icon = if msg.details_expanded { "▼" } else { "▶" };
+                let fold_style = if msg.details_expanded {
+                    theme.style_brand()
+                } else {
+                    Style::default().fg(theme.text_secondary)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(fold_icon, fold_style.add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!(" 详细过程 ({})", count),
+                        fold_style,
+                    ),
+                ]));
+
+                if msg.details_expanded {
+                    for block in details {
+                        match block {
+                            DetailBlock::Reasoning { thinking } => {
+                                lines.push(Line::from(vec![
+                                    Span::styled("  ❖ ", Style::default().fg(theme.brand)),
+                                    Span::styled("Thinking", Style::default().fg(theme.text_secondary)),
+                                ]));
+                                for line in thinking.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("    {}", line),
+                                        Style::default().fg(theme.text_secondary),
+                                    )));
+                                }
+                            }
+                            DetailBlock::ToolUse { name, arguments, .. } => {
+                                lines.push(Line::from(vec![
+                                    Span::styled("  🔧 ", Style::default().fg(theme.warning)),
+                                    Span::styled(format!("{}", name), Style::default().fg(theme.text_secondary)),
+                                ]));
+                                for line in arguments.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("    {}", line),
+                                        Style::default().fg(theme.text_secondary),
+                                    )));
+                                }
+                            }
+                            DetailBlock::ToolResult {
+                                tool_use_id: _,
+                                content,
+                                is_error,
+                            } => {
+                                let (icon, color) = if *is_error {
+                                    ("❌", theme.error)
+                                } else {
+                                    ("📤", theme.success)
+                                };
+                                lines.push(Line::from(vec![
+                                    Span::styled(format!("  {} ", icon), Style::default().fg(color)),
+                                    Span::styled("Result", Style::default().fg(theme.text_secondary)),
+                                ]));
+                                for line in content.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("    {}", line),
+                                        Style::default().fg(theme.text_secondary),
+                                    )));
+                                }
+                            }
+                            DetailBlock::Text { text } => {
+                                for line in text.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("  {}", line),
+                                        theme.style_primary(),
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             lines.push(Line::from(""));
         }
 
@@ -214,6 +311,15 @@ impl Component for Chat {
             | (KeyModifiers::NONE, KeyCode::PageDown) => {
                 self.scroll_offset += 1;
                 Some(AppEvent::ScrollDown)
+            }
+            (KeyModifiers::NONE, KeyCode::Enter) => {
+                // 展开/折叠最后一条 Assistant 消息的详细过程
+                if let Some(last) = self.messages.last_mut() {
+                    if last.role == MessageRole::Assistant && last.details.is_some() {
+                        last.details_expanded = !last.details_expanded;
+                    }
+                }
+                None
             }
             _ => None,
         }
