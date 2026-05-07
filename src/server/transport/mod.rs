@@ -19,11 +19,5 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-pub mod api;
-pub mod commands;
-pub mod models;
-pub mod server;
-pub mod session;
-pub mod transport;
-
-pub use server::Server;
+pub mod rpc;
+pub mod sse;

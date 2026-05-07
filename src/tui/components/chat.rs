@@ -28,7 +28,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::server::sse::SseEvent;
+use crate::server::transport::sse::SseEvent;
 use crate::tui::components::Component;
 use crate::tui::event::AppEvent;
 use crate::tui::theme::Theme;

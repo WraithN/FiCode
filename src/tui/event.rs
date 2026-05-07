@@ -19,7 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::server::sse::SseEvent;
+use crate::server::transport::sse::SseEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {

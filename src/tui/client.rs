@@ -27,8 +27,8 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::commands::registry::{CommandMeta, CommandOutput};
-use crate::server::rpc::{JsonRpcRequest, JsonRpcResponse};
-use crate::server::sse::SseEvent;
+use crate::server::transport::rpc::{JsonRpcRequest, JsonRpcResponse};
+use crate::server::transport::sse::SseEvent;
 use crate::tui::event::{AppEvent, LogLevel, LogLine};
 use crate::utils::log_store::LogEntry;
 

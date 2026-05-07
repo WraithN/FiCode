@@ -27,7 +27,7 @@ use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
 use crate::commands::registry::CommandMeta;
-use crate::server::sse::SseEvent;
+use crate::server::transport::sse::SseEvent;
 use crate::tui::components::{
     chat::Chat, header::Header, input::Input, left_drawer::LeftDrawer, log_window::LogWindow,
     right_drawer::RightDrawer, status_bar::StatusBar, Component,
@@ -61,10 +61,11 @@ pub struct TuiApp {
     log_window: LogWindow,     // 日志浮窗
 
     // === 应用状态 ===
-    focus: FocusArea,    // 当前焦点所在区域
-    is_generating: bool, // 是否正在等待模型生成回复
-    should_quit: bool,   // 是否退出主循环
-    dirty: bool,         // 是否需要重绘
+    focus: FocusArea,              // 当前焦点所在区域
+    is_generating: bool,           // 是否正在等待模型生成回复
+    should_quit: bool,             // 是否退出主循环
+    exit_confirm_pending: bool,    // Ctrl+C 是否已按过一次，等待第二次确认退出
+    dirty: bool,                   // 是否需要重绘
 
     // === 后端通信与事件通道 ===
     client: TuiClient,                                      // HTTP 客户端，对接本地 4040 端口服务
@@ -122,6 +123,7 @@ impl TuiApp {
             focus: FocusArea::Input,
             is_generating: false,
             should_quit: false,
+            exit_confirm_pending: false,
             dirty: true,
             client: TuiClient::new(),
             event_tx,
@@ -305,11 +307,12 @@ impl TuiApp {
     /// 处理 Ctrl 组合键快捷键。
     ///
     /// 映射表：
-    /// - `Ctrl+C`：若正在生成则停止生成，否则退出程序。
+    /// - `Ctrl+C`：若正在生成则停止生成；否则第一次按提示再按一次，第二次按退出程序。
     /// - `Ctrl+B`：切换左侧文件抽屉。
     /// - `Ctrl+H`：切换右侧会话历史抽屉。
-    /// - `Ctrl+M` / `Ctrl+N`：打开模型下拉菜单。
-    /// - `Ctrl+T`：切换主题。
+    /// - `Ctrl+M`：打开模型选择子菜单（/models）。
+    /// - `Ctrl+N`：打开模型下拉菜单。
+    /// - `Ctrl+T`：打开主题选择子菜单（/themes）。
     async fn handle_ctrl_key(&mut self, key: &crossterm::event::KeyEvent) {
         let KeyCode::Char(c) = key.code else { return };
         // crossterm 对 Ctrl+字母 的字符编码为 ASCII 控制字符（如 Ctrl+C = 0x03），
@@ -323,27 +326,44 @@ impl TuiApp {
             'c' => {
                 if self.is_generating {
                     self.handle_app_event(AppEvent::StopGeneration).await;
-                } else {
+                    self.exit_confirm_pending = false;
+                } else if self.exit_confirm_pending {
                     self.should_quit = true;
+                } else {
+                    self.exit_confirm_pending = true;
+                    self.chat.add_system_message("Press Ctrl+C again to exit.");
                 }
             }
             'b' => {
+                self.exit_confirm_pending = false;
                 self.handle_app_event(AppEvent::ToggleLeftDrawer).await;
                 self.focus = FocusArea::LeftDrawer;
             }
             'h' => {
+                self.exit_confirm_pending = false;
                 self.handle_app_event(AppEvent::ToggleRightDrawer).await;
                 self.focus = FocusArea::RightDrawer;
             }
-            'm' | 'n' => {
+            'm' => {
+                self.exit_confirm_pending = false;
+                self.handle_execute_slash_command("models", &None);
+            }
+            'n' => {
+                self.exit_confirm_pending = false;
                 self.header.toggle_model_dropdown();
                 self.focus = FocusArea::Header;
             }
-            't' => self.next_theme(),
+            't' => {
+                self.exit_confirm_pending = false;
+                self.handle_execute_slash_command("themes", &None);
+            }
             'l' => {
+                self.exit_confirm_pending = false;
                 self.handle_app_event(AppEvent::ToggleLogWindow).await;
             }
-            _ => {}
+            _ => {
+                self.exit_confirm_pending = false;
+            }
         }
     }
 
@@ -607,7 +627,7 @@ impl TuiApp {
                     let theme_name = self.theme_presets[index].name.clone();
                     tokio::spawn(async move {
                         let _ = client
-                            .execute_command("theme", Some(theme_name), None)
+                            .execute_command("themes", Some(theme_name), None)
                             .await;
                     });
                 }
@@ -730,7 +750,7 @@ impl TuiApp {
                             args_hint: None,
                         },
                         CommandMeta {
-                            name: "model".into(),
+                            name: "models".into(),
                             description: "Switch model".into(),
                             args_hint: Some("[model_key]".into()),
                         },
@@ -807,7 +827,7 @@ impl TuiApp {
     /// 处理斜杠命令执行：有参数时等待补全，无参数时直接执行。
     /// /theme 命令特殊处理：直接进入主题子菜单。
     fn handle_execute_slash_command(&mut self, name: &str, _args_hint: &Option<String>) {
-        if name == "skill" {
+        if name == "skills" {
             let registry = crate::skills::get_registry();
             if registry.entries.is_empty() {
                 let tx = self.event_tx.clone();
@@ -828,7 +848,7 @@ impl TuiApp {
             return;
         }
 
-        if name == "theme" {
+        if name == "themes" {
             self.input.enter_submenu_mode(crate::tui::components::input::SubmenuKind::Theme);
             let items: Vec<(String, String)> = self
                 .theme_presets

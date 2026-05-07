@@ -61,7 +61,7 @@ pub fn parse(input: &str) -> SlashCommand {
     let arg = parts.get(1).map(|s| s.trim().to_string());
 
     match cmd {
-        "/model" => SlashCommand::Model(arg.filter(|s| !s.is_empty())),
+        "/models" => SlashCommand::Model(arg.filter(|s| !s.is_empty())),
         "/init" => SlashCommand::Init,
         _ => SlashCommand::Unknown(cmd.trim_start_matches('/').to_string()),
     }
@@ -247,13 +247,13 @@ mod tests {
 
     #[test]
     fn test_parse_model_no_args() {
-        assert_eq!(parse("/model"), SlashCommand::Model(None));
+        assert_eq!(parse("/models"), SlashCommand::Model(None));
     }
 
     #[test]
     fn test_parse_model_with_args() {
         assert_eq!(
-            parse("/model gpt-4o"),
+            parse("/models gpt-4o"),
             SlashCommand::Model(Some("gpt-4o".to_string()))
         );
     }

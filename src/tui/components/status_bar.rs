@@ -80,10 +80,10 @@ impl Component for StatusBar {
         spans.push(Span::styled(history_label, theme.style_muted()));
         spans.push(Span::raw("  "));
 
-        spans.push(Span::styled("[Ctrl+M] Model", theme.style_muted()));
+        spans.push(Span::styled("[Ctrl+M] Models", theme.style_muted()));
         spans.push(Span::raw("  "));
 
-        spans.push(Span::styled("[Ctrl+T] Theme", theme.style_muted()));
+        spans.push(Span::styled("[Ctrl+T] Themes", theme.style_muted()));
         spans.push(Span::raw("  "));
 
         spans.push(Span::styled("[Ctrl+N] New", theme.style_muted()));
