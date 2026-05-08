@@ -19,14 +19,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::time::Instant;
+
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::{
-    layout::{Alignment, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
+use ratatui_braille_bar::BrailleBar;
 
 use crate::tui::components::Component;
 use crate::tui::event::{AppEvent, ModelItem, ProviderItem};
@@ -58,6 +61,7 @@ pub struct Header {
     model_selected: Vec<usize>, // 每个 provider 对应的选中模型索引
     status: HeaderStatus,
     progress_tick: u64, // 用于动画的 ticker
+    start_time: Option<Instant>,
 }
 
 impl Header {
@@ -71,6 +75,7 @@ impl Header {
             model_selected: vec![],
             status: HeaderStatus::Ready,
             progress_tick: 0,
+            start_time: None,
         }
     }
 
@@ -115,7 +120,35 @@ impl Header {
     }
 
     pub fn set_status(&mut self, status: HeaderStatus) {
+        match status {
+            HeaderStatus::Ready => {
+                self.start_time = None;
+            }
+            HeaderStatus::Generating | HeaderStatus::Streaming => {
+                if self.start_time.is_none() {
+                    self.start_time = Some(Instant::now());
+                }
+            }
+        }
         self.status = status;
+    }
+
+    /// 格式化耗时显示。
+    fn format_elapsed(&self) -> String {
+        if let Some(start) = self.start_time {
+            let elapsed = start.elapsed();
+            let seconds = elapsed.as_secs();
+            let minutes = seconds / 60;
+            let seconds = seconds % 60;
+
+            if minutes > 0 {
+                format!("{}m{}s", minutes, seconds)
+            } else {
+                format!("{}s", seconds)
+            }
+        } else {
+            String::from("")
+        }
     }
 
     /// 设置从后端加载的模型列表。
@@ -159,41 +192,45 @@ impl Component for Header {
         let model_text = format!("▼ {}", self.current_model);
         let model = Span::styled(model_text, theme.style_primary());
 
-        // 生成盲文进度条和状态信息
-        let (progress_bar, status_label, status_color) = match self.status {
-            HeaderStatus::Ready => {
-                // Ready状态：显示完整的进度条
-                (
-                    Span::styled("⣿⣿⣿⣿⣿⣿⣿⣿", Style::default().fg(theme.success)),
-                    "Ready",
-                    theme.success,
-                )
-            }
+        // 计算进度和状态信息
+        let (status_label, progress, fill_color) = match self.status {
+            HeaderStatus::Ready => ("Ready", 100.0, theme.success),
             HeaderStatus::Generating => {
-                // Generating状态：显示循环动画
-                let progress = ((self.progress_tick % 8) as usize) + 1;
-                let filled = "⣿".repeat(progress);
-                let empty = "⣀".repeat(8 - progress);
-                (
-                    Span::styled(format!("{}{}", filled, empty), Style::default().fg(theme.warning)),
-                    "Generating...",
-                    theme.warning,
-                )
+                // 循环动画 0 → 100%
+                let p = ((self.progress_tick % 100) as f64);
+                ("Generating...", p, theme.warning)
             }
             HeaderStatus::Streaming => {
-                // Streaming状态：显示循环动画
-                let progress = ((self.progress_tick % 8) as usize) + 1;
-                let filled = "⣿".repeat(progress);
-                let empty = "⣀".repeat(8 - progress);
-                (
-                    Span::styled(format!("{}{}", filled, empty), Style::default().fg(theme.brand)),
-                    "Streaming...",
-                    theme.brand,
-                )
+                // 循环动画 0 → 100%
+                let p = ((self.progress_tick % 100) as f64);
+                ("Streaming...", p, theme.brand)
             }
         };
 
+        let status_color = match self.status {
+            HeaderStatus::Ready => theme.success,
+            HeaderStatus::Generating => theme.warning,
+            HeaderStatus::Streaming => theme.brand,
+        };
+
+        let progress_bar = BrailleBar::new(progress, 100.0)
+            .fill_color(fill_color)
+            .empty_color(theme.text_muted);
+
         let status = Span::styled(status_label, Style::default().fg(status_color));
+        let elapsed = self.format_elapsed();
+        let elapsed_span = if !elapsed.is_empty() {
+            Span::styled(format!(" [{}]", elapsed), Style::default().fg(status_color))
+        } else {
+            Span::raw("")
+        };
+
+        // 使用 Layout 分成左右两部分
+        let chunks = Layout::horizontal([
+            Constraint::Min(0), // 左边：文本
+            Constraint::Length(12), // 右边：进度条
+        ])
+        .split(inner);
 
         let line = Line::from(vec![
             logo,
@@ -201,12 +238,12 @@ impl Component for Header {
             model,
             Span::raw(" │ "),
             status,
-            Span::raw(" "),
-            progress_bar,
+            elapsed_span,
         ]);
-
         let paragraph = Paragraph::new(line).alignment(Alignment::Left);
-        frame.render_widget(paragraph, inner);
+        frame.render_widget(paragraph, chunks[0]);
+
+        frame.render_widget(progress_bar, chunks[1]);
 
         match &self.menu_state {
             MenuState::ProviderList => self.draw_provider_list(frame, area, theme),
@@ -389,7 +426,6 @@ impl Header {
             _ => None,
         }
     }
-
 }
 
 #[cfg(test)]
@@ -411,5 +447,18 @@ mod tests {
         assert!(header.has_dropdown_open());
         header.toggle_model_dropdown();
         assert!(!header.has_dropdown_open());
+    }
+
+    #[test]
+    fn test_elapsed_format() {
+        let mut header = Header::new();
+        assert_eq!(header.format_elapsed(), "");
+
+        header.set_status(HeaderStatus::Generating);
+        // 刚设置时 start_time 是 Some(now)，elapsed 很小，但包含 's'
+        assert!(header.format_elapsed().contains('s'));
+
+        header.set_status(HeaderStatus::Ready);
+        assert_eq!(header.format_elapsed(), "");
     }
 }
