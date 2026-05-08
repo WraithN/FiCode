@@ -13,7 +13,6 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 dotenvy = "0.15"
 colored = "3.1.1"
-rustyline = "18.0.0"
 anyhow = "1.0"
 async-trait = "0.1.89"
 futures = "0.3"
@@ -25,14 +24,15 @@ dirs = "5.0"
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 notify = "8"
-ratatui = "0.28"
+ratatui = "0.29"
+ratatui-braille-bar = "0.2.2"
 crossterm = "0.28"
 jsonc-parser = { version = "0.32", features = ["serde"] }
 axum = "0.7"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower-http = { version = "0.5", features = ["cors"] }
 walkdir = "2.5"
-unicode-width = "0.2.2"
+unicode-width = "0.2.0"
 
 [dev-dependencies]
 wiremock = "0.6"
