@@ -29,8 +29,14 @@ use tokio::sync::mpsc;
 use crate::commands::registry::CommandMeta;
 use crate::server::transport::sse::SseEvent;
 use crate::tui::components::{
-    chat::Chat, header::Header, input::Input, left_drawer::LeftDrawer, log_window::LogWindow,
-    right_drawer::RightDrawer, status_bar::StatusBar, Component,
+    chat::Chat,
+    header::{Header, HeaderStatus},
+    input::Input,
+    left_drawer::LeftDrawer,
+    log_window::LogWindow,
+    right_drawer::RightDrawer,
+    status_bar::StatusBar,
+    Component,
 };
 use crate::tui::event::{AppEvent, FocusArea, ModelItem, ProviderItem};
 use crate::tui::layout::{LayoutManager, PanelState};
@@ -684,12 +690,20 @@ impl TuiApp {
             // 用户提交消息：标记生成中、添加到聊天区，并启动 SSE 流请求
             AppEvent::SubmitMessage(ref msg) => {
                 self.is_generating = true;
+                self.header.set_status(HeaderStatus::Generating);
                 self.chat.add_user_message(msg);
                 self.start_chat_stream(msg.clone()).await;
             }
             // SSE 事件到达：将内容追加到聊天区；若为 Done 事件则更新会话 ID
             AppEvent::SseEvent(ref sse_event) => {
                 self.chat.handle_sse_event(sse_event);
+                // 当内容到达时，设置为 Streaming 状态
+                match sse_event {
+                    SseEvent::Message { .. } | SseEvent::ToolUse { .. } | SseEvent::ToolResult { .. } | SseEvent::MessageDetails { .. } => {
+                        self.header.set_status(HeaderStatus::Streaming);
+                    }
+                    _ => {}
+                }
                 if let SseEvent::Done { session_id } = sse_event {
                     self.header.set_session_id(session_id.clone());
                     self.input.set_session_id(Some(session_id.clone()));
@@ -697,9 +711,11 @@ impl TuiApp {
             }
             AppEvent::ChatComplete => {
                 self.is_generating = false;
+                self.header.set_status(HeaderStatus::Ready);
             }
             AppEvent::StopGeneration => {
                 self.is_generating = false;
+                self.header.set_status(HeaderStatus::Ready);
             }
             // 切换左侧文件抽屉：打开时自动将焦点移入，并异步请求当前目录文件树
             AppEvent::ToggleLeftDrawer => {

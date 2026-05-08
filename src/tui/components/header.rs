@@ -57,6 +57,7 @@ pub struct Header {
     provider_selected: usize,
     model_selected: Vec<usize>, // 每个 provider 对应的选中模型索引
     status: HeaderStatus,
+    progress_tick: u64, // 用于动画的 ticker
 }
 
 impl Header {
@@ -69,6 +70,7 @@ impl Header {
             provider_selected: 0,
             model_selected: vec![],
             status: HeaderStatus::Ready,
+            progress_tick: 0,
         }
     }
 
@@ -108,7 +110,9 @@ impl Header {
         !matches!(self.menu_state, MenuState::Closed)
     }
 
-    pub fn on_tick(&mut self) {}
+    pub fn on_tick(&mut self) {
+        self.progress_tick = self.progress_tick.wrapping_add(1);
+    }
 
     pub fn set_status(&mut self, status: HeaderStatus) {
         self.status = status;
@@ -155,15 +159,41 @@ impl Component for Header {
         let model_text = format!("▼ {}", self.current_model);
         let model = Span::styled(model_text, theme.style_primary());
 
-        let (status_icon, status_color) = match self.status {
-            HeaderStatus::Ready => ("●", theme.success),
-            HeaderStatus::Generating => ("⟳", theme.warning),
-            HeaderStatus::Streaming => ("⚡", theme.brand),
+        // 生成盲文进度条和状态信息
+        let (progress_bar, status_label, status_color) = match self.status {
+            HeaderStatus::Ready => {
+                // Ready状态：显示完整的进度条
+                (
+                    Span::styled("⣿⣿⣿⣿⣿⣿⣿⣿", Style::default().fg(theme.success)),
+                    "Ready",
+                    theme.success,
+                )
+            }
+            HeaderStatus::Generating => {
+                // Generating状态：显示循环动画
+                let progress = ((self.progress_tick % 8) as usize) + 1;
+                let filled = "⣿".repeat(progress);
+                let empty = "⣀".repeat(8 - progress);
+                (
+                    Span::styled(format!("{}{}", filled, empty), Style::default().fg(theme.warning)),
+                    "Generating...",
+                    theme.warning,
+                )
+            }
+            HeaderStatus::Streaming => {
+                // Streaming状态：显示循环动画
+                let progress = ((self.progress_tick % 8) as usize) + 1;
+                let filled = "⣿".repeat(progress);
+                let empty = "⣀".repeat(8 - progress);
+                (
+                    Span::styled(format!("{}{}", filled, empty), Style::default().fg(theme.brand)),
+                    "Streaming...",
+                    theme.brand,
+                )
+            }
         };
-        let status = Span::styled(
-            format!("{} ready", status_icon),
-            Style::default().fg(status_color),
-        );
+
+        let status = Span::styled(status_label, Style::default().fg(status_color));
 
         let line = Line::from(vec![
             logo,
@@ -171,6 +201,8 @@ impl Component for Header {
             model,
             Span::raw(" │ "),
             status,
+            Span::raw(" "),
+            progress_bar,
         ]);
 
         let paragraph = Paragraph::new(line).alignment(Alignment::Left);
