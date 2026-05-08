@@ -22,6 +22,20 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Provider API 类型
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderType {
+    OpenAiCompatible,
+    Anthropic,
+}
+
+impl Default for ProviderType {
+    fn default() -> Self {
+        ProviderType::OpenAiCompatible
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct Config {
     pub model: String,
@@ -78,6 +92,8 @@ pub enum McpServerType {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ProviderConfig {
+    #[serde(default)]
+    pub provider_type: ProviderType,
     pub npm: String,
     pub name: String,
     pub options: ProviderOptions,
@@ -85,6 +101,7 @@ pub struct ProviderConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct ProviderOptions {
     #[serde(rename = "apiKey")]
     pub api_key: String,
@@ -93,16 +110,43 @@ pub struct ProviderOptions {
     pub timeout: u64,
     #[serde(rename = "chunkTimeout")]
     pub chunk_timeout: u64,
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+impl Default for ProviderOptions {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            base_url: String::new(),
+            timeout: 300_000,
+            chunk_timeout: 10_000,
+            headers: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ModelConfig {
     pub name: String,
-    pub limit: ModelLimits,
+    #[serde(default)]
+    pub limit: Option<ModelLimits>,
+    #[serde(rename = "maxTokens", default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub modalities: Option<ModelModalities>,
+    #[serde(default)]
+    pub options: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ModelLimits {
     pub context: u32,
     pub output: u32,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ModelModalities {
+    pub input: Vec<String>,
+    pub output: Vec<String>,
 }

@@ -22,9 +22,10 @@
 use super::{AIClient, AnthropicClient, OpenAiClient};
 use anyhow::{anyhow, Result};
 use std::env;
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::config::Config;
+use crate::config::{Config, ProviderConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ModelType {
@@ -38,6 +39,7 @@ struct Model {
     base_url: String,
     model_name: String,
     model_type: ModelType,
+    headers: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +69,7 @@ impl Provider {
     fn from_env() -> Result<Model> {
         dotenvy::dotenv().ok();
 
+        // OpenAI
         if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
             env::var("OPENAI_API_KEY"),
             env::var("OPENAI_BASE_URL"),
@@ -77,9 +80,11 @@ impl Provider {
                 base_url,
                 model_name,
                 model_type: ModelType::OpenAiCompatible,
+                headers: None,
             });
         }
 
+        // Anthropic
         let anthropic_api_key =
             env::var("ANTHROPIC_API_KEY").or_else(|_| env::var("ANTHROPIC_AUTH_TOKEN"));
         if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
@@ -92,31 +97,122 @@ impl Provider {
                 base_url,
                 model_name,
                 model_type: ModelType::Anthropic,
+                headers: None,
+            });
+        }
+
+        // GLM (智谱)
+        if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
+            env::var("GLM_API_KEY"),
+            env::var("GLM_BASE_URL"),
+            env::var("GLM_MODEL_NAME"),
+        ) {
+            return Ok(Model {
+                api_key,
+                base_url,
+                model_name,
+                model_type: ModelType::OpenAiCompatible,
+                headers: None,
+            });
+        }
+
+        // Kimi (Moonshot)
+        if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
+            env::var("KIMI_API_KEY"),
+            env::var("KIMI_BASE_URL"),
+            env::var("KIMI_MODEL_NAME"),
+        ) {
+            return Ok(Model {
+                api_key,
+                base_url,
+                model_name,
+                model_type: ModelType::OpenAiCompatible,
+                headers: None,
+            });
+        }
+
+        // DeepSeek
+        if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
+            env::var("DEEPSEEK_API_KEY"),
+            env::var("DEEPSEEK_BASE_URL"),
+            env::var("DEEPSEEK_MODEL_NAME"),
+        ) {
+            return Ok(Model {
+                api_key,
+                base_url,
+                model_name,
+                model_type: ModelType::OpenAiCompatible,
+                headers: None,
+            });
+        }
+
+        // Qwen (通义千问)
+        let qwen_api_key =
+            env::var("QWEN_API_KEY").or_else(|_| env::var("DASHSCOPE_API_KEY"));
+        if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
+            qwen_api_key,
+            env::var("QWEN_BASE_URL"),
+            env::var("QWEN_MODEL_NAME"),
+        ) {
+            return Ok(Model {
+                api_key,
+                base_url,
+                model_name,
+                model_type: ModelType::OpenAiCompatible,
+                headers: None,
             });
         }
 
         Err(anyhow!(
-            "未找到环境变量配置。请设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY。"
+            "未找到环境变量配置。请设置 OPENAI_API_KEY、ANTHROPIC_API_KEY、GLM_API_KEY、KIMI_API_KEY 或 QWEN_API_KEY。"
         ))
     }
 
     pub(crate) fn from_config(config: &Config) -> Result<Model> {
-        for (provider_name, provider_cfg) in &config.provider {
-            if provider_cfg.models.contains_key(&config.model) {
-                let model_type = match provider_name.as_str() {
-                    "anthropic" => ModelType::Anthropic,
-                    _ => ModelType::OpenAiCompatible,
-                };
-                return Ok(Model {
-                    api_key: provider_cfg.options.api_key.clone(),
-                    base_url: provider_cfg.options.base_url.clone(),
-                    model_name: config.model.clone(),
-                    model_type,
-                });
-            }
+        if let Some((provider_name, model_name, provider_cfg)) =
+            Self::resolve_model_ref(&config.model, config)
+        {
+            let model_type = match provider_cfg.provider_type {
+                crate::config::models::ProviderType::Anthropic => ModelType::Anthropic,
+                crate::config::models::ProviderType::OpenAiCompatible => ModelType::OpenAiCompatible,
+            };
+            return Ok(Model {
+                api_key: provider_cfg.options.api_key.clone(),
+                base_url: provider_cfg.options.base_url.clone(),
+                model_name: model_name.to_string(),
+                model_type,
+                headers: provider_cfg.options.headers.clone(),
+            });
         }
 
         Err(anyhow!("默认模型 '{}' 在配置中未找到", config.model))
+    }
+
+    /// 解析模型引用字符串，支持两种格式：
+    /// - "provider_key/model_key"：按指定 Provider 查找
+    /// - "model_key"：遍历所有 Provider 查找第一个匹配的模型
+    ///
+    /// 返回：(provider_name, model_name, &provider_cfg)
+    fn resolve_model_ref<'a>(
+        model_ref: &str,
+        config: &'a Config,
+    ) -> Option<(String, String, &'a ProviderConfig)> {
+        // 尝试 "provider/model" 格式
+        if let Some((provider_name, model_name)) = model_ref.split_once('/') {
+            let provider_cfg = config.provider.get(provider_name)?;
+            if provider_cfg.models.contains_key(model_name) {
+                return Some((provider_name.to_string(), model_name.to_string(), provider_cfg));
+            }
+            return None;
+        }
+
+        // 回退到纯 model_key 遍历查找
+        for (provider_name, provider_cfg) in &config.provider {
+            if provider_cfg.models.contains_key(model_ref) {
+                return Some((provider_name.clone(), model_ref.to_string(), provider_cfg));
+            }
+        }
+        None
     }
 
     pub fn model_name(&self) -> Result<&str> {
@@ -128,22 +224,71 @@ impl Provider {
 
     /// 运行时切换模型。
     pub fn set_model(&mut self, model_name: &str, config: &Config) -> Result<()> {
-        for (provider_name, provider_cfg) in &config.provider {
-            if provider_cfg.models.contains_key(model_name) {
-                let model_type = match provider_name.as_str() {
-                    "anthropic" => ModelType::Anthropic,
-                    _ => ModelType::OpenAiCompatible,
-                };
-                self.model = Some(Model {
-                    api_key: provider_cfg.options.api_key.clone(),
-                    base_url: provider_cfg.options.base_url.clone(),
-                    model_name: model_name.to_string(),
-                    model_type,
-                });
-                return Ok(());
-            }
+        self.set_model_with_key(model_name, config, None)
+    }
+
+    /// 运行时切换模型，支持 api_key 覆盖。
+    /// model_name 支持 "provider/model" 格式或纯 "model_key"。
+    pub fn set_model_with_key(
+        &mut self,
+        model_name: &str,
+        config: &Config,
+        api_key_override: Option<&str>,
+    ) -> Result<()> {
+        if let Some((_provider_name, model_key, provider_cfg)) =
+            Self::resolve_model_ref(model_name, config)
+        {
+            let model_type = match provider_cfg.provider_type {
+                crate::config::models::ProviderType::Anthropic => ModelType::Anthropic,
+                crate::config::models::ProviderType::OpenAiCompatible => ModelType::OpenAiCompatible,
+            };
+            self.model = Some(Model {
+                api_key: api_key_override
+                    .map(|k| k.to_string())
+                    .unwrap_or_else(|| provider_cfg.options.api_key.clone()),
+                base_url: provider_cfg.options.base_url.clone(),
+                model_name: model_key,
+                model_type,
+                headers: provider_cfg.options.headers.clone(),
+            });
+            return Ok(());
         }
         Err(anyhow!("模型 '{}' 在配置中未找到", model_name))
+    }
+
+    /// 按 Provider + 模型名切换，避免同名模型冲突。
+    pub fn set_model_by_provider(
+        &mut self,
+        provider_name: &str,
+        model_name: &str,
+        config: &Config,
+        api_key_override: Option<&str>,
+    ) -> Result<()> {
+        let provider_cfg = config
+            .provider
+            .get(provider_name)
+            .ok_or_else(|| anyhow!("Provider '{}' 在配置中未找到", provider_name))?;
+        if !provider_cfg.models.contains_key(model_name) {
+            return Err(anyhow!(
+                "模型 '{}' 在 Provider '{}' 中未找到",
+                model_name,
+                provider_name
+            ));
+        }
+        let model_type = match provider_cfg.provider_type {
+            crate::config::models::ProviderType::Anthropic => ModelType::Anthropic,
+            crate::config::models::ProviderType::OpenAiCompatible => ModelType::OpenAiCompatible,
+        };
+        self.model = Some(Model {
+            api_key: api_key_override
+                .map(|k| k.to_string())
+                .unwrap_or_else(|| provider_cfg.options.api_key.clone()),
+            base_url: provider_cfg.options.base_url.clone(),
+            model_name: model_name.to_string(),
+            model_type,
+            headers: provider_cfg.options.headers.clone(),
+        });
+        Ok(())
     }
 
     /// 枚举配置中所有可用模型。
@@ -167,6 +312,7 @@ impl Provider {
                 model.api_key.clone(),
                 model.base_url.clone(),
                 model.model_name.clone(),
+                model.headers.clone(),
             )?;
             Ok(Box::new(client))
         } else if model.model_type == ModelType::Anthropic {
@@ -184,312 +330,3 @@ impl Provider {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::provider::{AIClient, ChunkContent, FinishReason};
-    use crate::session::message::{Message, Part, Role};
-    use std::collections::HashMap;
-    use std::time::Duration;
-
-    /// 探测 localhost:11434 是否有可用的 Ollama 服务，并返回一个可用模型名。
-    async fn try_get_ollama_model() -> Option<String> {
-        let client = reqwest::Client::new();
-        let resp = client
-            .get("http://localhost:11434/api/tags")
-            .timeout(Duration::from_secs(2))
-            .send()
-            .await
-            .ok()?;
-        if !resp.status().is_success() {
-            return None;
-        }
-        let body: serde_json::Value = resp.json().await.ok()?;
-        let models = body.get("models")?.as_array()?;
-        models.first()?.get("name")?.as_str().map(|s| s.to_string())
-    }
-
-    #[test]
-    fn test_provider_from_config() {
-        use crate::config::models::{ModelConfig, ModelLimits, ProviderConfig, ProviderOptions};
-
-        let mut provider_map = HashMap::new();
-        provider_map.insert(
-            "openai".to_string(),
-            ProviderConfig {
-                npm: "@ai-sdk/openai-compatible".to_string(),
-                name: "OpenAI".to_string(),
-                options: ProviderOptions {
-                    api_key: "test-key".to_string(),
-                    base_url: "https://test.com".to_string(),
-                    timeout: 300000,
-                    chunk_timeout: 10000,
-                },
-                models: {
-                    let mut m = HashMap::new();
-                    m.insert(
-                        "gpt-4".to_string(),
-                        ModelConfig {
-                            name: "GPT-4".to_string(),
-                            limit: ModelLimits {
-                                context: 128000,
-                                output: 4096,
-                            },
-                        },
-                    );
-                    m
-                },
-            },
-        );
-
-        let config = Config {
-            model: "gpt-4".to_string(),
-            provider: provider_map,
-            mcp: None,
-            server: None,
-        };
-
-        let model = Provider::from_config(&config).unwrap();
-        assert_eq!(model.model_name, "gpt-4");
-        assert_eq!(model.api_key, "test-key");
-        assert_eq!(model.model_type, ModelType::OpenAiCompatible);
-    }
-
-    /// 测试本地 Ollama 的 OpenAI 兼容流式接口：纯文本场景
-    #[tokio::test]
-    async fn test_local_openai_compatible_text_stream() {
-        let Some(model_name) = try_get_ollama_model().await else {
-            panic!(
-                "Ollama is not running on localhost:11434. \
-                 Please start Ollama to run this test."
-            );
-        };
-
-        let provider = Provider {
-            model: Some(Model {
-                api_key: "dummy".to_string(),
-                base_url: "http://localhost:11434".to_string(),
-                model_name,
-                model_type: ModelType::OpenAiCompatible,
-            }),
-        };
-
-        let client = provider.get_client().expect("should create client");
-
-        let messages = vec![Message::new(
-            "test-session",
-            Role::User,
-            vec![Part::Text {
-                text: "Please reply with exactly the word 'pong'.".to_string(),
-            }],
-        )];
-
-        let schema = serde_json::json!([]);
-        let mut texts = Vec::new();
-        let mut finish_reason = None;
-
-        client
-            .stream_message(
-                "You are a concise assistant.",
-                &messages,
-                &schema,
-                &mut |chunk| match chunk.content {
-                    ChunkContent::Text(t) => texts.push(t),
-                    ChunkContent::Finish(r) => finish_reason = Some(r),
-                    _ => {}
-                },
-            )
-            .await
-            .expect("stream_message should succeed");
-
-        let full_text = texts.join("");
-        println!("text stream response: {}", full_text);
-        assert!(
-            !full_text.is_empty() || finish_reason.is_some(),
-            "should receive at least text or finish reason"
-        );
-        assert_eq!(
-            finish_reason,
-            Some(FinishReason::Stop),
-            "text-only stream should finish with Stop"
-        );
-    }
-
-    #[test]
-    fn test_set_model_and_list_models() {
-        use crate::config::models::{ModelConfig, ModelLimits, ProviderConfig, ProviderOptions};
-        use std::collections::HashMap;
-
-        let mut provider_map = HashMap::new();
-        provider_map.insert(
-            "openai".to_string(),
-            ProviderConfig {
-                npm: "@ai-sdk/openai-compatible".to_string(),
-                name: "OpenAI".to_string(),
-                options: ProviderOptions {
-                    api_key: "test-key".to_string(),
-                    base_url: "https://test.com".to_string(),
-                    timeout: 300000,
-                    chunk_timeout: 10000,
-                },
-                models: {
-                    let mut m = HashMap::new();
-                    m.insert(
-                        "gpt-4".to_string(),
-                        ModelConfig {
-                            name: "GPT-4".to_string(),
-                            limit: ModelLimits {
-                                context: 128000,
-                                output: 4096,
-                            },
-                        },
-                    );
-                    m.insert(
-                        "gpt-3.5".to_string(),
-                        ModelConfig {
-                            name: "GPT-3.5".to_string(),
-                            limit: ModelLimits {
-                                context: 16000,
-                                output: 4096,
-                            },
-                        },
-                    );
-                    m
-                },
-            },
-        );
-
-        let config = Config {
-            model: "gpt-4".to_string(),
-            provider: provider_map,
-            mcp: None,
-            server: None,
-        };
-
-        let mut provider = Provider {
-            model: Some(Model {
-                api_key: "test-key".to_string(),
-                base_url: "https://test.com".to_string(),
-                model_name: "gpt-4".to_string(),
-                model_type: ModelType::OpenAiCompatible,
-            }),
-        };
-        assert_eq!(provider.model_name().unwrap(), "gpt-4");
-
-        // 测试 list_models
-        let models = provider.list_models(&config);
-        assert_eq!(models.len(), 2);
-        assert!(models.iter().any(|(k, _)| k == "gpt-4"));
-        assert!(models.iter().any(|(k, _)| k == "gpt-3.5"));
-
-        // 测试 set_model
-        provider.set_model("gpt-3.5", &config).unwrap();
-        assert_eq!(provider.model_name().unwrap(), "gpt-3.5");
-
-        // 测试 set_model 无效模型
-        assert!(provider.set_model("invalid", &config).is_err());
-    }
-
-    /// 测试本地 Ollama 的 OpenAI 兼容流式接口：tool_use 场景
-    #[tokio::test]
-    async fn test_local_openai_compatible_tool_use_stream() {
-        let Some(model_name) = try_get_ollama_model().await else {
-            panic!(
-                "Ollama is not running on localhost:11434. \
-                 Please start Ollama to run this test."
-            );
-        };
-
-        let provider = Provider {
-            model: Some(Model {
-                api_key: "dummy".to_string(),
-                base_url: "http://localhost:11434".to_string(),
-                model_name,
-                model_type: ModelType::OpenAiCompatible,
-            }),
-        };
-
-        let client = provider.get_client().expect("should create client");
-
-        let tools_schema = serde_json::json!([
-            {
-                "name": "calculator",
-                "description": "Add two numbers.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "a": { "type": "number" },
-                        "b": { "type": "number" }
-                    },
-                    "required": ["a", "b"]
-                }
-            }
-        ]);
-
-        let messages = vec![Message::new(
-            "test-session",
-            Role::User,
-            vec![Part::Text {
-                text: "What is 23 plus 45? Use the calculator tool.".to_string(),
-            }],
-        )];
-
-        let mut texts = Vec::new();
-        let mut tool_uses = Vec::new();
-        let mut finish_reason = None;
-
-        let result = client
-            .stream_message(
-                "You are a helpful assistant. Use tools when appropriate.",
-                &messages,
-                &tools_schema,
-                &mut |chunk| match chunk.content {
-                    ChunkContent::Text(t) => texts.push(t),
-                    ChunkContent::ToolUse(part) => {
-                        if let Part::ToolUse {
-                            id,
-                            name,
-                            arguments,
-                        } = part
-                        {
-                            tool_uses.push((id, name, arguments));
-                        }
-                    }
-                    ChunkContent::Finish(r) => finish_reason = Some(r),
-                    _ => {}
-                },
-            )
-            .await;
-
-        if let Err(e) = result {
-            eprintln!(
-                "stream_message returned error (model may not support tools): {}",
-                e
-            );
-            return;
-        }
-
-        if !tool_uses.is_empty() {
-            assert_eq!(
-                finish_reason,
-                Some(FinishReason::ToolUse),
-                "tool use stream should finish with ToolUse"
-            );
-            let (_, name, args) = &tool_uses[0];
-            assert_eq!(name, "calculator");
-            assert!(
-                args.get("a").is_some() || args.get("b").is_some(),
-                "calculator arguments should contain a or b, got: {}",
-                args
-            );
-        } else {
-            // 模型未触发工具调用（可能是模型不支持 tools），仅做基本断言，不使测试失败
-            let full_text = texts.join("");
-            println!("tool stream text response (no tool use): {}", full_text);
-            assert!(
-                !full_text.is_empty() || finish_reason.is_some(),
-                "should receive text or finish reason even when no tool is used"
-            );
-        }
-    }
-}

@@ -335,6 +335,49 @@ impl TuiClient {
     }
 
 
+    /// 获取所有可用模型列表（按 Provider 分组）。
+    pub async fn list_models(&self) -> Result<serde_json::Value> {
+        let resp = self
+            .client
+            .get(format!("{}/api/models", self.base_url))
+            .send()
+            .await?
+            .json::<ApiResponse<serde_json::Value>>()
+            .await?;
+
+        match resp.data {
+            Some(data) => Ok(data),
+            None => Err(anyhow::anyhow!(resp.error.unwrap_or_default())),
+        }
+    }
+
+    /// 切换当前使用的模型。
+    pub async fn switch_model(
+        &self,
+        provider: &str,
+        model: &str,
+        api_key: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let body = serde_json::json!({
+            "provider": provider,
+            "model": model,
+            "api_key": api_key,
+        });
+        let resp = self
+            .client
+            .post(format!("{}/api/model/switch", self.base_url))
+            .json(&body)
+            .send()
+            .await?
+            .json::<ApiResponse<serde_json::Value>>()
+            .await?;
+
+        match resp.data {
+            Some(data) => Ok(data),
+            None => Err(anyhow::anyhow!(resp.error.unwrap_or_default())),
+        }
+    }
+
     pub async fn subscribe_logs(&self, tx: mpsc::Sender<AppEvent>) -> Result<()> {
         let url = format!("{}/api/logs/stream", self.base_url);
         let response = self.client.get(&url).send().await?;

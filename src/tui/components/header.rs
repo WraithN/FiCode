@@ -29,15 +29,8 @@ use ratatui::{
 };
 
 use crate::tui::components::Component;
-use crate::tui::event::AppEvent;
+use crate::tui::event::{AppEvent, ModelItem, ProviderItem};
 use crate::tui::theme::Theme;
-
-/// 模型信息结构。
-#[derive(Debug, Clone)]
-pub struct ModelInfo {
-    pub name: String,
-    pub capabilities: Vec<String>,
-}
 
 /// 顶部状态栏的当前状态。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,14 +40,22 @@ pub enum HeaderStatus {
     Streaming,  // 正在流式传输
 }
 
-/// 顶部标题栏组件，展示 Logo、当前模型、运行状态，以及模型下拉菜单。
+/// 模型菜单状态机。
+#[derive(Debug, Clone)]
+enum MenuState {
+    Closed,
+    ProviderList,
+    ModelList { provider_idx: usize },
+}
+
+/// 顶部标题栏组件，展示 Logo、当前模型、运行状态，以及模型两级子菜单。
 pub struct Header {
     current_model: String,
     session_id: Option<String>,
-    model_dropdown_open: bool,   // 模型下拉菜单是否展开
-    theme_dropdown_open: bool,   // 主题下拉菜单是否展开（预留）
-    dropdown_selected: usize,    // 下拉菜单当前选中项
-    models: Vec<ModelInfo>,      // 可选模型列表
+    menu_state: MenuState,
+    providers: Vec<ProviderItem>,
+    provider_selected: usize,
+    model_selected: Vec<usize>, // 每个 provider 对应的选中模型索引
     status: HeaderStatus,
 }
 
@@ -63,10 +64,10 @@ impl Header {
         Self {
             current_model: "unknown".to_string(),
             session_id: None,
-            model_dropdown_open: false,
-            theme_dropdown_open: false,
-            dropdown_selected: 0,
-            models: vec![],
+            menu_state: MenuState::Closed,
+            providers: vec![],
+            provider_selected: 0,
+            model_selected: vec![],
             status: HeaderStatus::Ready,
         }
     }
@@ -83,37 +84,63 @@ impl Header {
         self.session_id.clone()
     }
 
+    /// 切换模型菜单（打开时默认进入 Provider 列表）。
     pub fn toggle_model_dropdown(&mut self) {
-        self.model_dropdown_open = !self.model_dropdown_open;
-        self.theme_dropdown_open = false;
-        self.dropdown_selected = 0;
+        match self.menu_state {
+            MenuState::Closed => {
+                self.menu_state = MenuState::ProviderList;
+                self.provider_selected = 0;
+            }
+            _ => self.menu_state = MenuState::Closed,
+        }
     }
 
     pub fn toggle_theme_dropdown(&mut self) {
-        self.theme_dropdown_open = !self.theme_dropdown_open;
-        self.model_dropdown_open = false;
-        self.dropdown_selected = 0;
+        // 主题下拉保持原行为：关闭模型菜单
+        self.menu_state = MenuState::Closed;
     }
 
     pub fn close_dropdowns(&mut self) {
-        self.model_dropdown_open = false;
-        self.theme_dropdown_open = false;
+        self.menu_state = MenuState::Closed;
     }
 
     pub fn has_dropdown_open(&self) -> bool {
-        self.model_dropdown_open || self.theme_dropdown_open
+        !matches!(self.menu_state, MenuState::Closed)
     }
 
     pub fn on_tick(&mut self) {}
 
-    /// 更新状态栏显示的状态。
     pub fn set_status(&mut self, status: HeaderStatus) {
         self.status = status;
+    }
+
+    /// 设置从后端加载的模型列表。
+    pub fn set_providers(&mut self, providers: Vec<ProviderItem>) {
+        self.model_selected = vec![0; providers.len()];
+        self.providers = providers;
+        // 保持当前选中在有效范围内
+        if self.provider_selected >= self.providers.len() && !self.providers.is_empty() {
+            self.provider_selected = self.providers.len() - 1;
+        }
+    }
+
+    /// 返回当前是否需要从后端加载模型列表。
+    pub fn needs_load_models(&self) -> bool {
+        matches!(self.menu_state, MenuState::ProviderList) && self.providers.is_empty()
+    }
+
+    /// 按 key 查找 provider。
+    pub fn get_provider(&self, key: &str) -> Option<&ProviderItem> {
+        self.providers.iter().find(|p| p.key == key)
+    }
+
+    /// 获取所有 provider 的引用。
+    pub fn providers(&self) -> &[ProviderItem] {
+        &self.providers
     }
 }
 
 impl Component for Header {
-    /// 渲染标题栏：左侧显示 Logo、模型名、状态指示器；若下拉菜单打开则叠加渲染菜单。
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, _is_focused: bool) {
         let block = Block::default()
             .borders(Borders::BOTTOM)
@@ -149,75 +176,52 @@ impl Component for Header {
         let paragraph = Paragraph::new(line).alignment(Alignment::Left);
         frame.render_widget(paragraph, inner);
 
-        if self.model_dropdown_open {
-            self.draw_model_dropdown(frame, area, theme);
+        match &self.menu_state {
+            MenuState::ProviderList => self.draw_provider_list(frame, area, theme),
+            MenuState::ModelList { provider_idx } => self.draw_model_list(frame, area, theme, *provider_idx),
+            MenuState::Closed => {}
         }
     }
 
-    /// 处理标题栏事件：当下拉菜单打开时，拦截方向键、Enter、Esc 进行菜单导航。
     fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<AppEvent> {
         if let Event::Key(key) = event {
             if key.kind != KeyEventKind::Press {
                 return None;
             }
 
-            if self.model_dropdown_open {
-                match key.code {
-                    KeyCode::Up => {
-                        if self.dropdown_selected > 0 {
-                            self.dropdown_selected -= 1;
-                        }
-                        return Some(AppEvent::InputChanged(String::new()));
-                    }
-                    KeyCode::Down => {
-                        if self.dropdown_selected < self.models.len().saturating_sub(1) {
-                            self.dropdown_selected += 1;
-                        }
-                        return Some(AppEvent::InputChanged(String::new()));
-                    }
-                    KeyCode::Enter => {
-                        if let Some(model) = self.models.get(self.dropdown_selected) {
-                            let name = model.name.clone();
-                            self.model_dropdown_open = false;
-                            return Some(AppEvent::SelectModel(name));
-                        }
-                    }
-                    KeyCode::Esc => {
-                        self.model_dropdown_open = false;
-                        return None;
-                    }
-                    _ => {}
+            match &mut self.menu_state {
+                MenuState::ProviderList => self.handle_provider_list_event(key.code),
+                MenuState::ModelList { provider_idx } => {
+                    let idx = *provider_idx;
+                    self.handle_model_list_event(key.code, idx)
                 }
+                MenuState::Closed => None,
             }
+        } else {
+            None
         }
-        None
     }
 }
 
 impl Header {
-    /// 渲染模型下拉菜单：在标题栏下方弹出，显示可选模型列表与当前选中高亮。
-    fn draw_model_dropdown(&self, frame: &mut Frame, header_area: Rect, theme: &Theme) {
+    fn draw_provider_list(&self, frame: &mut Frame, header_area: Rect, theme: &Theme) {
         let items: Vec<Line> = self
-            .models
+            .providers
             .iter()
             .enumerate()
-            .map(|(i, model)| {
-                let prefix = if i == self.dropdown_selected {
-                    "● "
-                } else {
-                    "  "
-                };
-                let style = if i == self.dropdown_selected {
+            .map(|(i, provider)| {
+                let prefix = if i == self.provider_selected { "▶ " } else { "  " };
+                let style = if i == self.provider_selected {
                     theme.style_selection()
                 } else {
                     theme.style_primary()
                 };
-                Line::styled(format!("{}{}", prefix, model.name), style)
+                Line::styled(format!("{}{}", prefix, provider.name), style)
             })
             .collect();
 
-        let height = items.len().clamp(3, 10) as u16 + 2;
-        let width = 30u16;
+        let height = items.len().clamp(3, 8) as u16 + 2;
+        let width = 34u16;
         let x = header_area.x + 10;
         let y = header_area.y + header_area.height;
 
@@ -232,6 +236,128 @@ impl Header {
         );
         frame.render_widget(paragraph, area);
     }
+
+    fn draw_model_list(&self, frame: &mut Frame, header_area: Rect, theme: &Theme, provider_idx: usize) {
+        let provider = match self.providers.get(provider_idx) {
+            Some(p) => p,
+            None => return,
+        };
+
+        let mut items = vec![Line::styled(
+            format!("◀ {}", provider.name),
+            Style::default().fg(theme.border).add_modifier(Modifier::BOLD),
+        )];
+
+        let selected = self.model_selected.get(provider_idx).copied().unwrap_or(0);
+        for (i, model) in provider.models.iter().enumerate() {
+            let prefix = if i == selected { "● " } else { "  " };
+            let style = if i == selected {
+                theme.style_selection()
+            } else {
+                theme.style_primary()
+            };
+            items.push(Line::styled(format!("{}{}", prefix, model.name), style));
+        }
+
+        let height = items.len().clamp(3, 10) as u16 + 2;
+        let width = 38u16;
+        let x = header_area.x + 10;
+        let y = header_area.y + header_area.height;
+
+        let area = ratatui::layout::Rect::new(x, y, width, height);
+        frame.render_widget(Clear, area);
+
+        let paragraph = Paragraph::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border))
+                .style(theme.drawer_style()),
+        );
+        frame.render_widget(paragraph, area);
+    }
+
+    fn handle_provider_list_event(&mut self, code: KeyCode) -> Option<AppEvent> {
+        let max = self.providers.len().saturating_sub(1);
+        match code {
+            KeyCode::Up => {
+                if self.provider_selected > 0 {
+                    self.provider_selected -= 1;
+                }
+                Some(AppEvent::InputChanged(String::new()))
+            }
+            KeyCode::Down => {
+                if self.provider_selected < max {
+                    self.provider_selected += 1;
+                }
+                Some(AppEvent::InputChanged(String::new()))
+            }
+            KeyCode::Enter => {
+                if !self.providers.is_empty() {
+                    let idx = self.provider_selected;
+                    self.menu_state = MenuState::ModelList { provider_idx: idx };
+                }
+                Some(AppEvent::InputChanged(String::new()))
+            }
+            KeyCode::Esc => {
+                self.menu_state = MenuState::Closed;
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn handle_model_list_event(&mut self, code: KeyCode, provider_idx: usize) -> Option<AppEvent> {
+        let provider = match self.providers.get(provider_idx) {
+            Some(p) => p,
+            None => {
+                self.menu_state = MenuState::ProviderList;
+                return None;
+            }
+        };
+        let max = provider.models.len().saturating_sub(1);
+        let selected = self.model_selected.get_mut(provider_idx)?;
+
+        match code {
+            KeyCode::Up => {
+                if *selected > 0 {
+                    *selected -= 1;
+                }
+                Some(AppEvent::InputChanged(String::new()))
+            }
+            KeyCode::Down => {
+                if *selected < max {
+                    *selected += 1;
+                }
+                Some(AppEvent::InputChanged(String::new()))
+            }
+            KeyCode::Enter => {
+                let model = provider.models.get(*selected)?;
+                let provider_key = provider.key.clone();
+                let model_key = model.key.clone();
+                // 预设 provider（非 custom）默认 api_key 为空，弹出模态框让用户输入
+                let needs_key = provider.provider_type != "custom" && provider_key != "custom";
+                self.menu_state = MenuState::Closed;
+                if needs_key {
+                    Some(AppEvent::SelectModelItem {
+                        provider: provider_key,
+                        model: model_key,
+                    })
+                } else {
+                    Some(AppEvent::SwitchModel {
+                        provider: provider_key,
+                        model: model_key,
+                        api_key: None,
+                    })
+                }
+            }
+            KeyCode::Esc => {
+                self.menu_state = MenuState::ProviderList;
+                Some(AppEvent::InputChanged(String::new()))
+            }
+            _ => None,
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -246,13 +372,12 @@ mod tests {
     }
 
     #[test]
-    fn test_dropdown_toggle() {
+    fn test_menu_toggle() {
         let mut header = Header::new();
-        assert!(!header.model_dropdown_open);
+        assert!(!header.has_dropdown_open());
         header.toggle_model_dropdown();
-        assert!(header.model_dropdown_open);
-        header.toggle_theme_dropdown();
-        assert!(!header.model_dropdown_open);
-        assert!(header.theme_dropdown_open);
+        assert!(header.has_dropdown_open());
+        header.toggle_model_dropdown();
+        assert!(!header.has_dropdown_open());
     }
 }

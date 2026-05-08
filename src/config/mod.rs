@@ -21,11 +21,13 @@
 
 pub mod config;
 pub mod models;
+pub mod presets;
 
 pub use models::{
     Config, McpServerConfig, McpServerType, ModelConfig, ModelLimits, ProviderConfig,
-    ProviderOptions,
+    ProviderOptions, ProviderType,
 };
+pub use presets::merge_presets;
 
 #[cfg(test)]
 mod tests {

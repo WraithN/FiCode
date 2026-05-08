@@ -122,6 +122,8 @@ impl Server {
             .route("/api/commands", get(super::commands::handle_list_commands))
             .route("/api/commands/:name/execute", post(super::commands::handle_execute_command))
             .route("/api/themes", get(handle_list_themes))
+            .route("/api/models", get(super::api::chat_api::handle_list_models_endpoint))
+            .route("/api/model/switch", post(super::api::chat_api::handle_switch_model))
             .route("/api/logs", get(crate::server::api::log_api::handle_list_logs))
             .route("/api/logs/stream", get(crate::server::api::log_api::handle_log_stream))
             .layer(cors_layer(self.state.config.clone()))

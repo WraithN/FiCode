@@ -39,6 +39,8 @@ use crate::tui::theme::Theme;
 pub enum SubmenuKind {
     Theme,
     Skill,
+    ModelProvider,
+    ModelList,
 }
 
 /// 底部输入框组件，处理用户键盘输入、光标管理、斜杠命令提示与消息提交。
@@ -54,9 +56,10 @@ pub struct Input {
     commands_loaded: bool,
     // 子菜单（主题选择 / skill 选择）
     submenu_kind: Option<SubmenuKind>,
-    submenu_items: Vec<(String, String)>, // (name, description)
+    submenu_items: Vec<(String, String, String)>, // (key, display, description)
     submenu_selected: usize,
     submenu_loaded: bool,
+    submenu_context: Option<String>, // 用于 ModelList 存储当前 provider key
 }
 
 impl Input {
@@ -75,6 +78,7 @@ impl Input {
             submenu_items: Vec::new(),
             submenu_selected: 0,
             submenu_loaded: false,
+            submenu_context: None,
         }
     }
 
@@ -99,9 +103,14 @@ impl Input {
         self.submenu_kind = Some(kind);
         self.submenu_selected = 0;
         self.dropdown_visible = true;
+        self.submenu_context = None;
     }
 
-    pub fn set_submenu_items(&mut self, items: Vec<(String, String)>) {
+    pub fn set_submenu_context(&mut self, context: String) {
+        self.submenu_context = Some(context);
+    }
+
+    pub fn set_submenu_items(&mut self, items: Vec<(String, String, String)>) {
         self.submenu_items = items;
         self.submenu_loaded = true;
     }
@@ -109,6 +118,7 @@ impl Input {
     pub fn close_submenu(&mut self) {
         self.submenu_kind = None;
         self.dropdown_visible = false;
+        self.submenu_context = None;
     }
 
     pub fn is_submenu_open(&self) -> bool {
@@ -286,7 +296,7 @@ impl Component for Input {
                                 }
                                 return match kind {
                                     SubmenuKind::Theme => Some(AppEvent::PreviewTheme(self.submenu_selected)),
-                                    SubmenuKind::Skill => None,
+                                    SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
                                 };
                             }
                             KeyCode::Down => {
@@ -295,21 +305,30 @@ impl Component for Input {
                                 }
                                 return match kind {
                                     SubmenuKind::Theme => Some(AppEvent::PreviewTheme(self.submenu_selected)),
-                                    SubmenuKind::Skill => None,
+                                    SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
                                 };
                             }
                             KeyCode::Enter => {
                                 if self.submenu_selected < self.submenu_items.len() {
                                     let idx = self.submenu_selected;
+                                    let key = self.submenu_items[idx].0.clone();
                                     match kind {
                                         SubmenuKind::Theme => {
                                             self.close_submenu();
                                             return Some(AppEvent::SelectTheme(idx));
                                         }
                                         SubmenuKind::Skill => {
-                                            let name = self.submenu_items[idx].0.clone();
                                             self.close_submenu();
-                                            return Some(AppEvent::SelectSkill(name));
+                                            return Some(AppEvent::SelectSkill(key));
+                                        }
+                                        SubmenuKind::ModelProvider => {
+                                            self.close_submenu();
+                                            return Some(AppEvent::SelectModelProvider(key));
+                                        }
+                                        SubmenuKind::ModelList => {
+                                            let provider = self.submenu_context.clone().unwrap_or_default();
+                                            self.close_submenu();
+                                            return Some(AppEvent::SelectModelItem { provider, model: key });
                                         }
                                     }
                                 }
@@ -318,14 +337,14 @@ impl Component for Input {
                                 self.close_submenu();
                                 return match kind {
                                     SubmenuKind::Theme => Some(AppEvent::CancelThemePreview),
-                                    SubmenuKind::Skill => None,
+                                    SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
                                 };
                             }
                             _ => {
                                 self.close_submenu();
                                 return match kind {
                                     SubmenuKind::Theme => Some(AppEvent::CancelThemePreview),
-                                    SubmenuKind::Skill => None,
+                                    SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
                                 };
                             }
                         }
@@ -431,7 +450,7 @@ impl Component for Input {
                             }
                             return match kind {
                                 SubmenuKind::Theme => Some(AppEvent::PreviewTheme(self.submenu_selected)),
-                                SubmenuKind::Skill => None,
+                                SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
                             };
                         }
                         crossterm::event::MouseEventKind::ScrollDown => {
@@ -440,7 +459,7 @@ impl Component for Input {
                             }
                             return match kind {
                                 SubmenuKind::Theme => Some(AppEvent::PreviewTheme(self.submenu_selected)),
-                                SubmenuKind::Skill => None,
+                                SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
                             };
                         }
                         crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
@@ -455,15 +474,24 @@ impl Component for Input {
                                     if index < self.submenu_items.len() {
                                         self.submenu_selected = index;
                                         let idx = self.submenu_selected;
+                                        let key = self.submenu_items[idx].0.clone();
                                         match kind {
                                             SubmenuKind::Theme => {
                                                 self.close_submenu();
                                                 return Some(AppEvent::SelectTheme(idx));
                                             }
                                             SubmenuKind::Skill => {
-                                                let name = self.submenu_items[idx].0.clone();
                                                 self.close_submenu();
-                                                return Some(AppEvent::SelectSkill(name));
+                                                return Some(AppEvent::SelectSkill(key));
+                                            }
+                                            SubmenuKind::ModelProvider => {
+                                                self.close_submenu();
+                                                return Some(AppEvent::SelectModelProvider(key));
+                                            }
+                                            SubmenuKind::ModelList => {
+                                                let provider = self.submenu_context.clone().unwrap_or_default();
+                                                self.close_submenu();
+                                                return Some(AppEvent::SelectModelItem { provider, model: key });
                                             }
                                         }
                                     }
@@ -471,7 +499,7 @@ impl Component for Input {
                                     self.close_submenu();
                                     return match kind {
                                         SubmenuKind::Theme => Some(AppEvent::CancelThemePreview),
-                                        SubmenuKind::Skill => None,
+                                        SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
                                     };
                                 }
                             }
@@ -533,7 +561,7 @@ impl Input {
                 .submenu_items
                 .iter()
                 .enumerate()
-                .map(|(i, (name, desc))| {
+                .map(|(i, (_key, name, desc))| {
                     let style = if i == self.submenu_selected {
                         theme.style_selection()
                     } else {

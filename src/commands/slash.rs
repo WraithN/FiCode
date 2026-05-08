@@ -141,10 +141,12 @@ impl CommandHandler for ModelCommandHandler {
                 let mut limit_str = String::new();
                 for (_pname, pcfg) in &cfg.provider {
                     if let Some(mcfg) = pcfg.models.get(mkey) {
-                        limit_str = format!(
-                            " (context: {}, output: {})",
-                            mcfg.limit.context, mcfg.limit.output
-                        );
+                        if let Some(limit) = &mcfg.limit {
+                            limit_str = format!(
+                                " (context: {}, output: {})",
+                                limit.context, limit.output
+                            );
+                        }
                         break;
                     }
                 }

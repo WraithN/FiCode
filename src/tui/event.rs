@@ -21,6 +21,24 @@
 
 use crate::server::transport::sse::SseEvent;
 
+/// Provider 分组信息（TUI 模型菜单用）。
+#[derive(Debug, Clone)]
+pub struct ProviderItem {
+    pub key: String,
+    pub name: String,
+    pub provider_type: String,
+    pub models: Vec<ModelItem>,
+}
+
+/// 模型信息（TUI 模型菜单用）。
+#[derive(Debug, Clone)]
+pub struct ModelItem {
+    pub key: String,
+    pub name: String,
+    pub context: usize,
+    pub output: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
     Info,
@@ -54,6 +72,10 @@ pub enum AppEvent {
     ToggleModelDropdown,
     ToggleThemeDropdown,
     SelectModel(String),
+    SwitchModel { provider: String, model: String, api_key: Option<String> },
+    SetModelList(Vec<ProviderItem>),
+    SelectModelProvider(String),
+    SelectModelItem { provider: String, model: String },
     SelectTheme(usize),
     PreviewTheme(usize),   // 预览主题（方向键移动时触发，未确认）
     CancelThemePreview,    // 取消主题预览（Esc 时恢复原来主题）

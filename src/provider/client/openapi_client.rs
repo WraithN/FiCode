@@ -38,22 +38,31 @@ use crate::session::message::{Message, Part, Role};
 // OpenAI API 兼容客户端
 // =============================================================================
 
+use std::collections::HashMap;
+
 pub struct OpenAiClient {
     client: reqwest::Client,
     api_key: String,
     base_url: String,
     model_name: String,
+    headers: Option<HashMap<String, String>>,
     retry_config: RetryConfig,
 }
 
 impl OpenAiClient {
     /// 构造 OpenAI 兼容客户端。
-    pub(crate) fn new(api_key: String, base_url: String, model_name: String) -> Result<Self> {
+    pub(crate) fn new(
+        api_key: String,
+        base_url: String,
+        model_name: String,
+        headers: Option<HashMap<String, String>>,
+    ) -> Result<Self> {
         Ok(Self {
             client: reqwest::Client::new(),
             api_key,
             base_url,
             model_name,
+            headers,
             retry_config: RetryConfig::default(),
         })
     }
@@ -75,19 +84,47 @@ impl AIClient for OpenAiClient {
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
+        // 追加用户配置的自定义请求头
+        if let Some(ref custom_headers) = self.headers {
+            for (key, value) in custom_headers {
+                if let Ok(header_name) = reqwest::header::HeaderName::from_bytes(key.as_bytes()) {
+                    if let Ok(header_value) = HeaderValue::from_str(value) {
+                        headers.insert(header_name, header_value);
+                    }
+                }
+            }
+        }
+
         // 将内部 Message/Part 模型转换为 OpenAI 兼容的消息格式
         let openai_messages = build_messages(system_prompt, messages);
 
         // 显式开启流式模式
-        let body = json!({
+        let mut body = json!({
             "model": self.model_name,
             "messages": openai_messages,
-            "tools": convert_tools_schema(tools_schema),
             "max_tokens": 8000,
             "stream": true
         });
+        // 如果 tools_schema 非空则附加（部分平台不支持 tools，会导致 404）
+        let tools = convert_tools_schema(tools_schema);
+        if let Some(arr) = tools.as_array() {
+            if !arr.is_empty() {
+                body["tools"] = tools;
+            }
+        }
 
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        // 兼容两种 base_url 写法：
+        // - 已包含版本号（如 https://api.openai.com/v1） → 直接附加 /chat/completions
+        // - 未包含版本号（如 http://localhost:11434） → 附加 /v1/chat/completions
+        let url = if self.base_url.ends_with("/v1")
+            || self.base_url.ends_with("/v2")
+            || self.base_url.ends_with("/v3")
+            || self.base_url.ends_with("/v4")
+        {
+            format!("{}/chat/completions", self.base_url)
+        } else {
+            format!("{}/v1/chat/completions", self.base_url)
+        };
         log_debug!(
             "OpenAI request | url={} | model={} | messages={} | tools_count={}",
             url,
@@ -98,10 +135,8 @@ impl AIClient for OpenAiClient {
                 .map(|a| a.len())
                 .unwrap_or(0)
         );
-        log_trace!(
-            "OpenAI request body | {}",
-            serde_json::to_string_pretty(&body).unwrap_or_default()
-        );
+        let body_str = serde_json::to_string_pretty(&body).unwrap_or_default();
+        log_trace!("OpenAI request body | {}", body_str);
         let request = self
             .client
             .post(&url)
@@ -113,6 +148,12 @@ impl AIClient for OpenAiClient {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
+            log_debug!(
+                "OpenAI API error | url={} | status={} | response={}",
+                url,
+                status,
+                text
+            );
             return Err(anyhow::anyhow!("OpenAI API error ({}): {}", status, text));
         }
 

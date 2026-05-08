@@ -172,10 +172,12 @@ pub async fn run() -> Result<()> {
             println!("  {} ({})", provider_key, provider_cfg.name);
             for (model_key, model_cfg) in &provider_cfg.models {
                 println!("    {} — {}", model_key, model_cfg.name);
-                println!(
-                    "      context: {}, output: {}",
-                    model_cfg.limit.context, model_cfg.limit.output
-                );
+                if let Some(limit) = &model_cfg.limit {
+                    println!(
+                        "      context: {}, output: {}",
+                        limit.context, limit.output
+                    );
+                }
             }
         }
         return Ok(());

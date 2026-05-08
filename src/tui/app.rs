@@ -32,11 +32,72 @@ use crate::tui::components::{
     chat::Chat, header::Header, input::Input, left_drawer::LeftDrawer, log_window::LogWindow,
     right_drawer::RightDrawer, status_bar::StatusBar, Component,
 };
-use crate::tui::event::{AppEvent, FocusArea};
+use crate::tui::event::{AppEvent, FocusArea, ModelItem, ProviderItem};
 use crate::tui::layout::{LayoutManager, PanelState};
 use crate::tui::theme::Theme;
 
 use super::client::TuiClient;
+
+/// API Key 输入模态对话框动作。
+#[derive(Debug, Clone)]
+enum DialogAction {
+    Submit(String),
+    Cancel,
+}
+
+/// API Key 输入模态对话框。
+#[derive(Debug, Clone)]
+struct ApiKeyDialog {
+    provider: String,
+    model: String,
+    input: String,
+    cursor: usize,
+}
+
+impl ApiKeyDialog {
+    fn new(provider: String, model: String) -> Self {
+        Self {
+            provider,
+            model,
+            input: String::new(),
+            cursor: 0,
+        }
+    }
+
+    fn insert(&mut self, c: char) {
+        self.input.insert(self.cursor, c);
+        self.cursor += 1;
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor > 0 {
+            self.input.remove(self.cursor - 1);
+            self.cursor -= 1;
+        }
+    }
+
+    /// 处理键盘事件。
+    ///
+    /// 返回值：
+    /// - `None`：事件已消费，无操作（继续输入）。
+    /// - `Some(DialogAction::Submit(api_key))`：用户按 Enter，提交输入（可能为空字符串，表示使用配置中的默认 key）。
+    /// - `Some(DialogAction::Cancel)`：用户按 Esc，取消对话框。
+    fn handle_key(&mut self, code: KeyCode) -> Option<DialogAction> {
+        match code {
+            KeyCode::Enter => Some(DialogAction::Submit(self.input.clone())),
+            KeyCode::Esc => Some(DialogAction::Cancel),
+            KeyCode::Backspace => {
+                self.backspace();
+                None
+            }
+            KeyCode::Char(c) => {
+                self.insert(c);
+                None
+            }
+            _ => None,
+        }
+    }
+}
 
 /// TUI 应用主结构体，负责统筹所有组件、事件循环与后端通信。
 ///
@@ -66,6 +127,7 @@ pub struct TuiApp {
     should_quit: bool,             // 是否退出主循环
     exit_confirm_pending: bool,    // Ctrl+C 是否已按过一次，等待第二次确认退出
     dirty: bool,                   // 是否需要重绘
+    api_key_dialog: Option<ApiKeyDialog>, // API Key 输入模态框
 
     // === 后端通信与事件通道 ===
     client: TuiClient,                                      // HTTP 客户端，对接本地 4040 端口服务
@@ -125,6 +187,7 @@ impl TuiApp {
             should_quit: false,
             exit_confirm_pending: false,
             dirty: true,
+            api_key_dialog: None,
             client: TuiClient::new(),
             event_tx,
             event_rx,
@@ -255,6 +318,55 @@ impl TuiApp {
                 );
             }
         }
+
+        // 渲染 API Key 输入模态框
+        if let Some(ref dialog) = self.api_key_dialog {
+            let area = frame.area();
+            let dialog_w = 48u16;
+            let dialog_h = 6u16;
+            let x = area.x + (area.width.saturating_sub(dialog_w)) / 2;
+            let y = area.y + (area.height.saturating_sub(dialog_h)) / 2;
+            let dialog_area = ratatui::layout::Rect::new(x, y, dialog_w, dialog_h);
+
+            frame.render_widget(ratatui::widgets::Clear, dialog_area);
+            let block = ratatui::widgets::Block::default()
+                .borders(ratatui::widgets::Borders::ALL)
+                .border_style(ratatui::style::Style::default().fg(self.theme.border))
+                .style(self.theme.drawer_style());
+            let inner = block.inner(dialog_area);
+            frame.render_widget(block, dialog_area);
+
+            // Label 与输入框保持同一行，垂直居中于内框
+            let label_w = 7u16; // "ApiKey:" 宽度
+            let input_w = 24u16.min(inner.width.saturating_sub(label_w + 1));
+            let content_y = inner.y + (inner.height.saturating_sub(2)) / 2;
+
+            let label = ratatui::widgets::Paragraph::new("ApiKey:");
+            frame.render_widget(
+                label,
+                ratatui::layout::Rect::new(inner.x, content_y + 1, label_w, 1),
+            );
+
+            let input_area = ratatui::layout::Rect::new(inner.x + label_w + 1, content_y, input_w, 2);
+            let input_text = if dialog.input.is_empty() {
+                " ".to_string()
+            } else {
+                dialog.input.clone()
+            };
+            let input_para = ratatui::widgets::Paragraph::new(input_text)
+                .style(ratatui::style::Style::default().fg(self.theme.text_primary))
+                .block(
+                    ratatui::widgets::Block::default()
+                        .borders(ratatui::widgets::Borders::ALL)
+                        .border_style(ratatui::style::Style::default().fg(self.theme.border)),
+                );
+            frame.render_widget(input_para, input_area);
+
+            // 将光标焦点放到输入框内（考虑边框偏移）
+            let cursor_x = input_area.x + 1 + dialog.cursor as u16;
+            let cursor_y = input_area.y + 1;
+            frame.set_cursor_position((cursor_x, cursor_y));
+        }
     }
 
     /// 切换到下一套配色主题（循环）。
@@ -350,7 +462,25 @@ impl TuiApp {
             }
             'n' => {
                 self.exit_confirm_pending = false;
+                let was_open = self.header.has_dropdown_open();
                 self.header.toggle_model_dropdown();
+                if !was_open && self.header.needs_load_models() {
+                    let client = self.client.clone();
+                    let tx = self.event_tx.clone();
+                    tokio::spawn(async move {
+                        match client.list_models().await {
+                            Ok(data) => {
+                                let providers = parse_model_list(&data);
+                                let _ = tx.send(AppEvent::SetModelList(providers)).await;
+                            }
+                            Err(e) => {
+                                let _ = tx
+                                    .send(AppEvent::ShowSystemMessage(format!("Load models failed: {}", e)))
+                                    .await;
+                            }
+                        }
+                    });
+                }
                 self.focus = FocusArea::Header;
             }
             't' => {
@@ -427,6 +557,45 @@ impl TuiApp {
         match event {
             Event::Key(key) => {
                 if key.kind != KeyEventKind::Press {
+                    return;
+                }
+
+                // API Key 模态框优先处理键盘事件
+                if let Some(ref mut dialog) = self.api_key_dialog {
+                    if let Some(action) = dialog.handle_key(key.code) {
+                        let provider = dialog.provider.clone();
+                        let model = dialog.model.clone();
+                        self.api_key_dialog = None;
+                        match action {
+                            DialogAction::Submit(api_key) => {
+                                let api_key_opt = if api_key.is_empty() {
+                                    None
+                                } else {
+                                    Some(api_key)
+                                };
+                                let client = self.client.clone();
+                                let tx = self.event_tx.clone();
+                                tokio::spawn(async move {
+                                    match client.switch_model(&provider, &model, api_key_opt.as_deref()).await {
+                                        Ok(_) => {
+                                            let _ = tx.send(AppEvent::SelectModel(model)).await;
+                                        }
+                                        Err(e) => {
+                                            let _ = tx
+                                                .send(AppEvent::ShowSystemMessage(format!(
+                                                    "Switch model failed: {}",
+                                                    e
+                                                )))
+                                                .await;
+                                        }
+                                    }
+                                });
+                            }
+                            DialogAction::Cancel => {
+                                // 用户取消，仅关闭对话框，不切换模型
+                            }
+                        }
+                    }
                     return;
                 }
 
@@ -555,6 +724,78 @@ impl TuiApp {
             AppEvent::SelectModel(ref model) => {
                 self.header.set_current_model(model.clone());
             }
+            AppEvent::SwitchModel { ref provider, ref model, ref api_key } => {
+                let client = self.client.clone();
+                let tx = self.event_tx.clone();
+                let provider = provider.clone();
+                let model = model.clone();
+                let api_key = api_key.clone();
+                tokio::spawn(async move {
+                    match client.switch_model(&provider, &model, api_key.as_deref()).await {
+                        Ok(_) => {
+                            let _ = tx.send(AppEvent::SelectModel(model)).await;
+                        }
+                        Err(e) => {
+                            let _ = tx
+                                .send(AppEvent::ShowSystemMessage(format!(
+                                    "Switch model failed: {}",
+                                    e
+                                )))
+                                .await;
+                        }
+                    }
+                });
+            }
+            AppEvent::SetModelList(ref providers) => {
+                self.header.set_providers(providers.clone());
+                // 如果当前正在 /models 的 ModelProvider 子菜单中，填充 provider 列表
+                if self.input.is_submenu_open() {
+                    let items: Vec<(String, String, String)> = providers
+                        .iter()
+                        .map(|p| (p.key.clone(), p.name.clone(), p.provider_type.clone()))
+                        .collect();
+                    self.input.set_submenu_items(items);
+                }
+            }
+            AppEvent::SelectModelProvider(ref provider_key) => {
+                if let Some(provider) = self.header.get_provider(provider_key) {
+                    let items: Vec<(String, String, String)> = provider
+                        .models
+                        .iter()
+                        .map(|m| (m.key.clone(), m.name.clone(), format!("context: {}, output: {}", m.context, m.output)))
+                        .collect();
+                    self.input.enter_submenu_mode(crate::tui::components::input::SubmenuKind::ModelList);
+                    self.input.set_submenu_context(provider_key.clone());
+                    self.input.set_submenu_items(items);
+                    self.focus = FocusArea::Input;
+                }
+            }
+            AppEvent::SelectModelItem { ref provider, ref model } => {
+                let is_preset = provider != "custom";
+                if is_preset {
+                    self.api_key_dialog = Some(ApiKeyDialog::new(provider.clone(), model.clone()));
+                } else {
+                    let client = self.client.clone();
+                    let tx = self.event_tx.clone();
+                    let provider = provider.clone();
+                    let model = model.clone();
+                    tokio::spawn(async move {
+                        match client.switch_model(&provider, &model, None).await {
+                            Ok(_) => {
+                                let _ = tx.send(AppEvent::SelectModel(model)).await;
+                            }
+                            Err(e) => {
+                                let _ = tx
+                                    .send(AppEvent::ShowSystemMessage(format!(
+                                        "Switch model failed: {}",
+                                        e
+                                    )))
+                                    .await;
+                            }
+                        }
+                    });
+                }
+            }
             AppEvent::SelectTheme(index) => {
                 if index < self.themes.len() {
                     self.theme_index = index;
@@ -600,9 +841,9 @@ impl TuiApp {
                     .iter()
                     .map(|p| Arc::new(Theme::from_preset(p)))
                     .collect();
-                let items: Vec<(String, String)> = presets
+                let items: Vec<(String, String, String)> = presets
                     .iter()
-                    .map(|p| (p.name.clone(), p.description.clone()))
+                    .map(|p| (p.name.clone(), p.name.clone(), p.description.clone()))
                     .collect();
                 self.input.set_submenu_items(items);
                 if self.theme_index >= self.themes.len() && !self.themes.is_empty() {
@@ -839,10 +1080,10 @@ impl TuiApp {
                 return;
             }
             self.input.enter_submenu_mode(crate::tui::components::input::SubmenuKind::Skill);
-            let items: Vec<(String, String)> = registry
+            let items: Vec<(String, String, String)> = registry
                 .entries
                 .iter()
-                .map(|e| (e.metadata.name.clone(), e.metadata.description.clone()))
+                .map(|e| (e.metadata.name.clone(), e.metadata.name.clone(), e.metadata.description.clone()))
                 .collect();
             self.input.set_submenu_items(items);
             return;
@@ -850,13 +1091,33 @@ impl TuiApp {
 
         if name == "themes" {
             self.input.enter_submenu_mode(crate::tui::components::input::SubmenuKind::Theme);
-            let items: Vec<(String, String)> = self
+            let items: Vec<(String, String, String)> = self
                 .theme_presets
                 .iter()
-                .map(|p| (p.name.clone(), p.description.clone()))
+                .map(|p| (p.name.clone(), p.name.clone(), p.description.clone()))
                 .collect();
             self.input.set_submenu_items(items);
             self.spawn_load_themes();
+            return;
+        }
+
+        if name == "models" {
+            self.input.enter_submenu_mode(crate::tui::components::input::SubmenuKind::ModelProvider);
+            let client = self.client.clone();
+            let tx = self.event_tx.clone();
+            tokio::spawn(async move {
+                match client.list_models().await {
+                    Ok(data) => {
+                        let providers = parse_model_list(&data);
+                        let _ = tx.send(AppEvent::SetModelList(providers)).await;
+                    }
+                    Err(e) => {
+                        let _ = tx
+                            .send(AppEvent::ShowSystemMessage(format!("Load models failed: {}", e)))
+                            .await;
+                    }
+                }
+            });
             return;
         }
 
@@ -892,4 +1153,41 @@ impl TuiApp {
             self.input.clear_content();
         }
     }
+}
+
+
+/// 解析后端 /api/models 返回的 JSON，转换为 ProviderItem 列表。
+fn parse_model_list(data: &serde_json::Value) -> Vec<crate::tui::event::ProviderItem> {
+    let mut providers = Vec::new();
+    let Some(arr) = data.get("providers").and_then(|v| v.as_array()) else {
+        return providers;
+    };
+    for p in arr {
+        let key = p.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let provider_type = p.get("type").and_then(|v| v.as_str()).unwrap_or("openai_compatible").to_string();
+        let mut models = Vec::new();
+        if let Some(m_arr) = p.get("models").and_then(|v| v.as_array()) {
+            for m in m_arr {
+                let m_key = m.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let m_name = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let limit = m.get("limit").and_then(|v| v.as_object());
+                let context = limit.and_then(|l| l.get("context")).and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let output = limit.and_then(|l| l.get("output")).and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                models.push(crate::tui::event::ModelItem {
+                    key: m_key,
+                    name: m_name,
+                    context,
+                    output,
+                });
+            }
+        }
+        providers.push(crate::tui::event::ProviderItem {
+            key,
+            name,
+            provider_type,
+            models,
+        });
+    }
+    providers
 }

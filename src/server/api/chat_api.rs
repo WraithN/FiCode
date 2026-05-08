@@ -212,3 +212,135 @@ async fn run_agent_chat(
     // 发送 done 事件
     let _ = sse_sender.send(SseEvent::Done { session_id }).await;
 }
+
+/// 模型切换请求体
+#[derive(Deserialize)]
+pub struct SwitchModelRequest {
+    pub provider: String,
+    pub model: String,
+    pub api_key: Option<String>,
+}
+
+/// 模型切换响应
+#[derive(serde::Serialize)]
+pub struct SwitchModelResponse {
+    pub provider: String,
+    pub model: String,
+}
+
+/// POST /api/model/switch — 切换当前使用的模型
+pub async fn handle_switch_model(
+    State(state): State<AppState>,
+    Json(req): Json<SwitchModelRequest>,
+) -> Response {
+    let cfg = match state.config.read() {
+        Ok(c) => c,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(super::super::models::ApiResponse::<SwitchModelResponse>::error(
+                    "Config lock poisoned".to_string(),
+                    "INTERNAL_ERROR",
+                )),
+            )
+                .into_response();
+        }
+    };
+
+    let mut provider = match state.provider.write() {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(super::super::models::ApiResponse::<SwitchModelResponse>::error(
+                    "Provider lock poisoned".to_string(),
+                    "INTERNAL_ERROR",
+                )),
+            )
+                .into_response();
+        }
+    };
+
+    match provider.set_model_by_provider(&req.provider, &req.model, &cfg, req.api_key.as_deref()) {
+        Ok(()) => {
+            let resp = SwitchModelResponse {
+                provider: req.provider,
+                model: req.model,
+            };
+            Json(super::super::models::ApiResponse::success(resp)).into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(super::super::models::ApiResponse::<SwitchModelResponse>::error(
+                e.to_string(),
+                "BAD_REQUEST",
+            )),
+        )
+            .into_response(),
+    }
+}
+
+
+/// GET /api/models — 列出所有可用模型（按 Provider 分组）
+pub async fn handle_list_models_endpoint(
+    State(state): State<AppState>,
+) -> Response {
+    let cfg = match state.config.read() {
+        Ok(c) => c,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(super::super::models::ApiResponse::<serde_json::Value>::error(
+                    "Config lock poisoned".to_string(),
+                    "INTERNAL_ERROR",
+                )),
+            )
+                .into_response();
+        }
+    };
+
+    let current_model = match state.provider.read() {
+        Ok(p) => p.model_name().unwrap_or("unknown").to_string(),
+        Err(_) => "unknown".to_string(),
+    };
+
+    let providers: Vec<serde_json::Value> = cfg
+        .provider
+        .iter()
+        .map(|(key, p_cfg)| {
+            let models: Vec<serde_json::Value> = p_cfg
+                .models
+                .iter()
+                .map(|(m_key, m_cfg)| {
+                    let mut obj = serde_json::json!({
+                        "key": m_key,
+                        "name": m_cfg.name,
+                    });
+                    if let Some(limit) = &m_cfg.limit {
+                        obj["limit"] = serde_json::json!({
+                            "context": limit.context,
+                            "output": limit.output
+                        });
+                    }
+                    obj
+                })
+                .collect();
+            serde_json::json!({
+                "key": key,
+                "name": p_cfg.name,
+                "type": match p_cfg.provider_type {
+                    crate::config::models::ProviderType::Anthropic => "anthropic",
+                    crate::config::models::ProviderType::OpenAiCompatible => "openai_compatible",
+                },
+                "models": models
+            })
+        })
+        .collect();
+
+    let resp = serde_json::json!({
+        "providers": providers,
+        "current_model": current_model,
+    });
+
+    Json(super::super::models::ApiResponse::success(resp)).into_response()
+}

@@ -141,18 +141,40 @@ async fn handle_list_models(
         Err(_) => return JsonRpcResponse::error(-32603, "Provider lock poisoned", id),
     };
 
-    let models = provider_guard.list_models(&cfg);
-    let model_list: Vec<Value> = models
-        .into_iter()
-        .map(|(key, name)| {
+    let providers: Vec<Value> = cfg
+        .provider
+        .iter()
+        .map(|(key, p_cfg)| {
+            let models: Vec<Value> = p_cfg
+                .models
+                .iter()
+                .map(|(m_key, m_cfg)| {
+                    let mut obj = serde_json::json!({
+                        "key": m_key,
+                        "name": m_cfg.name,
+                    });
+                    if let Some(limit) = &m_cfg.limit {
+                        obj["limit"] = serde_json::json!({
+                            "context": limit.context,
+                            "output": limit.output
+                        });
+                    }
+                    obj
+                })
+                .collect();
             serde_json::json!({
                 "key": key,
-                "name": name
+                "name": p_cfg.name,
+                "type": match p_cfg.provider_type {
+                    crate::config::models::ProviderType::Anthropic => "anthropic",
+                    crate::config::models::ProviderType::OpenAiCompatible => "openai_compatible",
+                },
+                "models": models
             })
         })
         .collect();
 
-    JsonRpcResponse::success(serde_json::json!({ "models": model_list }), id)
+    JsonRpcResponse::success(serde_json::json!({ "providers": providers }), id)
 }
 
 async fn handle_get_status(
