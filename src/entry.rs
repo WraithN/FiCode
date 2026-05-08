@@ -26,7 +26,6 @@ use std::sync::{Arc, RwLock};
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use colored::Colorize;
-use rustyline::DefaultEditor;
 
 use crate::agent::{agent_loop, LoopState};
 use crate::config::Config;
@@ -230,7 +229,7 @@ fn print_sessions_list(session_manager: &SessionManager) -> Result<()> {
         };
         println!(
             "  [{}] {} | {} | {} messages | {}",
-            i,
+            i + 1,
             &s.id[..s.id.len().min(8)],
             s.project_path,
             s.message_count,
@@ -295,7 +294,7 @@ async fn run_single_command(
 }
 
 async fn handle_task_plan_and_save(
-    _provider: Arc<Provider>,
+    provider: Arc<Provider>,
     session_manager: &SessionManager,
     sessions_dir: &PathBuf,
     session: &mut crate::session::Session,
@@ -337,19 +336,22 @@ async fn run_interactive(
     crate::tools::set_task_provider(Arc::new(RwLock::new((*provider).clone())));
     let mut session = choose_or_create_session(session_manager, provider.model_name()?).await?;
     let prompt_prefix = format!("{} >> ", &session.id[..session.id.len().min(8)]);
-    let mut editor = DefaultEditor::new()?;
+    let mut history = Vec::new();
 
     log_debug!("run_interactive | session_id={}", session.id);
 
     loop {
-        let readline = editor.readline(prompt_prefix.cyan().to_string().as_str());
-        match readline {
-            Ok(line) => {
-                let query = line.trim();
+        print!("{}", prompt_prefix.cyan());
+        std::io::stdout().flush()?;
+
+        let mut input = String::new();
+        match std::io::stdin().read_line(&mut input) {
+            Ok(_) => {
+                let query = input.trim();
                 if query.is_empty() || ["q", "exit"].contains(&query.to_lowercase().as_str()) {
                     break;
                 }
-                editor.add_history_entry(query)?;
+                history.push(query.to_string());
 
                 // 拦截 slash 指令
                 if try_execute_slash(query, &provider, &config).await {
@@ -382,10 +384,9 @@ async fn run_interactive(
                 )
                 .await?;
             }
-            Err(rustyline::error::ReadlineError::Interrupted)
-            | Err(rustyline::error::ReadlineError::Eof) => break,
-            Err(err) => {
-                eprintln!("Error: {:?}", err);
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => break,
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
                 break;
             }
         }
@@ -399,10 +400,7 @@ async fn try_execute_slash(
     config: &Arc<RwLock<Config>>,
 ) -> bool {
     let slash_cmd = crate::commands::slash::parse(query);
-    let is_unknown = matches!(
-        slash_cmd,
-        SlashCommand::Unknown(ref s) if s.is_empty()
-    );
+    let is_unknown = matches!(slash_cmd, SlashCommand::Unknown(ref s) if s.is_empty());
     if is_unknown {
         return false;
     }
@@ -452,7 +450,6 @@ async fn choose_or_create_session(
     } else if choice <= sessions.len() {
         Ok(manager.load_session(&sessions[choice - 1].id)?)
     } else {
-        // 越界输入时回退到最近的一个会话
         Ok(manager.load_session(&sessions[0].id)?)
     }
 }
