@@ -22,7 +22,7 @@
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::{
     layout::Rect,
-    style::{Style, Modifier},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
@@ -108,16 +108,19 @@ impl Component for LogWindow {
         let mut text_lines: Vec<Line> = Vec::new();
 
         if self.disconnected {
-            text_lines.push(Line::from(vec![
-                Span::styled("⚠ 日志连接已断开", Style::default().fg(theme.error)),
-            ]));
+            text_lines.push(Line::from(vec![Span::styled(
+                "⚠ 日志连接已断开",
+                Style::default().fg(theme.error),
+            )]));
         }
 
         let visible_height = area.height.saturating_sub(2) as usize; // 减去边框
         let start = if self.scroll_offset == 0 {
             self.lines.len().saturating_sub(visible_height)
         } else {
-            self.lines.len().saturating_sub(visible_height + self.scroll_offset)
+            self.lines
+                .len()
+                .saturating_sub(visible_height + self.scroll_offset)
         };
         let start = start.min(self.lines.len());
         let end = (start + visible_height).min(self.lines.len());
@@ -136,9 +139,20 @@ impl Component for LogWindow {
                 LogLevel::Error => "ERROR",
             };
             text_lines.push(Line::from(vec![
-                Span::styled(format!("[{}] ", line.timestamp), Style::default().fg(theme.text_muted)),
-                Span::styled(format!("[{:<5}] ", level_str), Style::default().fg(level_color).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("[{:<20.20}] ", line.module), Style::default().fg(theme.text_muted)),
+                Span::styled(
+                    format!("[{}] ", line.timestamp),
+                    Style::default().fg(theme.text_muted),
+                ),
+                Span::styled(
+                    format!("[{:<5}] ", level_str),
+                    Style::default()
+                        .fg(level_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("[{:<20.20}] ", line.module),
+                    Style::default().fg(theme.text_muted),
+                ),
                 Span::styled(&line.message, Style::default().fg(theme.text_primary)),
             ]));
         }

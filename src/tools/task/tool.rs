@@ -24,8 +24,8 @@ use std::sync::Arc;
 
 use crate::provider::base_client::AIClient;
 use crate::provider::Provider;
-use crate::tools::task::{Task, TaskManager, TaskPlan};
 use crate::tools::subagent_tool_schema;
+use crate::tools::task::{Task, TaskManager, TaskPlan};
 
 /// 执行 handle_task_plan 工具的异步逻辑
 pub async fn execute_handle_task_plan(
@@ -49,7 +49,8 @@ pub async fn execute_handle_task_plan(
         if name.is_empty() {
             continue;
         }
-        plan.tasks.push(Task::new(format!("{}", idx + 1), name, description));
+        plan.tasks
+            .push(Task::new(format!("{}", idx + 1), name, description));
     }
 
     if plan.tasks.is_empty() {
@@ -59,14 +60,13 @@ pub async fn execute_handle_task_plan(
     let task_names: Vec<String> = plan.tasks.iter().map(|t| t.name.clone()).collect();
 
     let provider_clone = Arc::clone(&provider);
-    let client_factory: Arc<dyn Fn() -> Box<dyn AIClient> + Send + Sync> =
-        Arc::new(move || {
-            provider_clone
-                .read()
-                .unwrap()
-                .get_client()
-                .expect("Failed to create client")
-        });
+    let client_factory: Arc<dyn Fn() -> Box<dyn AIClient> + Send + Sync> = Arc::new(move || {
+        provider_clone
+            .read()
+            .unwrap()
+            .get_client()
+            .expect("Failed to create client")
+    });
 
     let subagent_schema = subagent_tool_schema().await;
     let task_manager = TaskManager::new(
@@ -80,9 +80,7 @@ pub async fn execute_handle_task_plan(
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        rt.block_on(async move {
-            task_manager.execute_plan(&mut plan, &mut |_| {}).await
-        })
+        rt.block_on(async move { task_manager.execute_plan(&mut plan, &mut |_| {}).await })
     });
 
     let summaries = handle

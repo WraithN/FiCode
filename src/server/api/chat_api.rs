@@ -93,7 +93,9 @@ pub async fn handle_chat_endpoint(
 }
 
 async fn send_last_assistant_text(messages: &[Message], sse_sender: &SseSender) {
-    let Some(last_msg) = messages.last() else { return };
+    let Some(last_msg) = messages.last() else {
+        return;
+    };
     if last_msg.role != Role::Assistant {
         return;
     }
@@ -120,7 +122,11 @@ async fn send_last_assistant_text(messages: &[Message], sse_sender: &SseSender) 
                     thinking: thinking.clone(),
                 })
             }
-            Part::ToolUse { id, name, arguments } => {
+            Part::ToolUse {
+                id,
+                name,
+                arguments,
+            } => {
                 let args_str = serde_json::to_string_pretty(arguments).unwrap_or_default();
                 Some(crate::server::transport::sse::DetailBlock::ToolUse {
                     id: id.clone(),
@@ -142,9 +148,7 @@ async fn send_last_assistant_text(messages: &[Message], sse_sender: &SseSender) 
         .collect();
 
     if !blocks.is_empty() {
-        let _ = sse_sender
-            .send(SseEvent::MessageDetails { blocks })
-            .await;
+        let _ = sse_sender.send(SseEvent::MessageDetails { blocks }).await;
     }
 }
 
@@ -238,10 +242,12 @@ pub async fn handle_switch_model(
         Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(super::super::models::ApiResponse::<SwitchModelResponse>::error(
-                    "Config lock poisoned".to_string(),
-                    "INTERNAL_ERROR",
-                )),
+                Json(
+                    super::super::models::ApiResponse::<SwitchModelResponse>::error(
+                        "Config lock poisoned".to_string(),
+                        "INTERNAL_ERROR",
+                    ),
+                ),
             )
                 .into_response();
         }
@@ -252,10 +258,12 @@ pub async fn handle_switch_model(
         Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(super::super::models::ApiResponse::<SwitchModelResponse>::error(
-                    "Provider lock poisoned".to_string(),
-                    "INTERNAL_ERROR",
-                )),
+                Json(
+                    super::super::models::ApiResponse::<SwitchModelResponse>::error(
+                        "Provider lock poisoned".to_string(),
+                        "INTERNAL_ERROR",
+                    ),
+                ),
             )
                 .into_response();
         }
@@ -271,29 +279,30 @@ pub async fn handle_switch_model(
         }
         Err(e) => (
             StatusCode::BAD_REQUEST,
-            Json(super::super::models::ApiResponse::<SwitchModelResponse>::error(
-                e.to_string(),
-                "BAD_REQUEST",
-            )),
+            Json(
+                super::super::models::ApiResponse::<SwitchModelResponse>::error(
+                    e.to_string(),
+                    "BAD_REQUEST",
+                ),
+            ),
         )
             .into_response(),
     }
 }
 
-
 /// GET /api/models — 列出所有可用模型（按 Provider 分组）
-pub async fn handle_list_models_endpoint(
-    State(state): State<AppState>,
-) -> Response {
+pub async fn handle_list_models_endpoint(State(state): State<AppState>) -> Response {
     let cfg = match state.config.read() {
         Ok(c) => c,
         Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(super::super::models::ApiResponse::<serde_json::Value>::error(
-                    "Config lock poisoned".to_string(),
-                    "INTERNAL_ERROR",
-                )),
+                Json(
+                    super::super::models::ApiResponse::<serde_json::Value>::error(
+                        "Config lock poisoned".to_string(),
+                        "INTERNAL_ERROR",
+                    ),
+                ),
             )
                 .into_response();
         }

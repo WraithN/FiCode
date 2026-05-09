@@ -20,7 +20,7 @@
 // SOFTWARE.
 
 use crate::log_trace;
-use crate::tools::windows_compat::{get_compat_mode, get_bash_path, WindowsCompatMode};
+use crate::tools::windows_compat::{get_bash_path, get_compat_mode, WindowsCompatMode};
 use crate::utils::workspace::workspace_dir;
 use glob::glob_with;
 use glob::MatchOptions;
@@ -117,31 +117,27 @@ impl BasicTool {
 
         std::thread::spawn(move || {
             let compat_mode = get_compat_mode();
-            
+
             let result = match compat_mode {
-                WindowsCompatMode::Native => {
-                    std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(&command)
-                        .env_clear()
-                        .env("PATH", "/usr/bin:/bin")
-                        .env(
-                            "HOME",
-                            std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()),
-                        )
-                        .stdout(Stdio::piped())
-                        .stderr(Stdio::piped())
-                        .output()
-                }
-                WindowsCompatMode::Wsl2 => {
-                    std::process::Command::new("wsl.exe")
-                        .arg("sh")
-                        .arg("-c")
-                        .arg(&command)
-                        .stdout(Stdio::piped())
-                        .stderr(Stdio::piped())
-                        .output()
-                }
+                WindowsCompatMode::Native => std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&command)
+                    .env_clear()
+                    .env("PATH", "/usr/bin:/bin")
+                    .env(
+                        "HOME",
+                        std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()),
+                    )
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output(),
+                WindowsCompatMode::Wsl2 => std::process::Command::new("wsl.exe")
+                    .arg("sh")
+                    .arg("-c")
+                    .arg(&command)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output(),
                 WindowsCompatMode::GitBash | WindowsCompatMode::Cygwin => {
                     if let Some(bash_path) = get_bash_path() {
                         std::process::Command::new(bash_path)
@@ -158,8 +154,14 @@ impl BasicTool {
                     }
                 }
                 WindowsCompatMode::None => {
-                    let error_msg = "Error: 未找到兼容的 bash 环境。请安装 WSL2、Git Bash 或 Cygwin。";
-                    return tx.send(Err(std::io::Error::new(std::io::ErrorKind::Other, error_msg))).unwrap();
+                    let error_msg =
+                        "Error: 未找到兼容的 bash 环境。请安装 WSL2、Git Bash 或 Cygwin。";
+                    return tx
+                        .send(Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            error_msg,
+                        )))
+                        .unwrap();
                 }
             };
 
@@ -271,7 +273,9 @@ impl BasicTool {
         re: &regex::Regex,
         matches: &mut Vec<String>,
     ) -> Result<(), String> {
-        let Ok(content) = std::fs::read_to_string(path) else { return Ok(()); };
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return Ok(());
+        };
         let relative = path
             .strip_prefix(&workspace_dir())
             .unwrap_or(path)
@@ -316,20 +320,20 @@ impl BasicTool {
             }
             None => base.clone(),
         };
-        
+
         log_trace!("run_glob | pattern={} | dir={:?}", pattern, search_dir);
-        
+
         let full_pattern = search_dir.join(pattern);
         let full_pattern_str = full_pattern.to_str().ok_or("Invalid pattern path")?;
-        
+
         let options = MatchOptions {
             case_sensitive: true,
             require_literal_separator: false,
             require_literal_leading_dot: false,
         };
-        
+
         let mut files = Vec::new();
-        
+
         match glob_with(full_pattern_str, options) {
             Ok(paths) => {
                 for entry in paths {
@@ -338,16 +342,18 @@ impl BasicTool {
                             if !path.is_file() {
                                 continue;
                             }
-                            let canonical = path.canonicalize().map_err(|e| format!("Error: {}", e))?;
+                            let canonical =
+                                path.canonicalize().map_err(|e| format!("Error: {}", e))?;
                             if !canonical.starts_with(&base) {
                                 continue;
                             }
-                            let relative = canonical.strip_prefix(&base)
+                            let relative = canonical
+                                .strip_prefix(&base)
                                 .map_err(|e| format!("Error: {}", e))?
                                 .display()
                                 .to_string();
                             files.push(relative);
-                            
+
                             if files.len() >= 1000 {
                                 files.push("... (too many matches)".to_string());
                                 break;
@@ -364,7 +370,7 @@ impl BasicTool {
                 return Err(format!("Invalid pattern: {}", e));
             }
         }
-        
+
         if files.is_empty() {
             Ok("No files found matching pattern".to_string())
         } else {

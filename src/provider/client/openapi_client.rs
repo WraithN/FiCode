@@ -202,7 +202,9 @@ fn update_openai_tool_call_delta(
         args
     );
 
-    let entry = index_to_tool.entry(index).or_insert((None, None, String::new()));
+    let entry = index_to_tool
+        .entry(index)
+        .or_insert((None, None, String::new()));
     if let Some(id) = id {
         entry.0 = Some(id);
     }
@@ -219,7 +221,9 @@ fn flush_openai_tool_calls(
     let mut indices: Vec<usize> = index_to_tool.keys().cloned().collect();
     indices.sort();
     for idx in indices {
-        let Some((Some(id), Some(name), args)) = index_to_tool.remove(&idx) else { continue };
+        let Some((Some(id), Some(name), args)) = index_to_tool.remove(&idx) else {
+            continue;
+        };
         let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
         log_debug!(
             "OpenAI assembled tool_call | id={} | name={} | args={}",
@@ -328,7 +332,9 @@ where
             let json: serde_json::Value = serde_json::from_str(data)
                 .with_context(|| format!("Failed to parse OpenAI SSE data: {}", data))?;
 
-            let Some(choices) = json.get("choices").and_then(|v| v.as_array()) else { continue };
+            let Some(choices) = json.get("choices").and_then(|v| v.as_array()) else {
+                continue;
+            };
             for choice in choices {
                 process_openai_choice(choice, &mut index_to_tool, on_chunk);
             }

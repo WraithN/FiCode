@@ -87,14 +87,21 @@ pub enum AppEvent {
     ToggleModelDropdown,
     ToggleThemeDropdown,
     SelectModel(String),
-    SwitchModel { provider: String, model: String, api_key: Option<String> },
+    SwitchModel {
+        provider: String,
+        model: String,
+        api_key: Option<String>,
+    },
     SetModelList(Vec<ProviderItem>),
     SelectModelProvider(String),
-    SelectModelItem { provider: String, model: String },
+    SelectModelItem {
+        provider: String,
+        model: String,
+    },
     SelectTheme(usize),
-    PreviewTheme(usize),   // 预览主题（方向键移动时触发，未确认）
-    CancelThemePreview,    // 取消主题预览（Esc 时恢复原来主题）
-    SelectSkill(String),   // 确认加载指定 Skill
+    PreviewTheme(usize), // 预览主题（方向键移动时触发，未确认）
+    CancelThemePreview,  // 取消主题预览（Esc 时恢复原来主题）
+    SelectSkill(String), // 确认加载指定 Skill
     NewSession,
     NewSessionWithName(String),
     NewSessionFromTemplate(SessionTemplate),
@@ -116,7 +123,10 @@ pub enum AppEvent {
     PreviewFile(String),
     AddToContext(String),
     ClearChat,
-    ExecuteSlashCommand { name: String, args_hint: Option<String> },
+    ExecuteSlashCommand {
+        name: String,
+        args_hint: Option<String>,
+    },
     LoadCommands,
     SetCommands(Vec<crate::commands::registry::CommandMeta>),
     ShowSystemMessage(String),
@@ -142,18 +152,18 @@ pub enum AppEvent {
 /// 当前焦点所在的 UI 区域，用于决定键盘事件下发给哪个组件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusArea {
-    Header,       // 顶部标题栏
-    Main,         // 聊天消息区
-    Input,        // 底部输入框
-    LeftDrawer,   // 左侧文件抽屉
-    RightDrawer,  // 右侧会话历史抽屉
+    Header,      // 顶部标题栏
+    Main,        // 聊天消息区
+    Input,       // 底部输入框
+    LeftDrawer,  // 左侧文件抽屉
+    RightDrawer, // 右侧会话历史抽屉
 }
 
 /// 新建会话时可选择的模板类型。
 #[derive(Debug, Clone)]
 pub enum SessionTemplate {
-    Empty,            // 空白会话
-    FromLastContext,  // 继承上文
-    CodeReview,       // 代码审查模板
-    Debug,            // 调试模板
+    Empty,           // 空白会话
+    FromLastContext, // 继承上文
+    CodeReview,      // 代码审查模板
+    Debug,           // 调试模板
 }

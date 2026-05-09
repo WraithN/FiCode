@@ -41,9 +41,8 @@ impl Default for WindowsCompatMode {
     }
 }
 
-static WINDOWS_COMPAT_MODE: Lazy<RwLock<WindowsCompatMode>> = Lazy::new(|| {
-    RwLock::new(detect_windows_compat_mode())
-});
+static WINDOWS_COMPAT_MODE: Lazy<RwLock<WindowsCompatMode>> =
+    Lazy::new(|| RwLock::new(detect_windows_compat_mode()));
 
 pub fn get_compat_mode() -> WindowsCompatMode {
     *WINDOWS_COMPAT_MODE.read().unwrap()
@@ -100,10 +99,7 @@ fn check_git_bash() -> bool {
 }
 
 fn check_cygwin() -> bool {
-    let possible_paths = vec![
-        r"C:\cygwin64\bin\bash.exe",
-        r"C:\cygwin\bin\bash.exe",
-    ];
+    let possible_paths = vec![r"C:\cygwin64\bin\bash.exe", r"C:\cygwin\bin\bash.exe"];
 
     for path in possible_paths {
         if std::path::Path::new(path).exists() {
@@ -130,11 +126,8 @@ pub fn get_bash_path() -> Option<String> {
             }
             None
         }
-            WindowsCompatMode::Cygwin => {
-            let possible_paths = vec![
-                r"C:\cygwin64\bin\bash.exe",
-                r"C:\cygwin\bin\bash.exe",
-            ];
+        WindowsCompatMode::Cygwin => {
+            let possible_paths = vec![r"C:\cygwin64\bin\bash.exe", r"C:\cygwin\bin\bash.exe"];
             for path in possible_paths {
                 if std::path::Path::new(path).exists() {
                     return Some(path.to_string());
@@ -154,12 +147,18 @@ mod tests {
     fn test_default_mode() {
         // 默认应该是 Native 或 None（根据平台）
         let mode = WindowsCompatMode::default();
-        assert!(matches!(mode, WindowsCompatMode::Native | WindowsCompatMode::None));
+        assert!(matches!(
+            mode,
+            WindowsCompatMode::Native | WindowsCompatMode::None
+        ));
     }
 
     #[test]
     fn test_get_compat_mode() {
         let mode = get_compat_mode();
-        assert!(matches!(mode, WindowsCompatMode::Native | WindowsCompatMode::None));
+        assert!(matches!(
+            mode,
+            WindowsCompatMode::Native | WindowsCompatMode::None
+        ));
     }
 }

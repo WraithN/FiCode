@@ -153,7 +153,8 @@ pub fn cleanup_stale_entries(registry: &mut SkillRegistry) {
             if let Err(e) = fs::remove_file(&entry.symlink_path) {
                 log_info!(
                     "Warning: failed to remove stale symlink {:?}: {}",
-                    entry.symlink_path, e
+                    entry.symlink_path,
+                    e
                 );
             }
         }

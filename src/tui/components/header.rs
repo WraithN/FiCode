@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::time::Instant;
-
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
@@ -29,7 +27,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
-use ratatui_braille_bar::BrailleBar;
 
 use crate::tui::components::Component;
 use crate::tui::event::{AppEvent, ModelItem, ProviderItem};
@@ -60,8 +57,6 @@ pub struct Header {
     provider_selected: usize,
     model_selected: Vec<usize>, // 每个 provider 对应的选中模型索引
     status: HeaderStatus,
-    progress_tick: u64, // 用于动画的 ticker
-    start_time: Option<Instant>,
 }
 
 impl Header {
@@ -74,9 +69,12 @@ impl Header {
             provider_selected: 0,
             model_selected: vec![],
             status: HeaderStatus::Ready,
-            progress_tick: 0,
-            start_time: None,
         }
+    }
+
+    /// 获取当前模型名（供外部组件同步使用）。
+    pub fn current_model(&self) -> String {
+        self.current_model.clone()
     }
 
     pub fn set_current_model(&mut self, model: String) {
@@ -115,40 +113,13 @@ impl Header {
         !matches!(self.menu_state, MenuState::Closed)
     }
 
+    /// 保留空实现以兼容现有调用，进度动画已移至底部状态栏。
     pub fn on_tick(&mut self) {
-        self.progress_tick = self.progress_tick.wrapping_add(1);
+        // 进度条动画已在 StatusBar 中实现
     }
 
     pub fn set_status(&mut self, status: HeaderStatus) {
-        match status {
-            HeaderStatus::Ready => {
-                self.start_time = None;
-            }
-            HeaderStatus::Generating | HeaderStatus::Streaming => {
-                if self.start_time.is_none() {
-                    self.start_time = Some(Instant::now());
-                }
-            }
-        }
         self.status = status;
-    }
-
-    /// 格式化耗时显示。
-    fn format_elapsed(&self) -> String {
-        if let Some(start) = self.start_time {
-            let elapsed = start.elapsed();
-            let seconds = elapsed.as_secs();
-            let minutes = seconds / 60;
-            let seconds = seconds % 60;
-
-            if minutes > 0 {
-                format!("{}m{}s", minutes, seconds)
-            } else {
-                format!("{}s", seconds)
-            }
-        } else {
-            String::from("")
-        }
     }
 
     /// 设置从后端加载的模型列表。
@@ -187,67 +158,58 @@ impl Component for Header {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let logo = Span::styled("FiCode", theme.style_brand().add_modifier(Modifier::BOLD));
-
         let model_text = format!("▼ {}", self.current_model);
         let model = Span::styled(model_text, theme.style_primary());
 
-        // 计算进度和状态信息
-        let (status_label, progress, fill_color) = match self.status {
-            HeaderStatus::Ready => ("Ready", 100.0, theme.success),
-            HeaderStatus::Generating => {
-                // 循环动画 0 → 100%
-                let p = ((self.progress_tick % 100) as f64);
-                ("Generating...", p, theme.warning)
-            }
-            HeaderStatus::Streaming => {
-                // 循环动画 0 → 100%
-                let p = ((self.progress_tick % 100) as f64);
-                ("Streaming...", p, theme.brand)
-            }
+        // 简化的状态指示（品牌色/进度条已移至底部状态栏）
+        let (status_label, status_color) = match self.status {
+            HeaderStatus::Ready => ("● Ready", theme.success),
+            HeaderStatus::Generating => ("● Generating", theme.warning),
+            HeaderStatus::Streaming => ("● Streaming", theme.brand),
         };
-
-        let status_color = match self.status {
-            HeaderStatus::Ready => theme.success,
-            HeaderStatus::Generating => theme.warning,
-            HeaderStatus::Streaming => theme.brand,
-        };
-
-        let progress_bar = BrailleBar::new(progress, 100.0)
-            .fill_color(fill_color)
-            .empty_color(theme.text_muted);
-
         let status = Span::styled(status_label, Style::default().fg(status_color));
-        let elapsed = self.format_elapsed();
-        let elapsed_span = if !elapsed.is_empty() {
-            Span::styled(format!(" [{}]", elapsed), Style::default().fg(status_color))
+
+        // 右侧：如果有 session_id，显示会话标识
+        let session_span = if let Some(ref id) = self.session_id {
+            let short_id = if id.len() >= 4 { &id[..4] } else { id.as_str() };
+            Span::styled(
+                format!("--[session: #{}] --", short_id),
+                theme.style_muted(),
+            )
         } else {
             Span::raw("")
         };
 
-        // 使用 Layout 分成左右两部分
+        // 使用 Layout 分成三部分
         let chunks = Layout::horizontal([
-            Constraint::Min(0), // 左边：文本
-            Constraint::Length(12), // 右边：进度条
+            Constraint::Min(0),     // 左边：模型名
+            Constraint::Length(16), // 中间：状态
+            Constraint::Min(0),     // 右边：会话标识
         ])
         .split(inner);
 
-        let line = Line::from(vec![
-            logo,
-            Span::raw(" │ "),
-            model,
-            Span::raw(" │ "),
-            status,
-            elapsed_span,
-        ]);
-        let paragraph = Paragraph::new(line).alignment(Alignment::Left);
-        frame.render_widget(paragraph, chunks[0]);
+        let model_line = Line::from(vec![model]);
+        frame.render_widget(Paragraph::new(model_line), chunks[0]);
 
-        frame.render_widget(progress_bar, chunks[1]);
+        let status_line = Line::from(vec![status]);
+        frame.render_widget(
+            Paragraph::new(status_line).alignment(Alignment::Center),
+            chunks[1],
+        );
+
+        if !session_span.content.is_empty() {
+            let session_line = Line::from(vec![session_span]);
+            frame.render_widget(
+                Paragraph::new(session_line).alignment(Alignment::Right),
+                chunks[2],
+            );
+        }
 
         match &self.menu_state {
             MenuState::ProviderList => self.draw_provider_list(frame, area, theme),
-            MenuState::ModelList { provider_idx } => self.draw_model_list(frame, area, theme, *provider_idx),
+            MenuState::ModelList { provider_idx } => {
+                self.draw_model_list(frame, area, theme, *provider_idx)
+            }
             MenuState::Closed => {}
         }
     }
@@ -279,7 +241,11 @@ impl Header {
             .iter()
             .enumerate()
             .map(|(i, provider)| {
-                let prefix = if i == self.provider_selected { "▶ " } else { "  " };
+                let prefix = if i == self.provider_selected {
+                    "▶ "
+                } else {
+                    "  "
+                };
                 let style = if i == self.provider_selected {
                     theme.style_selection()
                 } else {
@@ -306,7 +272,13 @@ impl Header {
         frame.render_widget(paragraph, area);
     }
 
-    fn draw_model_list(&self, frame: &mut Frame, header_area: Rect, theme: &Theme, provider_idx: usize) {
+    fn draw_model_list(
+        &self,
+        frame: &mut Frame,
+        header_area: Rect,
+        theme: &Theme,
+        provider_idx: usize,
+    ) {
         let provider = match self.providers.get(provider_idx) {
             Some(p) => p,
             None => return,
@@ -314,7 +286,9 @@ impl Header {
 
         let mut items = vec![Line::styled(
             format!("◀ {}", provider.name),
-            Style::default().fg(theme.border).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.border)
+                .add_modifier(Modifier::BOLD),
         )];
 
         let selected = self.model_selected.get(provider_idx).copied().unwrap_or(0);
@@ -450,15 +424,18 @@ mod tests {
     }
 
     #[test]
-    fn test_elapsed_format() {
+    fn test_session_id() {
         let mut header = Header::new();
-        assert_eq!(header.format_elapsed(), "");
+        assert!(header.session_id().is_none());
+        header.set_session_id("a7f2-3abc".to_string());
+        assert_eq!(header.session_id(), Some("a7f2-3abc".to_string()));
+    }
 
-        header.set_status(HeaderStatus::Generating);
-        // 刚设置时 start_time 是 Some(now)，elapsed 很小，但包含 's'
-        assert!(header.format_elapsed().contains('s'));
-
-        header.set_status(HeaderStatus::Ready);
-        assert_eq!(header.format_elapsed(), "");
+    #[test]
+    fn test_current_model() {
+        let mut header = Header::new();
+        assert_eq!(header.current_model(), "unknown");
+        header.set_current_model("kimi-code".to_string());
+        assert_eq!(header.current_model(), "kimi-code");
     }
 }

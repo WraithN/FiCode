@@ -29,10 +29,10 @@ use ratatui::{
 };
 
 use crate::commands::registry::CommandMeta;
-use unicode_width::UnicodeWidthStr;
 use crate::tui::components::Component;
 use crate::tui::event::AppEvent;
 use crate::tui::theme::Theme;
+use unicode_width::UnicodeWidthStr;
 
 /// 子菜单类型，用于区分不同命令打开的交互式菜单。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,11 +46,11 @@ pub enum SubmenuKind {
 /// 底部输入框组件，处理用户键盘输入、光标管理、斜杠命令提示与消息提交。
 pub struct Input {
     content: String,
-    cursor_position: usize,       // 光标在 content 中的字节位置
-    dropdown_visible: bool,       // 斜杠命令下拉菜单是否可见
+    cursor_position: usize, // 光标在 content 中的字节位置
+    dropdown_visible: bool, // 斜杠命令下拉菜单是否可见
     dropdown_items: Vec<CommandMeta>,
     dropdown_selected: usize,
-    session_id: Option<String>,   // 当前会话 ID，用于在输入框上方显示
+    session_id: Option<String>, // 当前会话 ID，用于在输入框上方显示
     last_drawn_area: Option<Rect>,
     dropdown_area: Option<Rect>,
     commands_loaded: bool,
@@ -229,8 +229,7 @@ impl Component for Input {
         if let Some(ref id) = self.session_id {
             let session_label = format!("--[Session: {}]---", id);
             let label_rect = Rect::new(area.x, area.y, area.width, 1);
-            let label = Paragraph::new(session_label)
-                .style(theme.style_muted());
+            let label = Paragraph::new(session_label).style(theme.style_muted());
             frame.render_widget(label, label_rect);
             y_offset = 1;
         }
@@ -298,17 +297,27 @@ impl Component for Input {
                                     self.submenu_selected -= 1;
                                 }
                                 return match kind {
-                                    SubmenuKind::Theme => Some(AppEvent::PreviewTheme(self.submenu_selected)),
-                                    SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
+                                    SubmenuKind::Theme => {
+                                        Some(AppEvent::PreviewTheme(self.submenu_selected))
+                                    }
+                                    SubmenuKind::Skill
+                                    | SubmenuKind::ModelProvider
+                                    | SubmenuKind::ModelList => None,
                                 };
                             }
                             KeyCode::Down => {
-                                if self.submenu_selected < self.submenu_items.len().saturating_sub(1) {
+                                if self.submenu_selected
+                                    < self.submenu_items.len().saturating_sub(1)
+                                {
                                     self.submenu_selected += 1;
                                 }
                                 return match kind {
-                                    SubmenuKind::Theme => Some(AppEvent::PreviewTheme(self.submenu_selected)),
-                                    SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
+                                    SubmenuKind::Theme => {
+                                        Some(AppEvent::PreviewTheme(self.submenu_selected))
+                                    }
+                                    SubmenuKind::Skill
+                                    | SubmenuKind::ModelProvider
+                                    | SubmenuKind::ModelList => None,
                                 };
                             }
                             KeyCode::Enter => {
@@ -329,9 +338,13 @@ impl Component for Input {
                                             return Some(AppEvent::SelectModelProvider(key));
                                         }
                                         SubmenuKind::ModelList => {
-                                            let provider = self.submenu_context.clone().unwrap_or_default();
+                                            let provider =
+                                                self.submenu_context.clone().unwrap_or_default();
                                             self.close_submenu();
-                                            return Some(AppEvent::SelectModelItem { provider, model: key });
+                                            return Some(AppEvent::SelectModelItem {
+                                                provider,
+                                                model: key,
+                                            });
                                         }
                                     }
                                 }
@@ -340,14 +353,18 @@ impl Component for Input {
                                 self.close_submenu();
                                 return match kind {
                                     SubmenuKind::Theme => Some(AppEvent::CancelThemePreview),
-                                    SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
+                                    SubmenuKind::Skill
+                                    | SubmenuKind::ModelProvider
+                                    | SubmenuKind::ModelList => None,
                                 };
                             }
                             _ => {
                                 self.close_submenu();
                                 return match kind {
                                     SubmenuKind::Theme => Some(AppEvent::CancelThemePreview),
-                                    SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
+                                    SubmenuKind::Skill
+                                    | SubmenuKind::ModelProvider
+                                    | SubmenuKind::ModelList => None,
                                 };
                             }
                         }
@@ -360,7 +377,9 @@ impl Component for Input {
                                 return None;
                             }
                             KeyCode::Down => {
-                                if self.dropdown_selected < self.dropdown_items.len().saturating_sub(1) {
+                                if self.dropdown_selected
+                                    < self.dropdown_items.len().saturating_sub(1)
+                                {
                                     self.dropdown_selected += 1;
                                 }
                                 return None;
@@ -452,8 +471,12 @@ impl Component for Input {
                                 self.submenu_selected -= 1;
                             }
                             return match kind {
-                                SubmenuKind::Theme => Some(AppEvent::PreviewTheme(self.submenu_selected)),
-                                SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
+                                SubmenuKind::Theme => {
+                                    Some(AppEvent::PreviewTheme(self.submenu_selected))
+                                }
+                                SubmenuKind::Skill
+                                | SubmenuKind::ModelProvider
+                                | SubmenuKind::ModelList => None,
                             };
                         }
                         crossterm::event::MouseEventKind::ScrollDown => {
@@ -461,16 +484,24 @@ impl Component for Input {
                                 self.submenu_selected += 1;
                             }
                             return match kind {
-                                SubmenuKind::Theme => Some(AppEvent::PreviewTheme(self.submenu_selected)),
-                                SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
+                                SubmenuKind::Theme => {
+                                    Some(AppEvent::PreviewTheme(self.submenu_selected))
+                                }
+                                SubmenuKind::Skill
+                                | SubmenuKind::ModelProvider
+                                | SubmenuKind::ModelList => None,
                             };
                         }
-                        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                        crossterm::event::MouseEventKind::Down(
+                            crossterm::event::MouseButton::Left,
+                        ) => {
                             if let Some(area) = self.dropdown_area {
                                 let mx = mouse.column;
                                 let my = mouse.row;
-                                if mx >= area.x && mx < area.x + area.width
-                                    && my >= area.y && my < area.y + area.height
+                                if mx >= area.x
+                                    && mx < area.x + area.width
+                                    && my >= area.y
+                                    && my < area.y + area.height
                                 {
                                     let item_y = my.saturating_sub(area.y + 1);
                                     let index = item_y as usize;
@@ -492,9 +523,15 @@ impl Component for Input {
                                                 return Some(AppEvent::SelectModelProvider(key));
                                             }
                                             SubmenuKind::ModelList => {
-                                                let provider = self.submenu_context.clone().unwrap_or_default();
+                                                let provider = self
+                                                    .submenu_context
+                                                    .clone()
+                                                    .unwrap_or_default();
                                                 self.close_submenu();
-                                                return Some(AppEvent::SelectModelItem { provider, model: key });
+                                                return Some(AppEvent::SelectModelItem {
+                                                    provider,
+                                                    model: key,
+                                                });
                                             }
                                         }
                                     }
@@ -502,7 +539,9 @@ impl Component for Input {
                                     self.close_submenu();
                                     return match kind {
                                         SubmenuKind::Theme => Some(AppEvent::CancelThemePreview),
-                                        SubmenuKind::Skill | SubmenuKind::ModelProvider | SubmenuKind::ModelList => None,
+                                        SubmenuKind::Skill
+                                        | SubmenuKind::ModelProvider
+                                        | SubmenuKind::ModelList => None,
                                     };
                                 }
                             }
@@ -519,17 +558,22 @@ impl Component for Input {
                             None
                         }
                         crossterm::event::MouseEventKind::ScrollDown => {
-                            if self.dropdown_selected < self.dropdown_items.len().saturating_sub(1) {
+                            if self.dropdown_selected < self.dropdown_items.len().saturating_sub(1)
+                            {
                                 self.dropdown_selected += 1;
                             }
                             None
                         }
-                        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                        crossterm::event::MouseEventKind::Down(
+                            crossterm::event::MouseButton::Left,
+                        ) => {
                             if let Some(area) = self.dropdown_area {
                                 let mx = mouse.column;
                                 let my = mouse.row;
-                                if mx >= area.x && mx < area.x + area.width
-                                    && my >= area.y && my < area.y + area.height
+                                if mx >= area.x
+                                    && mx < area.x + area.width
+                                    && my >= area.y
+                                    && my < area.y + area.height
                                 {
                                     let item_y = my.saturating_sub(area.y + 1);
                                     let index = item_y as usize;
@@ -629,14 +673,12 @@ impl Input {
             0
         };
 
-        let paragraph = Paragraph::new(items)
-            .scroll((scroll_y as u16, 0))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border))
-                    .style(theme.drawer_style()),
-            );
+        let paragraph = Paragraph::new(items).scroll((scroll_y as u16, 0)).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border))
+                .style(theme.drawer_style()),
+        );
         frame.render_widget(paragraph, area);
 
         // 3. 内容超出可视区域时绘制滚动条
@@ -685,9 +727,11 @@ mod tests {
     #[test]
     fn test_slash_command_detection() {
         let mut input = Input::new();
-        input.set_commands(vec![
-            CommandMeta { name: "clear".into(), description: "Clear".into(), args_hint: None },
-        ]);
+        input.set_commands(vec![CommandMeta {
+            name: "clear".into(),
+            description: "Clear".into(),
+            args_hint: None,
+        }]);
         input.insert_char('/');
         input.check_slash_commands();
         assert!(input.dropdown_visible);

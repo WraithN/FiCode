@@ -19,8 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use tokio::sync::broadcast;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +52,13 @@ impl LogStore {
     }
 
     pub fn recent(&self, limit: usize) -> Vec<LogEntry> {
-        self.buffer.iter().rev().take(limit).rev().cloned().collect()
+        self.buffer
+            .iter()
+            .rev()
+            .take(limit)
+            .rev()
+            .cloned()
+            .collect()
     }
 }
 
@@ -104,10 +110,30 @@ mod tests {
     #[test]
     fn test_log_store_capacity() {
         let mut store = LogStore::new(3);
-        store.push(LogEntry { timestamp: "00:00:00".into(), level: "INFO".into(), module: "a".into(), message: "1".into() });
-        store.push(LogEntry { timestamp: "00:00:01".into(), level: "INFO".into(), module: "a".into(), message: "2".into() });
-        store.push(LogEntry { timestamp: "00:00:02".into(), level: "INFO".into(), module: "a".into(), message: "3".into() });
-        store.push(LogEntry { timestamp: "00:00:03".into(), level: "INFO".into(), module: "a".into(), message: "4".into() });
+        store.push(LogEntry {
+            timestamp: "00:00:00".into(),
+            level: "INFO".into(),
+            module: "a".into(),
+            message: "1".into(),
+        });
+        store.push(LogEntry {
+            timestamp: "00:00:01".into(),
+            level: "INFO".into(),
+            module: "a".into(),
+            message: "2".into(),
+        });
+        store.push(LogEntry {
+            timestamp: "00:00:02".into(),
+            level: "INFO".into(),
+            module: "a".into(),
+            message: "3".into(),
+        });
+        store.push(LogEntry {
+            timestamp: "00:00:03".into(),
+            level: "INFO".into(),
+            module: "a".into(),
+            message: "4".into(),
+        });
         let recent = store.recent(10);
         assert_eq!(recent.len(), 3);
         assert_eq!(recent[0].message, "2");

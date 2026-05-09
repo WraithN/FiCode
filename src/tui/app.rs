@@ -34,9 +34,9 @@ use crate::tui::components::{
     input::Input,
     left_drawer::LeftDrawer,
     log_window::LogWindow,
+    question_dialog::{QuestionDialog, QuestionDialogAction},
     right_drawer::RightDrawer,
     status_bar::StatusBar,
-    question_dialog::{QuestionDialog, QuestionDialogAction},
     Component,
 };
 use crate::tui::event::{AppEvent, FocusArea, ModelItem, ProviderItem, QuestionAnswer};
@@ -129,19 +129,20 @@ pub struct TuiApp {
     log_window: LogWindow,     // 日志浮窗
 
     // === 应用状态 ===
-    focus: FocusArea,              // 当前焦点所在区域
-    is_generating: bool,           // 是否正在等待模型生成回复
-    should_quit: bool,             // 是否退出主循环
-    exit_confirm_pending: bool,    // Ctrl+C 是否已按过一次，等待第二次确认退出
-    dirty: bool,                   // 是否需要重绘
-    api_key_dialog: Option<ApiKeyDialog>, // API Key 输入模态框
-    question_dialog: Option<QuestionDialog>, // 问题询问模态框
+    focus: FocusArea,                             // 当前焦点所在区域
+    is_generating: bool,                          // 是否正在等待模型生成回复
+    should_quit: bool,                            // 是否退出主循环
+    exit_confirm_pending: bool,                   // Ctrl+C 是否已按过一次，等待第二次确认退出
+    dirty: bool,                                  // 是否需要重绘
+    api_key_dialog: Option<ApiKeyDialog>,         // API Key 输入模态框
+    question_dialog: Option<QuestionDialog>,      // 问题询问模态框
+    generation_start: Option<std::time::Instant>, // 当前生成轮次的开始时间
 
     // === 后端通信与事件通道 ===
-    client: TuiClient,                                      // HTTP 客户端，对接本地 4040 端口服务
-    event_tx: mpsc::Sender<AppEvent>,                       // 事件发送端（克隆给异步任务使用）
-    event_rx: mpsc::Receiver<AppEvent>,                     // 事件接收端（主循环消费）
-    crossterm_rx: mpsc::Receiver<anyhow::Result<Event>>,    // 终端事件接收端（后台线程读取后转发）
+    client: TuiClient,                  // HTTP 客户端，对接本地 4040 端口服务
+    event_tx: mpsc::Sender<AppEvent>,   // 事件发送端（克隆给异步任务使用）
+    event_rx: mpsc::Receiver<AppEvent>, // 事件接收端（主循环消费）
+    crossterm_rx: mpsc::Receiver<anyhow::Result<Event>>, // 终端事件接收端（后台线程读取后转发）
 }
 
 impl TuiApp {
@@ -152,18 +153,16 @@ impl TuiApp {
 
         // 在独立后台线程中持续读取终端事件，避免每次循环都启动 spawn_blocking 任务。
         // 线程在应用退出、channel 被关闭后会自动结束。
-        std::thread::spawn(move || {
-            loop {
-                match crossterm::event::read() {
-                    Ok(event) => {
-                        if crossterm_tx.blocking_send(Ok(event)).is_err() {
-                            break;
-                        }
+        std::thread::spawn(move || loop {
+            match crossterm::event::read() {
+                Ok(event) => {
+                    if crossterm_tx.blocking_send(Ok(event)).is_err() {
+                        break;
                     }
-                    Err(e) => {
-                        if crossterm_tx.blocking_send(Err(anyhow::anyhow!(e))).is_err() {
-                            break;
-                        }
+                }
+                Err(e) => {
+                    if crossterm_tx.blocking_send(Err(anyhow::anyhow!(e))).is_err() {
+                        break;
                     }
                 }
             }
@@ -200,6 +199,7 @@ impl TuiApp {
             dirty: true,
             api_key_dialog: None,
             question_dialog: None,
+            generation_start: None,
             client: TuiClient::new(),
             event_tx,
             event_rx,
@@ -293,43 +293,30 @@ impl TuiApp {
                 .style(ratatui::style::Style::default().bg(self.theme.bg_overlay));
             frame.render_widget(dim, areas.main);
 
-            match self.layout.panel {
-                PanelState::LeftDrawer => {
-                    self.left_drawer.draw(
-                        frame,
-                        overlay_area,
-                        &self.theme,
-                        self.focus == FocusArea::LeftDrawer,
-                    );
-                }
-                PanelState::RightDrawer => {
-                    self.right_drawer.draw(
-                        frame,
-                        overlay_area,
-                        &self.theme,
-                        self.focus == FocusArea::RightDrawer,
-                    );
-                }
-                _ => {}
-            }
-        } else {
-            if let Some(area) = areas.left_drawer {
-                self.left_drawer.draw(
-                    frame,
-                    area,
-                    &self.theme,
-                    self.focus == FocusArea::LeftDrawer,
-                );
-            }
-            if let Some(area) = areas.right_drawer {
-                self.right_drawer.draw(
-                    frame,
-                    area,
-                    &self.theme,
-                    self.focus == FocusArea::RightDrawer,
-                );
-            }
+            self.left_drawer.draw(
+                frame,
+                overlay_area,
+                &self.theme,
+                self.focus == FocusArea::LeftDrawer,
+            );
         }
+
+        if let Some(area) = areas.left_drawer {
+            self.left_drawer.draw(
+                frame,
+                area,
+                &self.theme,
+                self.focus == FocusArea::LeftDrawer,
+            );
+        }
+
+        // 右侧边栏始终常驻
+        self.right_drawer.draw(
+            frame,
+            areas.right_drawer,
+            &self.theme,
+            self.focus == FocusArea::RightDrawer,
+        );
 
         // 渲染 API Key 输入模态框
         if let Some(ref dialog) = self.api_key_dialog {
@@ -359,7 +346,8 @@ impl TuiApp {
                 ratatui::layout::Rect::new(inner.x, content_y + 1, label_w, 1),
             );
 
-            let input_area = ratatui::layout::Rect::new(inner.x + label_w + 1, content_y, input_w, 2);
+            let input_area =
+                ratatui::layout::Rect::new(inner.x + label_w + 1, content_y, input_w, 2);
             let input_text = if dialog.input.is_empty() {
                 " ".to_string()
             } else {
@@ -413,12 +401,16 @@ impl TuiApp {
     /// - 右侧抽屉打开时：Main ↔ Input ↔ RightDrawer
     fn cycle_focus(&mut self, forward: bool) {
         let areas = match self.layout.panel {
-            PanelState::None => vec![FocusArea::Main, FocusArea::Input],
-            PanelState::LeftDrawer => {
-                vec![FocusArea::LeftDrawer, FocusArea::Main, FocusArea::Input]
-            }
-            PanelState::RightDrawer => {
+            PanelState::LeftClosed => {
                 vec![FocusArea::Main, FocusArea::Input, FocusArea::RightDrawer]
+            }
+            PanelState::LeftOpen => {
+                vec![
+                    FocusArea::LeftDrawer,
+                    FocusArea::Main,
+                    FocusArea::Input,
+                    FocusArea::RightDrawer,
+                ]
             }
         };
 
@@ -481,11 +473,6 @@ impl TuiApp {
                 self.handle_app_event(AppEvent::ToggleLeftDrawer).await;
                 self.focus = FocusArea::LeftDrawer;
             }
-            'h' => {
-                self.exit_confirm_pending = false;
-                self.handle_app_event(AppEvent::ToggleRightDrawer).await;
-                self.focus = FocusArea::RightDrawer;
-            }
             'm' => {
                 self.exit_confirm_pending = false;
                 self.handle_execute_slash_command("models", &None);
@@ -505,7 +492,10 @@ impl TuiApp {
                             }
                             Err(e) => {
                                 let _ = tx
-                                    .send(AppEvent::ShowSystemMessage(format!("Load models failed: {}", e)))
+                                    .send(AppEvent::ShowSystemMessage(format!(
+                                        "Load models failed: {}",
+                                        e
+                                    )))
                                     .await;
                             }
                         }
@@ -544,8 +534,8 @@ impl TuiApp {
         if self.input.is_submenu_open() {
             return Some(AppEvent::CancelThemePreview);
         }
-        if self.layout.panel != PanelState::None {
-            self.layout.close_drawers();
+        if self.layout.panel != PanelState::LeftClosed {
+            self.layout.close_left();
         } else if self.header.has_dropdown_open() {
             self.header.close_dropdowns();
         } else {
@@ -606,7 +596,10 @@ impl TuiApp {
                                 let client = self.client.clone();
                                 let tx = self.event_tx.clone();
                                 tokio::spawn(async move {
-                                    match client.switch_model(&provider, &model, api_key_opt.as_deref()).await {
+                                    match client
+                                        .switch_model(&provider, &model, api_key_opt.as_deref())
+                                        .await
+                                    {
                                         Ok(_) => {
                                             let _ = tx.send(AppEvent::SelectModel(model)).await;
                                         }
@@ -634,7 +627,10 @@ impl TuiApp {
                     if let Some(action) = dialog.handle_key(key.code) {
                         match action {
                             QuestionDialogAction::Submit(answer) => {
-                                let _ = self.event_tx.send(AppEvent::QuestionAnswered { answer }).await;
+                                let _ = self
+                                    .event_tx
+                                    .send(AppEvent::QuestionAnswered { answer })
+                                    .await;
                             }
                             QuestionDialogAction::Cancel => {
                                 self.question_dialog = None;
@@ -719,8 +715,18 @@ impl TuiApp {
         }
 
         match event {
-            AppEvent::ShowQuestionDialog { ref question, ref options, ref recommended, ref allow_custom } => {
-                self.question_dialog = Some(QuestionDialog::new(question.clone(), options.clone(), recommended.clone(), *allow_custom));
+            AppEvent::ShowQuestionDialog {
+                ref question,
+                ref options,
+                ref recommended,
+                ref allow_custom,
+            } => {
+                self.question_dialog = Some(QuestionDialog::new(
+                    question.clone(),
+                    options.clone(),
+                    recommended.clone(),
+                    *allow_custom,
+                ));
             }
             AppEvent::QuestionAnswered { ref answer } => {
                 // 发送答案到工具通道
@@ -741,6 +747,11 @@ impl TuiApp {
             AppEvent::Tick => {
                 self.chat.on_tick();
                 self.header.on_tick();
+                // 更新状态栏的耗时
+                if let Some(start) = self.generation_start {
+                    let elapsed = start.elapsed().as_secs();
+                    self.status_bar.set_elapsed(elapsed);
+                }
             }
             AppEvent::Resize(w, h) => {
                 self.layout.resize(w, h);
@@ -748,6 +759,7 @@ impl TuiApp {
             // 用户提交消息：标记生成中、添加到聊天区，并启动 SSE 流请求
             AppEvent::SubmitMessage(ref msg) => {
                 self.is_generating = true;
+                self.generation_start = Some(std::time::Instant::now());
                 self.header.set_status(HeaderStatus::Generating);
                 self.chat.add_user_message(msg);
                 self.start_chat_stream(msg.clone()).await;
@@ -757,7 +769,10 @@ impl TuiApp {
                 self.chat.handle_sse_event(sse_event);
                 // 当内容到达时，设置为 Streaming 状态
                 match sse_event {
-                    SseEvent::Message { .. } | SseEvent::ToolUse { .. } | SseEvent::ToolResult { .. } | SseEvent::MessageDetails { .. } => {
+                    SseEvent::Message { .. }
+                    | SseEvent::ToolUse { .. }
+                    | SseEvent::ToolResult { .. }
+                    | SseEvent::MessageDetails { .. } => {
                         self.header.set_status(HeaderStatus::Streaming);
                     }
                     _ => {}
@@ -769,56 +784,61 @@ impl TuiApp {
             }
             AppEvent::ChatComplete => {
                 self.is_generating = false;
+                self.generation_start = None;
                 self.header.set_status(HeaderStatus::Ready);
             }
             AppEvent::StopGeneration => {
                 self.is_generating = false;
+                self.generation_start = None;
                 self.header.set_status(HeaderStatus::Ready);
             }
             // 切换左侧文件抽屉：打开时自动将焦点移入，并异步请求当前目录文件树
             AppEvent::ToggleLeftDrawer => {
                 self.layout.toggle_left();
-                if self.layout.panel == crate::tui::layout::PanelState::LeftDrawer {
+                if self.layout.panel == crate::tui::layout::PanelState::LeftOpen {
                     self.focus = FocusArea::LeftDrawer;
                     let client = self.client.clone();
                     let tx = self.event_tx.clone();
                     tokio::spawn(async move {
                         if let Ok(file_tree) = client.get_file_tree(".").await {
-                            let files: Vec<crate::tui::components::left_drawer::FileNode> = file_tree
-                                .entries
-                                .into_iter()
-                                .map(|e| crate::tui::components::left_drawer::FileNode {
-                                    path: e.path,
-                                    name: e.name,
-                                    is_dir: e.is_dir,
-                                    depth: e.depth,
-                                })
-                                .collect();
+                            let files: Vec<crate::tui::components::left_drawer::FileNode> =
+                                file_tree
+                                    .entries
+                                    .into_iter()
+                                    .map(|e| crate::tui::components::left_drawer::FileNode {
+                                        path: e.path,
+                                        name: e.name,
+                                        is_dir: e.is_dir,
+                                        depth: e.depth,
+                                    })
+                                    .collect();
                             let _ = tx.send(AppEvent::SetFileTree(files)).await;
                         }
                     });
                 }
             }
-            AppEvent::ToggleRightDrawer => {
-                self.layout.toggle_right();
-                if self.layout.panel == crate::tui::layout::PanelState::RightDrawer {
-                    self.focus = FocusArea::RightDrawer;
-                }
-            }
             AppEvent::CloseDrawers => {
-                self.layout.close_drawers();
+                self.layout.close_left();
             }
             AppEvent::SelectModel(ref model) => {
                 self.header.set_current_model(model.clone());
+                self.status_bar.set_model(model.clone());
             }
-            AppEvent::SwitchModel { ref provider, ref model, ref api_key } => {
+            AppEvent::SwitchModel {
+                ref provider,
+                ref model,
+                ref api_key,
+            } => {
                 let client = self.client.clone();
                 let tx = self.event_tx.clone();
                 let provider = provider.clone();
                 let model = model.clone();
                 let api_key = api_key.clone();
                 tokio::spawn(async move {
-                    match client.switch_model(&provider, &model, api_key.as_deref()).await {
+                    match client
+                        .switch_model(&provider, &model, api_key.as_deref())
+                        .await
+                    {
                         Ok(_) => {
                             let _ = tx.send(AppEvent::SelectModel(model)).await;
                         }
@@ -849,15 +869,25 @@ impl TuiApp {
                     let items: Vec<(String, String, String)> = provider
                         .models
                         .iter()
-                        .map(|m| (m.key.clone(), m.name.clone(), format!("context: {}, output: {}", m.context, m.output)))
+                        .map(|m| {
+                            (
+                                m.key.clone(),
+                                m.name.clone(),
+                                format!("context: {}, output: {}", m.context, m.output),
+                            )
+                        })
                         .collect();
-                    self.input.enter_submenu_mode(crate::tui::components::input::SubmenuKind::ModelList);
+                    self.input
+                        .enter_submenu_mode(crate::tui::components::input::SubmenuKind::ModelList);
                     self.input.set_submenu_context(provider_key.clone());
                     self.input.set_submenu_items(items);
                     self.focus = FocusArea::Input;
                 }
             }
-            AppEvent::SelectModelItem { ref provider, ref model } => {
+            AppEvent::SelectModelItem {
+                ref provider,
+                ref model,
+            } => {
                 let is_preset = provider != "custom";
                 if is_preset {
                     self.api_key_dialog = Some(ApiKeyDialog::new(provider.clone(), model.clone()));
@@ -978,10 +1008,8 @@ impl TuiApp {
                         ));
                     }
                     Err(e) => {
-                        self.chat.add_system_message(&format!(
-                            "Failed to load skill '{}': {}",
-                            name, e
-                        ));
+                        self.chat
+                            .add_system_message(&format!("Failed to load skill '{}': {}", name, e));
                     }
                 }
             }
@@ -1009,9 +1037,8 @@ impl TuiApp {
             _ => {}
         }
 
-        // 同步底部状态栏的生成状态与面板状态
+        // 同步底部状态栏的生成状态
         self.status_bar.set_generating(self.is_generating);
-        self.status_bar.set_panel(self.layout.panel);
 
         self.header.update(&event);
         self.chat.update(&event);
@@ -1163,24 +1190,32 @@ impl TuiApp {
             if registry.entries.is_empty() {
                 let tx = self.event_tx.clone();
                 tokio::spawn(async move {
-                    let _ = tx.send(AppEvent::ShowSystemMessage(
-                        "No skills available.".into(),
-                    )).await;
+                    let _ = tx
+                        .send(AppEvent::ShowSystemMessage("No skills available.".into()))
+                        .await;
                 });
                 return;
             }
-            self.input.enter_submenu_mode(crate::tui::components::input::SubmenuKind::Skill);
+            self.input
+                .enter_submenu_mode(crate::tui::components::input::SubmenuKind::Skill);
             let items: Vec<(String, String, String)> = registry
                 .entries
                 .iter()
-                .map(|e| (e.metadata.name.clone(), e.metadata.name.clone(), e.metadata.description.clone()))
+                .map(|e| {
+                    (
+                        e.metadata.name.clone(),
+                        e.metadata.name.clone(),
+                        e.metadata.description.clone(),
+                    )
+                })
                 .collect();
             self.input.set_submenu_items(items);
             return;
         }
 
         if name == "themes" {
-            self.input.enter_submenu_mode(crate::tui::components::input::SubmenuKind::Theme);
+            self.input
+                .enter_submenu_mode(crate::tui::components::input::SubmenuKind::Theme);
             let items: Vec<(String, String, String)> = self
                 .theme_presets
                 .iter()
@@ -1192,7 +1227,8 @@ impl TuiApp {
         }
 
         if name == "models" {
-            self.input.enter_submenu_mode(crate::tui::components::input::SubmenuKind::ModelProvider);
+            self.input
+                .enter_submenu_mode(crate::tui::components::input::SubmenuKind::ModelProvider);
             let client = self.client.clone();
             let tx = self.event_tx.clone();
             tokio::spawn(async move {
@@ -1203,7 +1239,10 @@ impl TuiApp {
                     }
                     Err(e) => {
                         let _ = tx
-                            .send(AppEvent::ShowSystemMessage(format!("Load models failed: {}", e)))
+                            .send(AppEvent::ShowSystemMessage(format!(
+                                "Load models failed: {}",
+                                e
+                            )))
                             .await;
                     }
                 }
@@ -1245,7 +1284,6 @@ impl TuiApp {
     }
 }
 
-
 /// 解析后端 /api/models 返回的 JSON，转换为 ProviderItem 列表。
 fn parse_model_list(data: &serde_json::Value) -> Vec<crate::tui::event::ProviderItem> {
     let mut providers = Vec::new();
@@ -1253,17 +1291,43 @@ fn parse_model_list(data: &serde_json::Value) -> Vec<crate::tui::event::Provider
         return providers;
     };
     for p in arr {
-        let key = p.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let provider_type = p.get("type").and_then(|v| v.as_str()).unwrap_or("openai_compatible").to_string();
+        let key = p
+            .get("key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let name = p
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let provider_type = p
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("openai_compatible")
+            .to_string();
         let mut models = Vec::new();
         if let Some(m_arr) = p.get("models").and_then(|v| v.as_array()) {
             for m in m_arr {
-                let m_key = m.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let m_name = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let m_key = m
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let m_name = m
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let limit = m.get("limit").and_then(|v| v.as_object());
-                let context = limit.and_then(|l| l.get("context")).and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let output = limit.and_then(|l| l.get("output")).and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let context = limit
+                    .and_then(|l| l.get("context"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let output = limit
+                    .and_then(|l| l.get("output"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
                 models.push(crate::tui::event::ModelItem {
                     key: m_key,
                     name: m_name,

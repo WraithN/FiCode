@@ -98,7 +98,8 @@ impl McpManager {
                 Err(e) => {
                     log_info!(
                         "Warning: MCP server '{}' initialization failed: {}",
-                        name, e
+                        name,
+                        e
                     );
                     manager
                         .status
@@ -268,7 +269,10 @@ impl McpManager {
                 Err(e) => {
                     log_info!(
                         "MCP server '{}' reconnect failed (attempt {}/{}): {}",
-                        server_name, attempt, self.max_retries, e
+                        server_name,
+                        attempt,
+                        self.max_retries,
+                        e
                     );
                 }
             }

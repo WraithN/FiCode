@@ -21,8 +21,8 @@
 
 use super::{AIClient, AnthropicClient, OpenAiClient};
 use anyhow::{anyhow, Result};
-use std::env;
 use std::collections::HashMap;
+use std::env;
 use std::sync::{Arc, RwLock};
 
 use crate::config::{Config, ProviderConfig};
@@ -147,8 +147,7 @@ impl Provider {
         }
 
         // Qwen (通义千问)
-        let qwen_api_key =
-            env::var("QWEN_API_KEY").or_else(|_| env::var("DASHSCOPE_API_KEY"));
+        let qwen_api_key = env::var("QWEN_API_KEY").or_else(|_| env::var("DASHSCOPE_API_KEY"));
         if let (Ok(api_key), Ok(base_url), Ok(model_name)) = (
             qwen_api_key,
             env::var("QWEN_BASE_URL"),
@@ -174,7 +173,9 @@ impl Provider {
         {
             let model_type = match provider_cfg.provider_type {
                 crate::config::models::ProviderType::Anthropic => ModelType::Anthropic,
-                crate::config::models::ProviderType::OpenAiCompatible => ModelType::OpenAiCompatible,
+                crate::config::models::ProviderType::OpenAiCompatible => {
+                    ModelType::OpenAiCompatible
+                }
             };
             return Ok(Model {
                 api_key: provider_cfg.options.api_key.clone(),
@@ -201,7 +202,11 @@ impl Provider {
         if let Some((provider_name, model_name)) = model_ref.split_once('/') {
             let provider_cfg = config.provider.get(provider_name)?;
             if provider_cfg.models.contains_key(model_name) {
-                return Some((provider_name.to_string(), model_name.to_string(), provider_cfg));
+                return Some((
+                    provider_name.to_string(),
+                    model_name.to_string(),
+                    provider_cfg,
+                ));
             }
             return None;
         }
@@ -240,7 +245,9 @@ impl Provider {
         {
             let model_type = match provider_cfg.provider_type {
                 crate::config::models::ProviderType::Anthropic => ModelType::Anthropic,
-                crate::config::models::ProviderType::OpenAiCompatible => ModelType::OpenAiCompatible,
+                crate::config::models::ProviderType::OpenAiCompatible => {
+                    ModelType::OpenAiCompatible
+                }
             };
             self.model = Some(Model {
                 api_key: api_key_override
@@ -329,4 +336,3 @@ impl Provider {
         }
     }
 }
-

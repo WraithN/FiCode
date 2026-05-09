@@ -56,7 +56,7 @@ static EVENT_TX: RwLock<Option<mpsc::Sender<AppEvent>>> = RwLock::new(None);
 
 // 问题答案通道
 type QuestionResponseSender = tokio::sync::oneshot::Sender<QuestionAnswer>;
-pub static QUESTION_CHANNEL: LazyLock<Mutex<Option<QuestionResponseSender>>> = 
+pub static QUESTION_CHANNEL: LazyLock<Mutex<Option<QuestionResponseSender>>> =
     LazyLock::new(|| Mutex::new(None));
 
 // 设置全局事件发送器
@@ -307,7 +307,9 @@ impl ToolHandler for CreateTaskPlanHandler {
         };
 
         // 兼容某些模型将 JSON 数组序列化为字符串传递的情况
-        let tasks_value = input.get("tasks").ok_or("Missing or invalid 'tasks' array")?;
+        let tasks_value = input
+            .get("tasks")
+            .ok_or("Missing or invalid 'tasks' array")?;
         let tasks_arr: serde_json::Value = if let Some(arr) = tasks_value.as_array() {
             serde_json::Value::Array(arr.clone())
         } else if let Some(s) = tasks_value.as_str() {
@@ -329,11 +331,8 @@ impl ToolHandler for CreateTaskPlanHandler {
             if name.is_empty() {
                 continue;
             }
-            plan.tasks.push(task::Task::new(
-                format!("{}", idx + 1),
-                name,
-                description,
-            ));
+            plan.tasks
+                .push(task::Task::new(format!("{}", idx + 1), name, description));
         }
 
         let json =
@@ -638,16 +637,16 @@ pub async fn tool_call(
             *channel = Some(tx);
         }
 
-        let event_tx_opt = {
-            EVENT_TX.read().unwrap().clone()
-        };
+        let event_tx_opt = { EVENT_TX.read().unwrap().clone() };
         if let Some(event_tx) = event_tx_opt {
-            let _ = event_tx.send(AppEvent::ShowQuestionDialog {
-                question,
-                options,
-                recommended,
-                allow_custom,
-            }).await;
+            let _ = event_tx
+                .send(AppEvent::ShowQuestionDialog {
+                    question,
+                    options,
+                    recommended,
+                    allow_custom,
+                })
+                .await;
         }
 
         match rx.await {
@@ -697,9 +696,7 @@ async fn execute_single_tool_call(
     arguments: &serde_json::Value,
 ) -> (String, bool) {
     let input: HashMap<String, serde_json::Value> = match arguments {
-        serde_json::Value::Object(map) => {
-            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-        }
+        serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         _ => HashMap::new(),
     };
 
@@ -735,7 +732,10 @@ pub async fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
             id,
             name,
             arguments,
-        } = part else { continue };
+        } = part
+        else {
+            continue;
+        };
 
         log_info!("calling tool: ${}", name);
         log_debug!("execute_tool_call | name={} | args={}", name, arguments);

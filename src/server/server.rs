@@ -40,10 +40,10 @@ use crate::config::Config;
 use crate::provider::Provider;
 
 use super::api::file_api;
-use super::models::ApiResponse;
-use super::transport::rpc::{handle_rpc, JsonRpcRequest, JsonRpcResponse};
-use super::session::HttpSessionManager;
 use super::api::session_api;
+use super::models::ApiResponse;
+use super::session::HttpSessionManager;
+use super::transport::rpc::{handle_rpc, JsonRpcRequest, JsonRpcResponse};
 use super::transport::sse::SseEvent;
 
 /// 服务器共享状态
@@ -96,7 +96,10 @@ impl Server {
         }
     }
 
-    pub fn with_log_broadcaster(mut self, broadcaster: Arc<crate::utils::log_store::LogBroadcaster>) -> Self {
+    pub fn with_log_broadcaster(
+        mut self,
+        broadcaster: Arc<crate::utils::log_store::LogBroadcaster>,
+    ) -> Self {
         self.state.log_broadcaster = Some(broadcaster);
         self
     }
@@ -120,12 +123,27 @@ impl Server {
             .route("/api/files", get(file_api::file_tree))
             .route("/api/files/content", get(file_api::file_content))
             .route("/api/commands", get(super::commands::handle_list_commands))
-            .route("/api/commands/:name/execute", post(super::commands::handle_execute_command))
+            .route(
+                "/api/commands/:name/execute",
+                post(super::commands::handle_execute_command),
+            )
             .route("/api/themes", get(handle_list_themes))
-            .route("/api/models", get(super::api::chat_api::handle_list_models_endpoint))
-            .route("/api/model/switch", post(super::api::chat_api::handle_switch_model))
-            .route("/api/logs", get(crate::server::api::log_api::handle_list_logs))
-            .route("/api/logs/stream", get(crate::server::api::log_api::handle_log_stream))
+            .route(
+                "/api/models",
+                get(super::api::chat_api::handle_list_models_endpoint),
+            )
+            .route(
+                "/api/model/switch",
+                post(super::api::chat_api::handle_switch_model),
+            )
+            .route(
+                "/api/logs",
+                get(crate::server::api::log_api::handle_list_logs),
+            )
+            .route(
+                "/api/logs/stream",
+                get(crate::server::api::log_api::handle_log_stream),
+            )
             .layer(cors_layer(self.state.config.clone()))
             .with_state(self.state.clone());
 
@@ -142,7 +160,9 @@ impl Server {
 fn build_cors_layer(origins: &[String]) -> CorsLayer {
     let mut layer = CorsLayer::new();
     for origin in origins {
-        let Ok(val) = origin.parse::<HeaderValue>() else { continue };
+        let Ok(val) = origin.parse::<HeaderValue>() else {
+            continue;
+        };
         layer = layer.allow_origin(val);
     }
     layer
@@ -153,8 +173,12 @@ fn build_cors_layer(origins: &[String]) -> CorsLayer {
 /// CORS 中间件配置
 fn cors_layer(config: Arc<RwLock<Config>>) -> CorsLayer {
     let cfg = config.read().unwrap();
-    let Some(server_cfg) = &cfg.server else { return CorsLayer::permissive() };
-    let Some(origins) = &server_cfg.allowed_origins else { return CorsLayer::permissive() };
+    let Some(server_cfg) = &cfg.server else {
+        return CorsLayer::permissive();
+    };
+    let Some(origins) = &server_cfg.allowed_origins else {
+        return CorsLayer::permissive();
+    };
     build_cors_layer(origins)
 }
 
@@ -174,7 +198,10 @@ async fn handle_rpc_endpoint(
 }
 
 /// 认证检查
-pub(crate) async fn check_auth(headers: &HeaderMap, config: &Arc<RwLock<Config>>) -> Option<JsonRpcResponse> {
+pub(crate) async fn check_auth(
+    headers: &HeaderMap,
+    config: &Arc<RwLock<Config>>,
+) -> Option<JsonRpcResponse> {
     let cfg = config.read().ok()?;
     let server_cfg = cfg.server.as_ref()?;
     let expected_token = server_cfg.api_token.as_ref()?;
@@ -195,13 +222,9 @@ pub(crate) async fn check_auth(headers: &HeaderMap, config: &Arc<RwLock<Config>>
     None
 }
 
-
-
 /// 列出所有可用主题
 async fn handle_list_themes(
     State(state): State<AppState>,
 ) -> Json<ApiResponse<Vec<crate::tui::theme::ThemePreset>>> {
     Json(ApiResponse::success(state.themes.clone()))
 }
-
-

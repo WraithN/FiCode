@@ -21,12 +21,11 @@
 
 use ratatui::layout::Rect;
 
-/// 面板状态：左右抽屉互斥，同时只能打开一个或都不打开。
+/// 面板状态：仅控制左侧边栏开关，右侧边栏始终常驻。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelState {
-    None,
-    LeftDrawer,
-    RightDrawer,
+    LeftClosed,
+    LeftOpen,
 }
 
 /// 布局管理器，负责根据终端尺寸计算各组件的 `Rect` 区域。
@@ -36,7 +35,7 @@ pub enum PanelState {
 /// - 窄屏（<80 列）：抽屉以 overlay 浮层形式覆盖在主区域上方。
 pub struct LayoutManager {
     pub terminal_size: (u16, u16), // (宽, 高)
-    pub panel: PanelState,         // 当前打开的面板
+    pub panel: PanelState,         // 当前左侧面板状态
     pub narrow_mode: bool,         // 是否为窄屏模式
     pub log_window: bool,          // 是否显示日志窗口
 }
@@ -47,19 +46,19 @@ pub struct LayoutAreas {
     pub header: Rect,
     pub left_drawer: Option<Rect>,
     pub main: Rect,
-    pub right_drawer: Option<Rect>,
+    pub right_drawer: Rect, // 改为非 Option，右侧边栏始终常驻
     pub status_bar: Rect,
-    pub overlay: Option<Rect>, // 窄屏模式下的抽屉浮层
+    pub overlay: Option<Rect>,    // 窄屏模式下的抽屉浮层
     pub log_window: Option<Rect>, // 日志窗口
 }
 
 impl LayoutManager {
-    /// 创建布局管理器，初始无抽屉，并根据宽度判定是否进入窄屏模式。
+    /// 创建布局管理器，初始左侧面板关闭，并根据宽度判定是否进入窄屏模式。
     pub fn new(width: u16, height: u16) -> Self {
         let narrow_mode = width < 80;
         Self {
             terminal_size: (width, height),
-            panel: PanelState::None,
+            panel: PanelState::LeftClosed,
             narrow_mode,
             log_window: false,
         }
@@ -71,25 +70,17 @@ impl LayoutManager {
         self.narrow_mode = width < 80;
     }
 
-    /// 切换左侧抽屉（若已打开则关闭，否则打开左侧并关闭右侧）。
+    /// 切换左侧抽屉（在 LeftClosed 和 LeftOpen 之间切换）。
     pub fn toggle_left(&mut self) {
         self.panel = match self.panel {
-            PanelState::LeftDrawer => PanelState::None,
-            _ => PanelState::LeftDrawer,
+            PanelState::LeftOpen => PanelState::LeftClosed,
+            PanelState::LeftClosed => PanelState::LeftOpen,
         };
     }
 
-    /// 切换右侧抽屉（若已打开则关闭，否则打开右侧并关闭左侧）。
-    pub fn toggle_right(&mut self) {
-        self.panel = match self.panel {
-            PanelState::RightDrawer => PanelState::None,
-            _ => PanelState::RightDrawer,
-        };
-    }
-
-    /// 关闭所有抽屉。
-    pub fn close_drawers(&mut self) {
-        self.panel = PanelState::None;
+    /// 关闭左侧抽屉。
+    pub fn close_left(&mut self) {
+        self.panel = PanelState::LeftClosed;
     }
 
     /// 根据当前状态计算每个组件应占据的 `Rect`。
@@ -101,29 +92,43 @@ impl LayoutManager {
         let status_height = 1u16;
         let main_height = height.saturating_sub(header_height + status_height);
 
-        if self.narrow_mode && self.panel != PanelState::None {
-            let overlay_width = (width as f32 * 0.75).max(30.0).min(width as f32) as u16;
-            let overlay_x = match self.panel {
-                PanelState::LeftDrawer => 0,
-                PanelState::RightDrawer => width.saturating_sub(overlay_width),
-                PanelState::None => 0,
-            };
+        let right_width = ((width as f32 * 0.28) as u16).clamp(24, 40);
 
-            let mut main = Rect::new(0, header_height, width, main_height);
+        if self.narrow_mode && self.panel == PanelState::LeftOpen {
+            // 窄屏模式下左侧边栏以浮层形式覆盖
+            let overlay_width = (width as f32 * 0.75).max(30.0).min(width as f32) as u16;
+            let overlay_x = 0;
+
+            let mut main = Rect::new(
+                0,
+                header_height,
+                width.saturating_sub(right_width),
+                main_height,
+            );
             let log_window = if self.log_window {
                 let log_height = (main.height as f32 * 0.6) as u16;
                 main.height = main.height.saturating_sub(log_height);
-                Some(Rect::new(main.x, main.y + main.height, main.width, log_height))
+                Some(Rect::new(
+                    main.x,
+                    main.y + main.height,
+                    main.width,
+                    log_height,
+                ))
             } else {
                 None
             };
 
             LayoutAreas {
                 header: Rect::new(0, 0, width, header_height),
-                main,
-                status_bar: Rect::new(0, height - status_height, width, status_height),
                 left_drawer: None,
-                right_drawer: None,
+                main,
+                right_drawer: Rect::new(
+                    width.saturating_sub(right_width),
+                    header_height,
+                    right_width,
+                    main_height,
+                ),
+                status_bar: Rect::new(0, height - status_height, width, status_height),
                 overlay: Some(Rect::new(
                     overlay_x,
                     header_height,
@@ -133,34 +138,39 @@ impl LayoutManager {
                 log_window,
             }
         } else {
-            let drawer_width = ((width as f32 * 0.28) as u16).clamp(24, 40);
-            let main_width = match self.panel {
-                PanelState::None => width,
-                _ => width.saturating_sub(drawer_width),
+            let left_width = ((width as f32 * 0.22) as u16).clamp(20, 35);
+            let left_open = self.panel == PanelState::LeftOpen;
+
+            let main_width = if left_open {
+                width.saturating_sub(left_width + right_width)
+            } else {
+                width.saturating_sub(right_width)
             };
 
-            let (left_x, main_x, right_x) = match self.panel {
-                PanelState::LeftDrawer => (0, drawer_width, width),
-                PanelState::RightDrawer => (0, 0, main_width),
-                PanelState::None => (0, 0, width),
-            };
+            let left_x = 0;
+            let main_x = if left_open { left_width } else { 0 };
+            let right_x = main_x + main_width;
 
             let mut main = Rect::new(main_x, header_height, main_width, main_height);
             let log_window = if self.log_window {
                 let log_height = (main.height as f32 * 0.6) as u16;
                 main.height = main.height.saturating_sub(log_height);
-                Some(Rect::new(main.x, main.y + main.height, main.width, log_height))
+                Some(Rect::new(
+                    main.x,
+                    main.y + main.height,
+                    main.width,
+                    log_height,
+                ))
             } else {
                 None
             };
 
             LayoutAreas {
                 header: Rect::new(0, 0, width, header_height),
-                left_drawer: (self.panel == PanelState::LeftDrawer)
-                    .then(|| Rect::new(left_x, header_height, drawer_width, main_height)),
+                left_drawer: left_open
+                    .then(|| Rect::new(left_x, header_height, left_width, main_height)),
                 main,
-                right_drawer: (self.panel == PanelState::RightDrawer)
-                    .then(|| Rect::new(right_x, header_height, drawer_width, main_height)),
+                right_drawer: Rect::new(right_x, header_height, right_width, main_height),
                 status_bar: Rect::new(0, height - status_height, width, status_height),
                 overlay: None,
                 log_window,
@@ -195,9 +205,12 @@ mod tests {
         assert_eq!(areas.header.height, 3);
         assert_eq!(areas.status_bar.height, 1);
         assert!(areas.left_drawer.is_none());
-        assert!(areas.right_drawer.is_none());
+        // 右侧边栏始终存在
+        assert_eq!(areas.right_drawer.width, (120.0_f32 * 0.28) as u16);
         assert!(areas.overlay.is_none());
-        assert_eq!(areas.main.width, 120);
+        // 主区域宽度 = 120 - right_width
+        let right_width = (120.0_f32 * 0.28) as u16;
+        assert_eq!(areas.main.width, 120 - right_width);
     }
 
     #[test]
@@ -207,21 +220,31 @@ mod tests {
         let areas = layout.calculate();
 
         assert!(areas.left_drawer.is_some());
-        assert!(areas.right_drawer.is_none());
         assert!(areas.overlay.is_none());
-        assert!(areas.main.width < 120);
+        let right_width = (120.0_f32 * 0.28) as u16;
+        let left_width = (120.0_f32 * 0.22) as u16;
+        assert_eq!(areas.main.width, 120 - left_width - right_width);
     }
 
     #[test]
-    fn test_drawer_mutual_exclusion() {
+    fn test_right_drawer_always_present() {
         let mut layout = LayoutManager::new(120, 30);
-        layout.toggle_left();
-        layout.toggle_right();
-
-        assert_eq!(layout.panel, PanelState::RightDrawer);
+        // 默认状态
         let areas = layout.calculate();
+        assert_eq!(areas.right_drawer.width, (120.0_f32 * 0.28) as u16);
         assert!(areas.left_drawer.is_none());
-        assert!(areas.right_drawer.is_some());
+
+        // 左侧打开
+        layout.toggle_left();
+        let areas = layout.calculate();
+        assert_eq!(areas.right_drawer.width, (120.0_f32 * 0.28) as u16);
+        assert!(areas.left_drawer.is_some());
+
+        // 左侧关闭
+        layout.close_left();
+        let areas = layout.calculate();
+        assert_eq!(areas.right_drawer.width, (120.0_f32 * 0.28) as u16);
+        assert!(areas.left_drawer.is_none());
     }
 
     #[test]
@@ -232,7 +255,11 @@ mod tests {
 
         assert!(areas.overlay.is_some());
         assert!(areas.left_drawer.is_none());
-        assert_eq!(areas.main.width, 60);
+        // 窄屏下右侧边栏仍然常驻
+        let right_width = ((60.0_f32 * 0.28) as u16).clamp(24, 40);
+        assert_eq!(areas.right_drawer.width, right_width);
+        // 主区域宽度 = 60 - right_width（右侧边栏始终存在）
+        assert_eq!(areas.main.width, 60 - right_width);
     }
 
     #[test]

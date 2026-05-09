@@ -142,15 +142,19 @@ impl CommandHandler for ModelCommandHandler {
                 for (_pname, pcfg) in &cfg.provider {
                     if let Some(mcfg) = pcfg.models.get(mkey) {
                         if let Some(limit) = &mcfg.limit {
-                            limit_str = format!(
-                                " (context: {}, output: {})",
-                                limit.context, limit.output
-                            );
+                            limit_str =
+                                format!(" (context: {}, output: {})", limit.context, limit.output);
                         }
                         break;
                     }
                 }
-                output.push_str(&format!("  [{}] {} — {}{}\n", i + 1, mkey, display, limit_str));
+                output.push_str(&format!(
+                    "  [{}] {} — {}{}\n",
+                    i + 1,
+                    mkey,
+                    display,
+                    limit_str
+                ));
             }
             Ok(output)
         };

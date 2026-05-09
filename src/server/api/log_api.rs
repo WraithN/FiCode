@@ -63,15 +63,13 @@ pub async fn handle_log_stream(
         }
     };
 
-    let stream = tokio_stream::wrappers::BroadcastStream::new(rx)
-        .filter_map(|result| {
-            match result {
-                Ok(entry) => {
-                    let data = serde_json::to_string(&entry).unwrap_or_default();
-                    Some(Ok::<_, Infallible>(Event::default().data(data)))
-                }
-                Err(_) => None,
+    let stream =
+        tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|result| match result {
+            Ok(entry) => {
+                let data = serde_json::to_string(&entry).unwrap_or_default();
+                Some(Ok::<_, Infallible>(Event::default().data(data)))
             }
+            Err(_) => None,
         });
 
     Sse::new(stream)

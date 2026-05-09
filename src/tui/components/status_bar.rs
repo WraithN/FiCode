@@ -30,85 +30,200 @@ use ratatui::{
 
 use crate::tui::components::Component;
 use crate::tui::event::AppEvent;
-use crate::tui::layout::PanelState;
 use crate::tui::theme::Theme;
 
-/// 底部状态栏组件，始终显示快捷键提示与当前生成状态。
+/// 进度条动画状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProgressState {
+    /// 空闲：进度条为空，静态显示。
+    Idle,
+    /// 运行中：每 tick 前进一格，到头后停在最满状态。
+    Running,
+    /// 暂停：定格在当前长度，不再前进。
+    Paused,
+}
+
+/// 底部状态栏组件，显示品牌、进度条、耗时、Token 统计和当前模型。
 ///
 /// 该组件不可聚焦，仅作为信息展示。
 pub struct StatusBar {
-    is_generating: bool, // 是否正在生成回复（控制是否显示 Stop 提示）
-    panel: PanelState,   // 当前面板状态（控制 Files/History 按钮显示文字）
+    progress_state: ProgressState,
+    progress_tick: u64, // 动画帧计数器
+    last_filled: usize, // 暂停时定格的填充格数
+    model_name: String, // 当前模型名
+    token_in: usize,    // 输入 Token 计数
+    token_out: usize,   // 输出 Token 计数
+    elapsed_secs: u64,  // 当前耗时（秒）
 }
+
+/// 进度条总格数。
+const PROGRESS_BAR_WIDTH: usize = 20;
 
 impl StatusBar {
     pub fn new() -> Self {
         Self {
-            is_generating: false,
-            panel: PanelState::None,
+            progress_state: ProgressState::Idle,
+            progress_tick: 0,
+            last_filled: 0,
+            model_name: "unknown".to_string(),
+            token_in: 0,
+            token_out: 0,
+            elapsed_secs: 0,
         }
     }
 
     /// 更新生成状态。
     pub fn set_generating(&mut self, generating: bool) {
-        self.is_generating = generating;
+        match (self.progress_state, generating) {
+            (ProgressState::Idle, true) => {
+                self.progress_state = ProgressState::Running;
+                self.progress_tick = 0;
+                self.last_filled = 0;
+            }
+            (ProgressState::Running, false) => {
+                let filled = self.current_filled();
+                self.progress_state = ProgressState::Paused;
+                self.last_filled = filled;
+            }
+            (ProgressState::Paused, true) => {
+                self.progress_state = ProgressState::Running;
+                self.progress_tick = self.last_filled as u64;
+            }
+            (ProgressState::Paused, false) => {
+                // 已经是暂停状态，重置为空闲
+                self.progress_state = ProgressState::Idle;
+                self.progress_tick = 0;
+                self.last_filled = 0;
+            }
+            _ => {}
+        }
     }
 
-    /// 更新面板状态。
-    pub fn set_panel(&mut self, panel: PanelState) {
-        self.panel = panel;
+    /// 更新当前模型名。
+    pub fn set_model(&mut self, model: String) {
+        self.model_name = model;
+    }
+
+    /// 暂留：兼容旧接口，Task 5 中从 app.rs 移除后删除此方法。
+    pub fn set_panel(&mut self, _panel: crate::tui::layout::PanelState) {
+        // 新设计下状态栏不显示面板状态，此方法为空实现
+    }
+
+    /// 更新 Token 计数。
+    pub fn set_tokens(&mut self, in_count: usize, out_count: usize) {
+        self.token_in = in_count;
+        self.token_out = out_count;
+    }
+
+    /// 更新耗时（秒）。
+    pub fn set_elapsed(&mut self, secs: u64) {
+        self.elapsed_secs = secs;
+    }
+
+    /// 每帧 tick，更新进度条动画。
+    pub fn on_tick(&mut self) {
+        if self.progress_state == ProgressState::Running {
+            self.progress_tick = self.progress_tick.wrapping_add(1);
+        }
+    }
+
+    /// 计算当前应填充的格数。
+    fn current_filled(&self) -> usize {
+        match self.progress_state {
+            ProgressState::Idle => 0,
+            ProgressState::Running => (self.progress_tick as usize).min(PROGRESS_BAR_WIDTH),
+            ProgressState::Paused => self.last_filled,
+        }
+    }
+
+    /// 渲染进度条字符串。
+    fn render_progress_bar(&self) -> String {
+        let filled = self.current_filled();
+        let empty = PROGRESS_BAR_WIDTH - filled;
+        format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
+    }
+
+    /// 格式化耗时显示。
+    fn format_elapsed(&self) -> String {
+        if self.elapsed_secs == 0 {
+            String::new()
+        } else {
+            let minutes = self.elapsed_secs / 60;
+            let secs = self.elapsed_secs % 60;
+            if minutes > 0 {
+                format!("{}m{}s", minutes, secs)
+            } else {
+                format!("{}s", secs)
+            }
+        }
+    }
+
+    /// 构建状态栏完整显示行。
+    fn build_line(&self, theme: &Theme) -> Line<'static> {
+        let mut spans = vec![];
+
+        // 品牌标识：FiCode（品牌色）
+        spans.push(Span::styled("FiCode", theme.style_brand()));
+        spans.push(Span::raw("  "));
+
+        // 进度条
+        let progress_bar = self.render_progress_bar();
+        let progress_style = match self.progress_state {
+            ProgressState::Idle => Style::default().fg(theme.text_muted),
+            ProgressState::Running | ProgressState::Paused => Style::default().fg(theme.brand),
+        };
+        spans.push(Span::styled(progress_bar, progress_style));
+
+        // 分隔符 + 耗时
+        let elapsed = self.format_elapsed();
+        if !elapsed.is_empty() {
+            spans.push(Span::styled(" ｜ ", theme.style_muted()));
+            spans.push(Span::styled(
+                format!("耗时：{}", elapsed),
+                theme.style_primary(),
+            ));
+        }
+
+        // 分隔符 + Token 统计
+        if self.token_in > 0 || self.token_out > 0 {
+            spans.push(Span::styled(" ｜ ", theme.style_muted()));
+            spans.push(Span::styled(
+                format!("IN:{} OUT:{}", self.token_in, self.token_out),
+                theme.style_primary(),
+            ));
+        }
+
+        // 分隔符 + 模型名
+        spans.push(Span::styled(" ｜ ", theme.style_muted()));
+        spans.push(Span::styled(
+            format!("Model:{}", self.model_name),
+            theme.style_primary(),
+        ));
+
+        Line::from(spans)
     }
 }
 
 impl Component for StatusBar {
-    /// 渲染状态栏：左侧显示常用快捷键（Files、History、Model、Theme、New），
-    /// 若正在生成则追加红色的 `[Ctrl+C] Stop` 提示。
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, _is_focused: bool) {
-        let mut spans = vec![];
-
-        let files_label = match self.panel {
-            PanelState::LeftDrawer => "[Ctrl+B] Hide",
-            _ => "[Ctrl+B] Files",
-        };
-        spans.push(Span::styled(files_label, theme.style_muted()));
-        spans.push(Span::raw("  "));
-
-        let history_label = match self.panel {
-            PanelState::RightDrawer => "[Ctrl+H] Hide",
-            _ => "[Ctrl+H] History",
-        };
-        spans.push(Span::styled(history_label, theme.style_muted()));
-        spans.push(Span::raw("  "));
-
-        spans.push(Span::styled("[Ctrl+M] Models", theme.style_muted()));
-        spans.push(Span::raw("  "));
-
-        spans.push(Span::styled("[Ctrl+T] Themes", theme.style_muted()));
-        spans.push(Span::raw("  "));
-
-        spans.push(Span::styled("[Ctrl+N] New", theme.style_muted()));
-
-        if self.is_generating {
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                "[Ctrl+C] Stop",
-                Style::default().fg(theme.error),
-            ));
-        }
-
-        let line = Line::from(spans);
+        let line = self.build_line(theme);
         let paragraph = Paragraph::new(line).style(theme.status_bar_style());
         frame.render_widget(paragraph, area);
     }
 
-    /// 状态栏不处理任何事件。
     fn handle_event(&mut self, _event: &Event, _focus: bool) -> Option<AppEvent> {
         None
     }
 
-    /// 状态栏不可聚焦。
     fn is_focusable(&self) -> bool {
         false
+    }
+
+    fn update(&mut self, event: &AppEvent) {
+        match event {
+            AppEvent::Tick => self.on_tick(),
+            _ => {}
+        }
     }
 }
 
@@ -117,10 +232,106 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_status_bar_state() {
+    fn test_status_bar_initial_state() {
+        let bar = StatusBar::new();
+        assert_eq!(bar.progress_state, ProgressState::Idle);
+        assert_eq!(bar.progress_tick, 0);
+        assert_eq!(bar.model_name, "unknown");
+    }
+
+    #[test]
+    fn test_progress_state_transitions() {
         let mut bar = StatusBar::new();
-        assert!(!bar.is_generating);
+
+        // 空闲 → 运行
         bar.set_generating(true);
-        assert!(bar.is_generating);
+        assert_eq!(bar.progress_state, ProgressState::Running);
+
+        // 运行 → 暂停
+        bar.set_generating(false);
+        assert_eq!(bar.progress_state, ProgressState::Paused);
+
+        // 暂停 → 空闲（再次停止）
+        bar.set_generating(false);
+        assert_eq!(bar.progress_state, ProgressState::Idle);
+
+        // 空闲 → 运行 → 运行（无变化）
+        bar.set_generating(true);
+        bar.set_generating(true);
+        assert_eq!(bar.progress_state, ProgressState::Running);
+    }
+
+    #[test]
+    fn test_progress_bar_idle() {
+        let bar = StatusBar::new();
+        let pb = bar.render_progress_bar();
+        assert_eq!(pb, "[░░░░░░░░░░░░░░░░░░░░]");
+    }
+
+    #[test]
+    fn test_progress_bar_running() {
+        let mut bar = StatusBar::new();
+        bar.set_generating(true);
+        bar.on_tick(); // tick = 1, filled = 1
+        let pb = bar.render_progress_bar();
+        assert_eq!(pb, "[█░░░░░░░░░░░░░░░░░░░]");
+
+        // 前进到第 5 格
+        for _ in 0..4 {
+            bar.on_tick();
+        }
+        let pb = bar.render_progress_bar();
+        assert_eq!(pb, "[█████░░░░░░░░░░░░░░░]");
+    }
+
+    #[test]
+    fn test_progress_bar_capped_at_width() {
+        let mut bar = StatusBar::new();
+        bar.set_generating(true);
+        // 前进超过 20 格
+        for _ in 0..30 {
+            bar.on_tick();
+        }
+        let pb = bar.render_progress_bar();
+        assert_eq!(pb, "[████████████████████]");
+    }
+
+    #[test]
+    fn test_progress_bar_paused() {
+        let mut bar = StatusBar::new();
+        bar.set_generating(true);
+        for _ in 0..5 {
+            bar.on_tick();
+        }
+        bar.set_generating(false); // 暂停，定格在 5 格
+
+        // 即使继续 tick，也不应前进
+        bar.on_tick();
+        bar.on_tick();
+        let pb = bar.render_progress_bar();
+        assert_eq!(pb, "[█████░░░░░░░░░░░░░░░]");
+    }
+
+    #[test]
+    fn test_elapsed_format() {
+        let mut bar = StatusBar::new();
+        assert_eq!(bar.format_elapsed(), "");
+
+        bar.set_elapsed(52);
+        assert_eq!(bar.format_elapsed(), "52s");
+
+        bar.set_elapsed(125);
+        assert_eq!(bar.format_elapsed(), "2m5s");
+    }
+
+    #[test]
+    fn test_build_line_includes_model() {
+        let mut bar = StatusBar::new();
+        bar.set_model("kimi-code".to_string());
+        let theme = Theme::deep_ocean();
+        let line = bar.build_line(&theme);
+        let text = line.to_string();
+        assert!(text.contains("FiCode"));
+        assert!(text.contains("Model:kimi-code"));
     }
 }

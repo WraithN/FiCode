@@ -183,12 +183,7 @@ fn compute_backoff(attempt: u32, base: Duration, max: Duration) -> Duration {
 /// - `request` 必须支持 `try_clone()`。对于基于 `String` / `Bytes` 的 JSON body，
 ///   reqwest 通常可以成功克隆；若 body 是不可克隆的流，则会在首次重试时返回错误。
 /// - 对于非成功但不可重试的 HTTP 响应，直接原样返回，由调用方处理错误 body。
-async fn do_retry_backoff(
-    attempt: u32,
-    config: &RetryConfig,
-    context: &str,
-    detail: &str,
-) {
+async fn do_retry_backoff(attempt: u32, config: &RetryConfig, context: &str, detail: &str) {
     let backoff = compute_backoff(attempt, config.base_delay, config.max_delay);
     log_trace!(
         "send_with_retry | attempt={} | {} | backoff={:?}",

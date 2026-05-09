@@ -42,12 +42,14 @@ pub struct SessionMeta {
     pub is_current: bool, // 是否为当前活跃会话
 }
 
-/// 右侧会话历史抽屉组件，展示所有历史会话，支持切换与会话管理。
+/// 右侧常驻栏组件，展示 Task 完成情况和本次会话变更文件。
+///
+/// 当前为占位实现，等后端 API 提供 Task 和变更文件数据后填充真实内容。
 pub struct RightDrawer {
     sessions: Vec<SessionMeta>,
     selected_index: usize,
-    filter: String,       // 预留：会话名称过滤
-    filter_active: bool,  // 预留：是否处于过滤模式
+    filter: String,      // 预留：会话名称过滤
+    filter_active: bool, // 预留：是否处于过滤模式
 }
 
 impl RightDrawer {
@@ -80,72 +82,46 @@ impl Component for RightDrawer {
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(Style::default().fg(theme.border))
-            .title("Session History")
+            .title("Tasks & Changes")
             .style(theme.drawer_style());
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let items: Vec<Line> = self
-            .sessions
-            .iter()
-            .enumerate()
-            .map(|(i, session)| {
-                let prefix = if session.is_current { "● " } else { "○ " };
-                let style = if i == self.selected_index {
-                    theme.style_selection()
-                } else if session.is_current {
-                    theme.style_brand()
-                } else {
-                    theme.style_primary()
-                };
+        // 上下两个区块：Tasks（上）和 Changes（下）
+        let half_height = inner.height / 2;
+        let top_area = Rect::new(inner.x, inner.y, inner.width, half_height);
+        let bottom_area = Rect::new(
+            inner.x,
+            inner.y + half_height,
+            inner.width,
+            inner.height - half_height,
+        );
 
-                Line::from(vec![
-                    Span::styled(prefix, style.add_modifier(Modifier::BOLD)),
-                    Span::styled(&session.name, style),
-                    Span::styled(
-                        format!(" ({} msgs)", session.message_count),
-                        theme.style_muted(),
-                    ),
-                ])
-            })
-            .collect();
+        // 上半区：Tasks
+        let tasks_lines = vec![
+            Line::styled(
+                "📋 Tasks",
+                theme.style_primary().add_modifier(Modifier::BOLD),
+            ),
+            Line::styled("  No active tasks", theme.style_muted()),
+        ];
+        frame.render_widget(Paragraph::new(tasks_lines), top_area);
 
-        let paragraph = Paragraph::new(items);
-        frame.render_widget(paragraph, inner);
+        // 下半区：Changes
+        let changes_lines = vec![
+            Line::styled(
+                "📁 Changes",
+                theme.style_primary().add_modifier(Modifier::BOLD),
+            ),
+            Line::styled("  No changes yet", theme.style_muted()),
+        ];
+        frame.render_widget(Paragraph::new(changes_lines), bottom_area);
     }
 
-    /// 处理导航事件：上下方向键移动选中，Enter 触发切换会话事件。
-    fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<AppEvent> {
-        if let Event::Key(key) = event {
-            if key.kind != KeyEventKind::Press {
-                return None;
-            }
-
-            match key.code {
-                KeyCode::Up => {
-                    if self.selected_index > 0 {
-                        self.selected_index -= 1;
-                    }
-                    None
-                }
-                KeyCode::Down => {
-                    if self.selected_index < self.sessions.len().saturating_sub(1) {
-                        self.selected_index += 1;
-                    }
-                    None
-                }
-                KeyCode::Enter => {
-                    if let Some(session) = self.sessions.get(self.selected_index) {
-                        return Some(AppEvent::SwitchSession(session.id.clone()));
-                    }
-                    None
-                }
-                _ => None,
-            }
-        } else {
-            None
-        }
+    /// 右侧常驻栏当前为占位展示，不处理导航事件。
+    fn handle_event(&mut self, _event: &Event, _focus: bool) -> Option<AppEvent> {
+        None
     }
 }
 

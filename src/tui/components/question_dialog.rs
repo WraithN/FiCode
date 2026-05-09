@@ -19,10 +19,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use crate::tui::event::{QuestionAnswer, QuestionOption};
 use crossterm::event::{KeyCode, KeyEventKind};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, List, ListItem, Paragraph, Borders, Wrap};
-use crate::tui::event::{QuestionOption, QuestionAnswer};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 
 #[derive(Debug, Clone)]
 pub enum QuestionDialogAction {
@@ -63,7 +63,9 @@ impl QuestionDialog {
         match code {
             KeyCode::Enter => {
                 if self.is_custom_selected() {
-                    Some(QuestionDialogAction::Submit(QuestionAnswer::Custom(self.custom_input.clone())))
+                    Some(QuestionDialogAction::Submit(QuestionAnswer::Custom(
+                        self.custom_input.clone(),
+                    )))
                 } else if let Some(option) = self.options.get(self.selected_index) {
                     Some(QuestionDialogAction::Submit(QuestionAnswer::Option {
                         id: option.id.clone(),
@@ -132,7 +134,7 @@ impl QuestionDialog {
             .title(" Question ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Blue));
-        
+
         let inner = block.inner(area);
         f.render_widget(block, area);
 
@@ -153,25 +155,30 @@ impl QuestionDialog {
 
         // 选项列表
         let options_area = chunks[1];
-        let list_items: Vec<ListItem> = self.options.iter().enumerate().map(|(i, option)| {
-            let is_recommended = self.recommended.as_ref() == Some(&option.id);
-            let label = if is_recommended {
-                format!("{} (推荐)", option.label)
-            } else {
-                option.label.clone()
-            };
-            let content = if let Some(desc) = &option.description {
-                format!("{}\n  {}", label, desc)
-            } else {
-                label
-            };
-            let style = if i == self.selected_index {
-                Style::default().bg(Color::Blue).fg(Color::White)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            ListItem::new(content).style(style)
-        }).collect();
+        let list_items: Vec<ListItem> = self
+            .options
+            .iter()
+            .enumerate()
+            .map(|(i, option)| {
+                let is_recommended = self.recommended.as_ref() == Some(&option.id);
+                let label = if is_recommended {
+                    format!("{} (推荐)", option.label)
+                } else {
+                    option.label.clone()
+                };
+                let content = if let Some(desc) = &option.description {
+                    format!("{}\n  {}", label, desc)
+                } else {
+                    label
+                };
+                let style = if i == self.selected_index {
+                    Style::default().bg(Color::Blue).fg(Color::White)
+                } else {
+                    Style::default().fg(Color::Gray)
+                };
+                ListItem::new(content).style(style)
+            })
+            .collect();
 
         let mut items = list_items;
         if self.allow_custom {
@@ -183,8 +190,7 @@ impl QuestionDialog {
             items.push(ListItem::new("自定义答案").style(style));
         }
 
-        let list = List::new(items)
-            .highlight_symbol("> ");
+        let list = List::new(items).highlight_symbol("> ");
         f.render_widget(list, options_area);
 
         // 自定义输入框（如果选中自定义）

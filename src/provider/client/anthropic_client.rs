@@ -172,7 +172,11 @@ fn convert_part_to_anthropic(part: &Part) -> serde_json::Value {
     match part {
         Part::Text { text } => json!({"type": "text", "text": text}),
         Part::Image { source } => convert_image_source_to_anthropic(source),
-        Part::ToolUse { id, name, arguments } => json!({
+        Part::ToolUse {
+            id,
+            name,
+            arguments,
+        } => json!({
             "type": "tool_use",
             "id": id,
             "name": name,
@@ -232,7 +236,9 @@ fn handle_content_block_start(
     json: &serde_json::Value,
     index_to_tool: &mut std::collections::HashMap<usize, (String, String, String)>,
 ) {
-    let Some(block) = json.get("content_block") else { return };
+    let Some(block) = json.get("content_block") else {
+        return;
+    };
     let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
     if block_type != "tool_use" {
         return;
@@ -258,7 +264,9 @@ fn handle_content_block_start(
 }
 
 fn handle_text_delta(delta: &serde_json::Value, on_chunk: &mut dyn FnMut(Chunk)) {
-    let Some(text) = delta.get("text").and_then(|v| v.as_str()) else { return };
+    let Some(text) = delta.get("text").and_then(|v| v.as_str()) else {
+        return;
+    };
     log_trace!(
         "Anthropic SSE text_delta | len={} | preview={}",
         text.len(),
@@ -270,7 +278,9 @@ fn handle_text_delta(delta: &serde_json::Value, on_chunk: &mut dyn FnMut(Chunk))
 }
 
 fn handle_thinking_delta(delta: &serde_json::Value, on_chunk: &mut dyn FnMut(Chunk)) {
-    let Some(text) = delta.get("thinking").and_then(|v| v.as_str()) else { return };
+    let Some(text) = delta.get("thinking").and_then(|v| v.as_str()) else {
+        return;
+    };
     log_trace!(
         "Anthropic SSE thinking_delta | len={} | preview={}",
         text.len(),
@@ -287,8 +297,12 @@ fn handle_input_json_delta(
     index_to_tool: &mut std::collections::HashMap<usize, (String, String, String)>,
 ) {
     let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let Some((_, _, args)) = index_to_tool.get_mut(&index) else { return };
-    let Some(partial) = delta.get("partial_json").and_then(|v| v.as_str()) else { return };
+    let Some((_, _, args)) = index_to_tool.get_mut(&index) else {
+        return;
+    };
+    let Some(partial) = delta.get("partial_json").and_then(|v| v.as_str()) else {
+        return;
+    };
     log_trace!(
         "Anthropic SSE input_json_delta | index={} | partial={}",
         index,
@@ -302,7 +316,9 @@ fn handle_content_block_delta(
     index_to_tool: &mut std::collections::HashMap<usize, (String, String, String)>,
     on_chunk: &mut dyn FnMut(Chunk),
 ) {
-    let Some(delta) = json.get("delta") else { return };
+    let Some(delta) = json.get("delta") else {
+        return;
+    };
     let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
     match delta_type {
         "text_delta" => handle_text_delta(delta, on_chunk),
@@ -318,7 +334,9 @@ fn handle_content_block_stop(
     on_chunk: &mut dyn FnMut(Chunk),
 ) {
     let index = json.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let Some((id, name, args)) = index_to_tool.remove(&index) else { return };
+    let Some((id, name, args)) = index_to_tool.remove(&index) else {
+        return;
+    };
     let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
     log_debug!(
         "Anthropic assembled tool_call | id={} | name={} | args={}",

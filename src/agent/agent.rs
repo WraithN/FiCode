@@ -133,13 +133,21 @@ fn process_chunk(
 async fn collect_mcp_schema_texts(content_blocks: &[Part]) -> Vec<String> {
     let mut schema_texts = Vec::new();
     for part in content_blocks {
-        let Part::ToolUse { name, .. } = part else { continue };
+        let Part::ToolUse { name, .. } = part else {
+            continue;
+        };
         if !name.starts_with("mcp:") {
             continue;
         }
-        let Some(mcp) = crate::tools::get_mcp_manager() else { continue };
-        let Some(schema) = mcp.tool_schema(name).await else { continue };
-        let Some(input_schema) = schema.input_schema else { continue };
+        let Some(mcp) = crate::tools::get_mcp_manager() else {
+            continue;
+        };
+        let Some(schema) = mcp.tool_schema(name).await else {
+            continue;
+        };
+        let Some(input_schema) = schema.input_schema else {
+            continue;
+        };
         schema_texts.push(format!(
             "工具 `{}` 的完整参数格式：\n```json\n{}\n```",
             name,

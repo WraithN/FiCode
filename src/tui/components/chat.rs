@@ -47,18 +47,18 @@ pub struct Message {
 /// 消息发送者角色。
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageRole {
-    User,       // 用户
-    Assistant,  // AI 助手
-    System,     // 系统提示
-    Error,      // 错误信息
+    User,      // 用户
+    Assistant, // AI 助手
+    System,    // 系统提示
+    Error,     // 错误信息
 }
 
 /// 聊天组件，负责显示对话历史、处理 SSE 流式消息、渲染生成动画。
 pub struct Chat {
-    messages: Vec<Message>,      // 消息列表
-    scroll_offset: usize,        // 垂直滚动偏移（以行为单位）
-    is_generating: bool,         // 是否正在生成回复
-    spinner_frame: usize,        // 当前 spinner 动画帧索引
+    messages: Vec<Message>, // 消息列表
+    scroll_offset: usize,   // 垂直滚动偏移（以行为单位）
+    is_generating: bool,    // 是否正在生成回复
+    spinner_frame: usize,   // 当前 spinner 动画帧索引
 }
 
 /// 终端 spinner 动画帧（Braille 点阵字符），每 tick 轮播一帧。
@@ -213,10 +213,7 @@ impl Component for Chat {
                 };
                 lines.push(Line::from(vec![
                     Span::styled(fold_icon, fold_style.add_modifier(Modifier::BOLD)),
-                    Span::styled(
-                        format!(" 详细过程 ({})", count),
-                        fold_style,
-                    ),
+                    Span::styled(format!(" 详细过程 ({})", count), fold_style),
                 ]));
 
                 if msg.details_expanded {
@@ -225,7 +222,10 @@ impl Component for Chat {
                             DetailBlock::Reasoning { thinking } => {
                                 lines.push(Line::from(vec![
                                     Span::styled("  ❖ ", Style::default().fg(theme.brand)),
-                                    Span::styled("Thinking", Style::default().fg(theme.text_secondary)),
+                                    Span::styled(
+                                        "Thinking",
+                                        Style::default().fg(theme.text_secondary),
+                                    ),
                                 ]));
                                 for line in thinking.lines() {
                                     lines.push(Line::from(Span::styled(
@@ -234,10 +234,15 @@ impl Component for Chat {
                                     )));
                                 }
                             }
-                            DetailBlock::ToolUse { name, arguments, .. } => {
+                            DetailBlock::ToolUse {
+                                name, arguments, ..
+                            } => {
                                 lines.push(Line::from(vec![
                                     Span::styled("  🔧 ", Style::default().fg(theme.warning)),
-                                    Span::styled(format!("{}", name), Style::default().fg(theme.text_secondary)),
+                                    Span::styled(
+                                        format!("{}", name),
+                                        Style::default().fg(theme.text_secondary),
+                                    ),
                                 ]));
                                 for line in arguments.lines() {
                                     lines.push(Line::from(Span::styled(
@@ -257,8 +262,14 @@ impl Component for Chat {
                                     ("📤", theme.success)
                                 };
                                 lines.push(Line::from(vec![
-                                    Span::styled(format!("  {} ", icon), Style::default().fg(color)),
-                                    Span::styled("Result", Style::default().fg(theme.text_secondary)),
+                                    Span::styled(
+                                        format!("  {} ", icon),
+                                        Style::default().fg(color),
+                                    ),
+                                    Span::styled(
+                                        "Result",
+                                        Style::default().fg(theme.text_secondary),
+                                    ),
                                 ]));
                                 for line in content.lines() {
                                     lines.push(Line::from(Span::styled(
@@ -307,8 +318,7 @@ impl Component for Chat {
             (KeyModifiers::CONTROL, KeyCode::Up) | (KeyModifiers::NONE, KeyCode::PageUp) => {
                 self.handle_page_up()
             }
-            (KeyModifiers::CONTROL, KeyCode::Down)
-            | (KeyModifiers::NONE, KeyCode::PageDown) => {
+            (KeyModifiers::CONTROL, KeyCode::Down) | (KeyModifiers::NONE, KeyCode::PageDown) => {
                 self.scroll_offset += 1;
                 Some(AppEvent::ScrollDown)
             }

@@ -149,8 +149,12 @@ impl SessionManager {
             if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
                 continue;
             }
-            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-            let Ok(session) = self.load_session(id) else { continue };
+            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Ok(session) = self.load_session(id) else {
+                continue;
+            };
             metas.push(SessionMeta {
                 id: session.id,
                 project_path: session.project_path,
@@ -215,13 +219,21 @@ impl SessionManager {
                     current_message = Some(MessageBuilder::new(id, session_id, role, created_at));
                 }
                 "part" => {
-                    let Some(builder) = current_message.as_mut() else { continue };
-                    let Some(part_value) = record.fields.get("part").cloned() else { continue };
-                    let Ok(part) = serde_json::from_value::<Part>(part_value) else { continue };
+                    let Some(builder) = current_message.as_mut() else {
+                        continue;
+                    };
+                    let Some(part_value) = record.fields.get("part").cloned() else {
+                        continue;
+                    };
+                    let Ok(part) = serde_json::from_value::<Part>(part_value) else {
+                        continue;
+                    };
                     builder.add_part(part);
                 }
                 "message_end" => {
-                    let Some(builder) = current_message.take() else { continue };
+                    let Some(builder) = current_message.take() else {
+                        continue;
+                    };
                     let token_count = record.fields.get("token_count").and_then(|v| v.as_u64());
                     let cost = record.fields.get("cost").and_then(|v| v.as_f64());
                     let msg = builder.finalize(token_count, cost);

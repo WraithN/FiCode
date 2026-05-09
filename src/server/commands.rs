@@ -22,14 +22,13 @@
 use std::sync::{Arc, RwLock};
 
 use anyhow::anyhow;
-use axum::{
-    extract::State,
-    Json,
-};
+use axum::{extract::State, Json};
 use serde::Deserialize;
 
 use crate::agent::LoopState;
-use crate::commands::registry::{CommandContext, CommandHandler, CommandMeta, CommandOutput, CommandRegistry};
+use crate::commands::registry::{
+    CommandContext, CommandHandler, CommandMeta, CommandOutput, CommandRegistry,
+};
 use crate::commands::slash::{InitCommandHandler, ModelCommandHandler};
 
 use super::models::ApiResponse;
@@ -110,11 +109,20 @@ pub fn build_command_registry(
             _ctx: &CommandContext,
         ) -> anyhow::Result<CommandOutput> {
             if let Some(theme_name) = args.filter(|s| !s.is_empty()) {
-                let mut current = self.current_theme.write().map_err(|_| anyhow!("主题锁中毒"))?;
+                let mut current = self
+                    .current_theme
+                    .write()
+                    .map_err(|_| anyhow!("主题锁中毒"))?;
                 *current = theme_name.clone();
-                Ok(CommandOutput::text(format!("✅ 已切换主题: {}", theme_name)))
+                Ok(CommandOutput::text(format!(
+                    "✅ 已切换主题: {}",
+                    theme_name
+                )))
             } else {
-                let current = self.current_theme.read().map_err(|_| anyhow!("主题锁中毒"))?;
+                let current = self
+                    .current_theme
+                    .read()
+                    .map_err(|_| anyhow!("主题锁中毒"))?;
                 Ok(CommandOutput::text(format!("当前主题: {}", *current)))
             }
         }

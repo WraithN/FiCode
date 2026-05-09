@@ -28,8 +28,12 @@ use tokio_stream::wrappers::ReceiverStream;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DetailBlock {
-    Text { text: String },
-    Reasoning { thinking: String },
+    Text {
+        text: String,
+    },
+    Reasoning {
+        thinking: String,
+    },
     ToolUse {
         id: String,
         name: String,

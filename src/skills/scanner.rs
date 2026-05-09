@@ -113,7 +113,8 @@ pub fn scan_source_dir(
         Err(e) => {
             log_info!(
                 "Warning: failed to read source directory {:?}: {}",
-                source_dir, e
+                source_dir,
+                e
             );
             return;
         }
@@ -144,7 +145,8 @@ pub fn scan_source_dir(
                     if let Err(e) = fs::remove_file(&symlink_path) {
                         log_info!(
                             "Warning: failed to remove existing symlink {:?}: {}",
-                            symlink_path, e
+                            symlink_path,
+                            e
                         );
                         continue;
                     }
@@ -153,7 +155,9 @@ pub fn scan_source_dir(
                 if let Err(e) = create_symlink(&path, &symlink_path) {
                     log_info!(
                         "Warning: failed to create symlink {:?} -> {:?}: {}",
-                        symlink_path, path, e
+                        symlink_path,
+                        path,
+                        e
                     );
                     continue;
                 }

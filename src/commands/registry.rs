@@ -142,7 +142,11 @@ mod tests {
 
     #[async_trait]
     impl CommandHandler for TestHandler {
-        async fn execute(&self, args: Option<String>, _ctx: &CommandContext) -> Result<CommandOutput> {
+        async fn execute(
+            &self,
+            args: Option<String>,
+            _ctx: &CommandContext,
+        ) -> Result<CommandOutput> {
             Ok(CommandOutput::text(format!("test: {:?}", args)))
         }
     }

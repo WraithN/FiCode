@@ -30,9 +30,9 @@ pub mod header;
 pub mod input;
 pub mod left_drawer;
 pub mod log_window;
+pub mod question_dialog;
 pub mod right_drawer;
 pub mod status_bar;
-pub mod question_dialog;
 
 pub use log_window::LogWindow;
 

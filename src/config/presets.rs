@@ -434,7 +434,7 @@ mod tests {
                             base_url: "https://custom.com".to_string(),
                             timeout: 300000,
                             chunk_timeout: 10000,
-                headers: None,
+                            headers: None,
                         },
                         models: HashMap::new(),
                     },

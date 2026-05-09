@@ -40,19 +40,13 @@ pub async fn run_tui() -> anyhow::Result<()> {
     terminal.clear()?;
 
     // 启用鼠标事件捕获（滚轮 + 点击）
-    let _ = crossterm::execute!(
-        std::io::stdout(),
-        crossterm::event::EnableMouseCapture
-    );
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
 
     let mut app = TuiApp::new();
     let result = app.run(&mut terminal).await;
 
     // 退出前禁用鼠标捕获
-    let _ = crossterm::execute!(
-        std::io::stdout(),
-        crossterm::event::DisableMouseCapture
-    );
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
     ratatui::restore();
     result
 }

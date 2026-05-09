@@ -53,7 +53,10 @@ impl PromptBuilder {
         let mut parts: Vec<String> = Vec::new();
 
         // 块 1-4：系统级内容
-        parts.push(format!("# System Prompt for FiCode\n\n{}", self.build_identity()));
+        parts.push(format!(
+            "# System Prompt for FiCode\n\n{}",
+            self.build_identity()
+        ));
         parts.push(self.build_core_rules());
         parts.push(self.build_tools(tools_schema));
         if let Some(skills) = self.build_skills(registry) {
@@ -197,9 +200,7 @@ impl PromptBuilder {
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
                 let path = entry.path();
-                path.extension()
-                    .map(|ext| ext == "md")
-                    .unwrap_or(false)
+                path.extension().map(|ext| ext == "md").unwrap_or(false)
             })
             .collect();
 
@@ -260,9 +261,9 @@ mod tests {
 
         assert!(prompt.contains("# System Prompt for FiCode"));
         assert!(prompt.contains("## 1. Identity"));
-        assert!(
-            prompt.contains("You are FiCode, a swift, efficient, and easy-to-use intelligent coding agent")
-        );
+        assert!(prompt.contains(
+            "You are FiCode, a swift, efficient, and easy-to-use intelligent coding agent"
+        ));
         assert!(prompt.contains("## 2. Core Rules"));
         assert!(prompt.contains("CANNOT be overridden"));
         assert!(prompt.contains("## 3. Available Tools"));
@@ -312,7 +313,11 @@ mod tests {
         let temp_dir = std::env::temp_dir().join("fi-code-test-agents-md-v2");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
-        std::fs::write(temp_dir.join("AGENTS.md"), "# Test Project\n\nThis is a test.").unwrap();
+        std::fs::write(
+            temp_dir.join("AGENTS.md"),
+            "# Test Project\n\nThis is a test.",
+        )
+        .unwrap();
 
         set_workspace(temp_dir.clone());
 
@@ -380,7 +385,11 @@ mod tests {
         std::fs::create_dir_all(temp_dir.join(".rules")).unwrap();
         std::fs::write(temp_dir.join(".rules/valid.md"), "This is valid.").unwrap();
         std::fs::write(temp_dir.join(".rules/empty.md"), "").unwrap();
-        std::fs::write(temp_dir.join(".rules/ignore.txt"), "This should be ignored.").unwrap();
+        std::fs::write(
+            temp_dir.join(".rules/ignore.txt"),
+            "This should be ignored.",
+        )
+        .unwrap();
 
         set_workspace(temp_dir.clone());
 

@@ -28,6 +28,7 @@ use clap::Parser;
 use colored::Colorize;
 
 use crate::agent::{agent_loop, LoopState};
+use crate::commands::slash::{SlashCommand, SlashCommandHandler};
 use crate::config::Config;
 use crate::mcp::manager::McpManager;
 use crate::provider::Provider;
@@ -35,7 +36,6 @@ use crate::session::message::{Message, Part, Role};
 use crate::session::{SessionManager, SessionStatus};
 use crate::tools::set_mcp_manager;
 use crate::utils::cli::{Args, Commands};
-use crate::commands::slash::{SlashCommand, SlashCommandHandler};
 use crate::utils::workspace::set_workspace;
 use crate::{log_debug, log_info};
 
@@ -172,10 +172,7 @@ pub async fn run() -> Result<()> {
             for (model_key, model_cfg) in &provider_cfg.models {
                 println!("    {} — {}", model_key, model_cfg.name);
                 if let Some(limit) = &model_cfg.limit {
-                    println!(
-                        "      context: {}, output: {}",
-                        limit.context, limit.output
-                    );
+                    println!("      context: {}, output: {}", limit.context, limit.output);
                 }
             }
         }

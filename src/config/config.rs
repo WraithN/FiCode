@@ -138,8 +138,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use crate::log_info;
 use super::models::Config;
+use crate::log_info;
 
 impl Config {
     /// 返回配置目录路径：~/.config/fi-code/
@@ -251,4 +251,3 @@ pub fn spawn_watcher(config: Arc<RwLock<Config>>) -> Result<impl notify::Watcher
     watcher.watch(&config_dir, notify::RecursiveMode::NonRecursive)?;
     Ok(watcher)
 }
-

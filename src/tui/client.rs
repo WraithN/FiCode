@@ -334,7 +334,6 @@ impl TuiClient {
         }
     }
 
-
     /// 获取所有可用模型列表（按 Provider 分组）。
     pub async fn list_models(&self) -> Result<serde_json::Value> {
         let resp = self
