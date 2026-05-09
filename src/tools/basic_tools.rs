@@ -22,6 +22,8 @@
 use crate::log_trace;
 use crate::tools::windows_compat::{get_compat_mode, get_bash_path, WindowsCompatMode};
 use crate::utils::workspace::workspace_dir;
+use glob::glob_with;
+use glob::MatchOptions;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -304,6 +306,72 @@ impl BasicTool {
         }
         Ok(())
     }
+
+    pub fn run_glob(pattern: &str, dir: Option<&str>) -> Result<String, String> {
+        let base = workspace_dir();
+        let search_dir = match dir {
+            Some(d) => {
+                let safe_dir = Self::safe_path(d)?;
+                safe_dir
+            }
+            None => base.clone(),
+        };
+        
+        log_trace!("run_glob | pattern={} | dir={:?}", pattern, search_dir);
+        
+        let full_pattern = search_dir.join(pattern);
+        let full_pattern_str = full_pattern.to_str().ok_or("Invalid pattern path")?;
+        
+        let options = MatchOptions {
+            case_sensitive: true,
+            require_literal_separator: false,
+            require_literal_leading_dot: false,
+        };
+        
+        let mut files = Vec::new();
+        
+        match glob_with(full_pattern_str, options) {
+            Ok(paths) => {
+                for entry in paths {
+                    match entry {
+                        Ok(path) => {
+                            if !path.is_file() {
+                                continue;
+                            }
+                            let canonical = path.canonicalize().map_err(|e| format!("Error: {}", e))?;
+                            if !canonical.starts_with(&base) {
+                                continue;
+                            }
+                            let relative = canonical.strip_prefix(&base)
+                                .map_err(|e| format!("Error: {}", e))?
+                                .display()
+                                .to_string();
+                            files.push(relative);
+                            
+                            if files.len() >= 1000 {
+                                files.push("... (too many matches)".to_string());
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            log_trace!("glob error: {}", e);
+                            continue;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(format!("Invalid pattern: {}", e));
+            }
+        }
+        
+        if files.is_empty() {
+            Ok("No files found matching pattern".to_string())
+        } else {
+            let result = files.join("\n");
+            Ok(result.chars().take(50000).collect())
+        }
+    }
 }
 
 // =============================================================================
@@ -377,5 +445,22 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "No matches found");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_run_glob() {
+        ensure_workspace();
+        let result = BasicTool::run_glob("**/Cargo.toml", None);
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.contains("Cargo.toml"));
+    }
+
+    #[test]
+    fn test_run_glob_no_matches() {
+        ensure_workspace();
+        let result = BasicTool::run_glob("**/nonexistent_file_1234.xyz", None);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "No files found matching pattern");
     }
 }
