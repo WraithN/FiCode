@@ -218,6 +218,9 @@ impl Input {
 }
 
 impl Component for Input {
+    fn update(&mut self, _event: &AppEvent) {
+        // 什么都不做，避免被 Header 组件的 InputChanged 事件清空
+    }
     /// 渲染输入框：包含可选的会话 ID 标签、带边框的输入区域、placeholder、光标位置，
     /// 以及斜杠命令下拉菜单。
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_focused: bool) {
