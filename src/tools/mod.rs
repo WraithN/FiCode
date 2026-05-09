@@ -38,6 +38,7 @@ pub mod basic_tools;
 pub mod task;
 pub mod tools_registry;
 pub mod tools_type;
+pub mod windows_compat;
 
 // =============================================================================
 // 模块内部导入
