@@ -127,10 +127,19 @@ impl AgentRunner {
         let mut content_blocks = Vec::new();
         let mut finish_reason = None;
 
+        // 消息历史截断：超过 30 条时只保留最近 30 条
+        const MAX_CONTEXT_MESSAGES: usize = 30;
+        let messages_for_llm: &[Message] = if messages.len() > MAX_CONTEXT_MESSAGES {
+            let start = messages.len().saturating_sub(MAX_CONTEXT_MESSAGES);
+            &messages[start..]
+        } else {
+            &messages[..]
+        };
+
         self.client
             .stream_message(
                 &self.system_prompt,
-                messages,
+                messages_for_llm,
                 &self.tools_schema,
                 &mut |chunk| {
                     match &chunk.content {

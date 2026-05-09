@@ -218,8 +218,22 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         serde_json::to_string_pretty(&schema).unwrap_or_default()
     );
 
+    // 消息历史截断：超过 30 条时只保留最近 30 条，防止长对话导致 Prompt 无限膨胀
+    const MAX_CONTEXT_MESSAGES: usize = 30;
+    let messages_for_llm: &[Message] = if state.messages.len() > MAX_CONTEXT_MESSAGES {
+        let start = state.messages.len().saturating_sub(MAX_CONTEXT_MESSAGES);
+        &state.messages[start..]
+    } else {
+        &state.messages[..]
+    };
+    log_debug!(
+        "context truncated | total={} | sent={}",
+        state.messages.len(),
+        messages_for_llm.len()
+    );
+
     client
-        .stream_message(&system_prompt, &state.messages, &schema, &mut |chunk| {
+        .stream_message(&system_prompt, messages_for_llm, &schema, &mut |chunk| {
             // 实时转发文本内容，实现真流式
             match &chunk.content {
                 ChunkContent::Text(text) | ChunkContent::Think(text) => {
