@@ -581,6 +581,7 @@ dependencies = [
  "html2md",
  "jsonc-parser",
  "notify",
+ "once_cell",
  "rand 0.8.5",
  "ratatui",
  "ratatui-braille-bar",
