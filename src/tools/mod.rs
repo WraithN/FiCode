@@ -25,8 +25,10 @@ use crate::log_trace;
 use crate::mcp::manager::McpManager;
 use crate::provider::Provider;
 use crate::session::message::Part;
+use crate::tui::event::{AppEvent, QuestionAnswer};
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
+use tokio::sync::mpsc;
 
 // =============================================================================
 // Rust 基础概念：模块声明
@@ -48,6 +50,20 @@ pub mod windows_compat;
 use basic_tools::BasicTool;
 use tools_registry::ToolsRegistry;
 use tools_type::{ToolHandler, ToolParameter, ToolParams};
+
+// 全局事件发送器（TuiApp 初始化时设置）
+static EVENT_TX: RwLock<Option<mpsc::Sender<AppEvent>>> = RwLock::new(None);
+
+// 问题答案通道
+type QuestionResponseSender = tokio::sync::oneshot::Sender<QuestionAnswer>;
+static QUESTION_CHANNEL: LazyLock<Mutex<Option<QuestionResponseSender>>> = 
+    LazyLock::new(|| Mutex::new(None));
+
+// 设置全局事件发送器
+pub fn set_event_tx(tx: mpsc::Sender<AppEvent>) {
+    let mut event_tx = EVENT_TX.write().unwrap();
+    *event_tx = Some(tx);
+}
 
 // =============================================================================
 // 辅助函数：从 JSON 对象中提取字符串参数
