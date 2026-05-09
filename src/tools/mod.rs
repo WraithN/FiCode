@@ -601,6 +601,64 @@ pub async fn tool_call(
     name: &str,
     input: &HashMap<String, serde_json::Value>,
 ) -> Result<String, String> {
+    if name == "ask_for_question" {
+        let question = input
+            .get("question")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing question parameter")?
+            .to_string();
+
+        let options_json = input
+            .get("options")
+            .and_then(|v| v.as_array())
+            .ok_or("Missing or invalid options parameter")?;
+
+        let options: Vec<crate::tui::event::QuestionOption> = options_json
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+
+        if options.is_empty() || options.len() > 3 {
+            return Err("Options count must be between 1 and 3".to_string());
+        }
+
+        let recommended = input
+            .get("recommended")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let allow_custom = input
+            .get("allow_custom")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        {
+            let mut channel = QUESTION_CHANNEL.lock().unwrap();
+            *channel = Some(tx);
+        }
+
+        let event_tx_opt = {
+            EVENT_TX.read().unwrap().clone()
+        };
+        if let Some(event_tx) = event_tx_opt {
+            let _ = event_tx.send(AppEvent::ShowQuestionDialog {
+                question,
+                options,
+                recommended,
+                allow_custom,
+            }).await;
+        }
+
+        match rx.await {
+            Ok(answer) => {
+                let result = serde_json::to_string(&answer)
+                    .map_err(|e| format!("Serialize error: {}", e))?;
+                return Ok(result);
+            }
+            Err(_) => return Err("No answer received".to_string()),
+        }
+    }
     if name == "handle_task_plan" {
         let provider = get_task_provider().ok_or("Task provider not initialized")?;
         return task::tool::execute_handle_task_plan(provider, input).await;
