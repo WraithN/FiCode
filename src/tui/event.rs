@@ -21,6 +21,20 @@
 
 use crate::server::transport::sse::SseEvent;
 use crate::tui::components::left_drawer::FileNode;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuestionOption {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum QuestionAnswer {
+    Option { id: String, label: String },
+    Custom(String),
+}
 
 /// Provider 分组信息（TUI 模型菜单用）。
 #[derive(Debug, Clone)]
@@ -113,6 +127,15 @@ pub enum AppEvent {
     AppendLog(LogLine),
     LogDisconnected,
     SetFileTree(Vec<FileNode>),
+    ShowQuestionDialog {
+        question: String,
+        options: Vec<QuestionOption>,
+        recommended: Option<String>,
+        allow_custom: bool,
+    },
+    QuestionAnswered {
+        answer: QuestionAnswer,
+    },
     Quit,
 }
 
