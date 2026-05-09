@@ -92,24 +92,14 @@ pub async fn handle_chat_endpoint(
     axum::response::Sse::new(stream).into_response()
 }
 
-async fn send_last_assistant_text(messages: &[Message], sse_sender: &SseSender) {
+/// 发送 Assistant 消息的结构化详情（思考过程、工具调用等）。
+/// 文本内容已通过实时流式发送，此处不再重复发送文本。
+async fn send_last_assistant_details(messages: &[Message], sse_sender: &SseSender) {
     let Some(last_msg) = messages.last() else {
         return;
     };
     if last_msg.role != Role::Assistant {
         return;
-    }
-    let text = last_msg
-        .parts
-        .iter()
-        .filter_map(|p| match p {
-            Part::Text { text } => Some(text.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    if !text.is_empty() {
-        let _ = sse_sender.send(SseEvent::Message { content: text }).await;
     }
 
     // 发送结构化详情（思考过程、工具调用等）
@@ -198,16 +188,22 @@ async fn run_agent_chat(
         }
     };
 
-    // 运行 agent_loop
-    if let Err(e) = agent_loop(client.as_ref(), &mut loop_state).await {
+    // 运行 agent_loop，传入实时文本回调实现真流式
+    let sse_sender_for_stream = sse_sender.clone();
+    let mut on_text: Option<Box<dyn FnMut(&str) + Send>> = Some(Box::new(move |text: &str| {
+        let _ = sse_sender_for_stream.try_send(SseEvent::Message {
+            content: text.to_string(),
+        });
+    }));
+    if let Err(e) = agent_loop(client.as_ref(), &mut loop_state, &mut on_text).await {
         let _ = sse_sender
             .send(SseEvent::Error {
                 message: format!("Agent loop error: {}", e),
             })
             .await;
     } else {
-        // 发送 assistant 的最后回复
-        send_last_assistant_text(&loop_state.messages, &sse_sender).await;
+        // 发送结构化详情（文本已通过实时流式发送，此处不再重复）
+        send_last_assistant_details(&loop_state.messages, &sse_sender).await;
     }
 
     // 保存会话状态

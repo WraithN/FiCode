@@ -80,6 +80,17 @@ impl AgentRunner {
 
     /// 运行 Agent 循环，直到对话自然结束或达到最大轮数。
     pub async fn run(&self, initial_messages: Vec<Message>) -> Result<AgentRunResult> {
+        self.run_with_sink(initial_messages, &mut None).await
+    }
+
+    /// 运行 Agent 循环，支持实时文本回调。
+    ///
+    /// `on_text` 收到每个 Text/Think chunk 时立即调用，用于真流式渲染。
+    pub async fn run_with_sink(
+        &self,
+        initial_messages: Vec<Message>,
+        on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
+    ) -> Result<AgentRunResult> {
         let mut messages = initial_messages;
         let mut turn_count = 0usize;
         let mut last_finish_reason = None;
@@ -88,7 +99,8 @@ impl AgentRunner {
             turn_count += 1;
             log_debug!("AgentRunner::run | turn={}/{} ", turn_count, self.max_turns);
 
-            let (should_continue, finish_reason) = self.run_one_turn(&mut messages).await?;
+            let (should_continue, finish_reason) =
+                self.run_one_turn(&mut messages, on_text).await?;
             last_finish_reason = finish_reason;
             if !should_continue {
                 break;
@@ -110,6 +122,7 @@ impl AgentRunner {
     async fn run_one_turn(
         &self,
         messages: &mut Vec<Message>,
+        on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
     ) -> Result<(bool, Option<FinishReason>)> {
         let mut content_blocks = Vec::new();
         let mut finish_reason = None;
@@ -119,7 +132,17 @@ impl AgentRunner {
                 &self.system_prompt,
                 messages,
                 &self.tools_schema,
-                &mut |chunk| Self::process_chunk(chunk, &mut content_blocks, &mut finish_reason),
+                &mut |chunk| {
+                    match &chunk.content {
+                        ChunkContent::Text(text) | ChunkContent::Think(text) => {
+                            if let Some(ref mut cb) = on_text {
+                                cb(text);
+                            }
+                        }
+                        _ => {}
+                    }
+                    Self::process_chunk(chunk, &mut content_blocks, &mut finish_reason)
+                },
             )
             .await?;
 

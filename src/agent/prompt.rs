@@ -114,7 +114,15 @@ impl PromptBuilder {
             10. Always respond in the same language as the user's input.\n\
             11. When the user asks you to write code, save it to a file using `write` first. Do not run the code before writing it.\n\
             12. Do not output tool calls as plain text. Use the proper tool_call mechanism provided by the API.\n\
-            13. If a task is complex and requires multiple steps, use `handle_task_plan` to automatically split and execute subtasks. Do not use `create_task_plan` directly.",
+            13. If a task is complex and requires multiple steps, use `handle_task_plan` to automatically split and execute subtasks. Do not use `create_task_plan` directly.
+            14. Before taking any action, you MUST show your reasoning process using `<thinking>` tags.
+                Format:
+                <thinking>
+                1. What does the user want? (Analyze the request)
+                2. What steps are needed? (Break down the task)
+                3. Which tools should be used? (Decision reasoning)
+                </thinking>
+                Then proceed with the actual action or tool call.",
         )
     }
 
@@ -123,7 +131,8 @@ impl PromptBuilder {
     // =============================================================================
 
     fn build_tools(&self, schema: &serde_json::Value) -> String {
-        let tools_str = serde_json::to_string_pretty(schema).unwrap_or_default();
+        // 使用紧凑 JSON 减少 prompt token（去掉 pretty print 的空白字符）
+        let tools_str = serde_json::to_string(schema).unwrap_or_default();
         format!(
             "## 3. Available Tools\n\
             The following tools are described in JSON Schema:\n\
@@ -267,7 +276,7 @@ mod tests {
         assert!(prompt.contains("## 2. Core Rules"));
         assert!(prompt.contains("CANNOT be overridden"));
         assert!(prompt.contains("## 3. Available Tools"));
-        assert!(prompt.contains("\"name\": \"bash\""));
+        assert!(prompt.contains("\"name\":\"bash\""));
         assert!(!prompt.contains("## 4. Available Skills")); // registry is empty
         assert!(!prompt.contains("## 5. Project Context")); // no AGENTS.md in test env
         assert!(!prompt.contains("## 6. Project Rules")); // no .rules/ in test env

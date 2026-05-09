@@ -157,7 +157,11 @@ async fn collect_mcp_schema_texts(content_blocks: &[Part]) -> Vec<String> {
     schema_texts
 }
 
-pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopState) -> Result<bool> {
+pub async fn run_one_turn<C: AIClient + ?Sized>(
+    client: &C,
+    state: &mut LoopState,
+    on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
+) -> Result<bool> {
     let mut content_blocks = Vec::new();
     let mut finish_reason = None;
 
@@ -216,6 +220,15 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
 
     client
         .stream_message(&system_prompt, &state.messages, &schema, &mut |chunk| {
+            // 实时转发文本内容，实现真流式
+            match &chunk.content {
+                ChunkContent::Text(text) | ChunkContent::Think(text) => {
+                    if let Some(ref mut cb) = on_text {
+                        cb(text);
+                    }
+                }
+                _ => {}
+            }
             process_chunk(chunk, &mut content_blocks, &mut finish_reason)
         })
         .await?;
@@ -334,7 +347,14 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(client: &C, state: &mut LoopStat
 // =============================================================================
 
 /// Agent 主循环：不断调用 `run_one_turn` 直到对话自然结束。
-pub async fn agent_loop<C: AIClient + ?Sized>(client: &C, state: &mut LoopState) -> Result<()> {
-    while run_one_turn(client, state).await? {}
+///
+/// `on_text` 为可选的实时文本回调，收到每个 Text/Think chunk 时立即调用。
+/// 用于 TUI 真流式渲染：首 token 到达即可显示，无需等待整轮完成。
+pub async fn agent_loop<C: AIClient + ?Sized>(
+    client: &C,
+    state: &mut LoopState,
+    on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
+) -> Result<()> {
+    while run_one_turn(client, state, on_text).await? {}
     Ok(())
 }

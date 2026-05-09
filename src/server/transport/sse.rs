@@ -85,6 +85,11 @@ impl SseSender {
     pub async fn send(&self, event: SseEvent) -> Result<(), String> {
         self.tx.send(event).await.map_err(|e| e.to_string())
     }
+
+    /// 同步尝试发送事件（不阻塞，channel 满时返回错误）。
+    pub fn try_send(&self, event: SseEvent) -> Result<(), String> {
+        self.tx.try_send(event).map_err(|e| e.to_string())
+    }
 }
 
 /// 创建 SSE 流对 (sender, stream)
