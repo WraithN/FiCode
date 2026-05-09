@@ -48,9 +48,14 @@ pub struct AnthropicClient {
 
 impl AnthropicClient {
     /// 构造 Anthropic 客户端。
-    pub(crate) fn new(api_key: String, base_url: String, model_name: String) -> Result<Self> {
+    pub(crate) fn new(
+        client: reqwest::Client,
+        api_key: String,
+        base_url: String,
+        model_name: String,
+    ) -> Result<Self> {
         Ok(Self {
-            client: reqwest::Client::new(),
+            client,
             api_key,
             base_url,
             model_name,

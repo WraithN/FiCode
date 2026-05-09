@@ -52,13 +52,14 @@ pub struct OpenAiClient {
 impl OpenAiClient {
     /// 构造 OpenAI 兼容客户端。
     pub(crate) fn new(
+        client: reqwest::Client,
         api_key: String,
         base_url: String,
         model_name: String,
         headers: Option<HashMap<String, String>>,
     ) -> Result<Self> {
         Ok(Self {
-            client: reqwest::Client::new(),
+            client,
             api_key,
             base_url,
             model_name,

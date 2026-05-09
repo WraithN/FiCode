@@ -45,25 +45,38 @@ struct Model {
 #[derive(Debug, Clone)]
 pub struct Provider {
     model: Option<Model>,
+    http_client: reqwest::Client,
 }
 
 impl Default for Provider {
     fn default() -> Self {
-        Self { model: None }
+        Self {
+            model: None,
+            http_client: reqwest::Client::new(),
+        }
     }
 }
 
 impl Provider {
     pub fn new(config: Arc<RwLock<Config>>) -> Result<Self> {
+        // 复用同一个 reqwest::Client，避免每次请求都重新建立 TCP/TLS 连接
+        let http_client = reqwest::Client::new();
+
         // 1. 优先尝试环境变量
         if let Ok(model) = Self::from_env() {
-            return Ok(Self { model: Some(model) });
+            return Ok(Self {
+                model: Some(model),
+                http_client,
+            });
         }
 
         // 2. 降级到配置文件
         let cfg = config.read().map_err(|_| anyhow!("配置锁中毒"))?;
         let model = Self::from_config(&cfg)?;
-        Ok(Self { model: Some(model) })
+        Ok(Self {
+            model: Some(model),
+            http_client,
+        })
     }
 
     fn from_env() -> Result<Model> {
@@ -316,6 +329,7 @@ impl Provider {
             .ok_or_else(|| anyhow!("Model not set"))?;
         if model.model_type == ModelType::OpenAiCompatible {
             let client = OpenAiClient::new(
+                self.http_client.clone(),
                 model.api_key.clone(),
                 model.base_url.clone(),
                 model.model_name.clone(),
@@ -324,6 +338,7 @@ impl Provider {
             Ok(Box::new(client))
         } else if model.model_type == ModelType::Anthropic {
             let client = AnthropicClient::new(
+                self.http_client.clone(),
                 model.api_key.clone(),
                 model.base_url.clone(),
                 model.model_name.clone(),
