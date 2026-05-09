@@ -20,6 +20,7 @@
 // SOFTWARE.
 
 use crate::server::transport::sse::SseEvent;
+use crate::tui::components::left_drawer::FileNode;
 
 /// Provider 分组信息（TUI 模型菜单用）。
 #[derive(Debug, Clone)]
@@ -111,6 +112,7 @@ pub enum AppEvent {
     SetLogHistory(Vec<LogLine>),
     AppendLog(LogLine),
     LogDisconnected,
+    SetFileTree(Vec<FileNode>),
     Quit,
 }
 

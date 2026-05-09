@@ -723,8 +723,21 @@ impl TuiApp {
                 if self.layout.panel == crate::tui::layout::PanelState::LeftDrawer {
                     self.focus = FocusArea::LeftDrawer;
                     let client = self.client.clone();
+                    let tx = self.event_tx.clone();
                     tokio::spawn(async move {
-                        let _ = client.get_file_tree(".").await;
+                        if let Ok(file_tree) = client.get_file_tree(".").await {
+                            let files: Vec<crate::tui::components::left_drawer::FileNode> = file_tree
+                                .entries
+                                .into_iter()
+                                .map(|e| crate::tui::components::left_drawer::FileNode {
+                                    path: e.path,
+                                    name: e.name,
+                                    is_dir: e.is_dir,
+                                    depth: e.depth,
+                                })
+                                .collect();
+                            let _ = tx.send(AppEvent::SetFileTree(files)).await;
+                        }
                     });
                 }
             }
@@ -931,6 +944,9 @@ impl TuiApp {
             }
             AppEvent::LogDisconnected => {
                 self.log_window.set_disconnected(true);
+            }
+            AppEvent::SetFileTree(ref files) => {
+                self.left_drawer.set_files(files.clone());
             }
             _ => {}
         }
