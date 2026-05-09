@@ -724,31 +724,37 @@ async fn execute_single_tool_call(
 
 pub async fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
     use colored::Colorize;
+    use futures::future::join_all;
 
-    let mut results = Vec::new();
+    let futures: Vec<_> = parts
+        .iter()
+        .filter_map(|part| {
+            let Part::ToolUse {
+                id,
+                name,
+                arguments,
+            } = part
+            else {
+                return None;
+            };
 
-    for part in parts {
-        let Part::ToolUse {
-            id,
-            name,
-            arguments,
-        } = part
-        else {
-            continue;
-        };
+            let id = id.clone();
+            let name = name.clone();
+            let arguments = arguments.clone();
+            Some(async move {
+                log_info!("calling tool: ${}", name);
+                log_debug!("execute_tool_call | name={} | args={}", name, arguments);
+                let (content, is_error) = execute_single_tool_call(&id, &name, &arguments).await;
+                Part::ToolResult {
+                    tool_call_id: id,
+                    content,
+                    is_error,
+                }
+            })
+        })
+        .collect();
 
-        log_info!("calling tool: ${}", name);
-        log_debug!("execute_tool_call | name={} | args={}", name, arguments);
-
-        let (content, is_error) = execute_single_tool_call(id, name, arguments).await;
-
-        results.push(Part::ToolResult {
-            tool_call_id: id.clone(),
-            content,
-            is_error,
-        });
-    }
-    results
+    join_all(futures).await
 }
 
 // =============================================================================
