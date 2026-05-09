@@ -174,6 +174,9 @@ impl TuiApp {
 
         let (term_w, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
 
+        // 设置全局事件发送器，供工具调用时发送事件
+        crate::tools::set_event_tx(event_tx.clone());
+
         Self {
             layout: LayoutManager::new(term_w, term_h),
             theme: themes[0].clone(),
