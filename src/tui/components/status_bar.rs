@@ -104,11 +104,6 @@ impl StatusBar {
         self.model_name = model;
     }
 
-    /// 暂留：兼容旧接口，Task 5 中从 app.rs 移除后删除此方法。
-    pub fn set_panel(&mut self, _panel: crate::tui::layout::PanelState) {
-        // 新设计下状态栏不显示面板状态，此方法为空实现
-    }
-
     /// 更新 Token 计数。
     pub fn set_tokens(&mut self, in_count: usize, out_count: usize) {
         self.token_in = in_count;

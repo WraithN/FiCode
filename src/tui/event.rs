@@ -79,7 +79,6 @@ pub enum AppEvent {
     Tick,
     Resize(u16, u16),
     ToggleLeftDrawer,
-    ToggleRightDrawer,
     CloseDrawers,
     FocusNext,
     FocusPrev,
