@@ -357,6 +357,19 @@ impl ToolHandler for HandleTaskPlanHandler {
 }
 
 // =============================================================================
+// AskForQuestionHandler：向用户询问问题并获取答案
+// =============================================================================
+
+#[derive(Debug)]
+struct AskForQuestionHandler;
+
+impl ToolHandler for AskForQuestionHandler {
+    fn call(&self, _name: &str, params: ToolParams) -> Result<String, String> {
+        Err("AskForQuestion handled in tool_call".to_string())
+    }
+}
+
+// =============================================================================
 // MCP Manager 全局状态
 // =============================================================================
 // `McpManager` 在程序启动后由 `main.rs` 异步初始化并设置到这里。
@@ -480,6 +493,14 @@ static REGISTRY: LazyLock<ToolsRegistry> = LazyLock::new(|| {
             Box::new(HandleTaskPlanHandler),
         )
         .expect("register handle_task_plan tool failed");
+    registry
+        .register(
+            "ask_for_question",
+            "Ask the user a question with predefined options",
+            r#"{"type":"object","properties":{"question":{"type":"string"},"options":{"type":"array","maxItems":3,"items":{"type":"object","properties":{"id":{"type":"string"},"label":{"type":"string"},"description":{"type":"string"}},"required":["id","label"]}},"recommended":{"type":"string"},"allow_custom":{"type":"boolean","default":true}},"required":["question","options"]}"#,
+            Box::new(AskForQuestionHandler),
+        )
+        .expect("register ask_for_question failed");
     registry
 });
 
