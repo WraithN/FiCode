@@ -20,6 +20,7 @@
 // SOFTWARE.
 
 use crate::log_trace;
+use crate::tools::windows_compat::{get_compat_mode, get_bash_path, WindowsCompatMode};
 use crate::utils::workspace::workspace_dir;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -113,34 +114,61 @@ impl BasicTool {
         let (tx, rx) = mpsc::channel();
 
         std::thread::spawn(move || {
-            // 方案 3：沙箱化执行
-            // 1. 清除所有继承的环境变量，阻断 LD_PRELOAD / BASH_ENV / ENV / IFS 等注入通道
-            // 2. 仅注入最小必要环境（PATH + HOME），防止 PATH 劫持
-            let result = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&command)
-                .env_clear()
-                .env("PATH", "/usr/bin:/bin")
-                .env(
-                    "HOME",
-                    std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()),
-                )
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output();
+            let compat_mode = get_compat_mode();
+            
+            let result = match compat_mode {
+                WindowsCompatMode::Native => {
+                    std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(&command)
+                        .env_clear()
+                        .env("PATH", "/usr/bin:/bin")
+                        .env(
+                            "HOME",
+                            std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()),
+                        )
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .output()
+                }
+                WindowsCompatMode::Wsl2 => {
+                    std::process::Command::new("wsl.exe")
+                        .arg("sh")
+                        .arg("-c")
+                        .arg(&command)
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .output()
+                }
+                WindowsCompatMode::GitBash | WindowsCompatMode::Cygwin => {
+                    if let Some(bash_path) = get_bash_path() {
+                        std::process::Command::new(bash_path)
+                            .arg("-c")
+                            .arg(&command)
+                            .stdout(Stdio::piped())
+                            .stderr(Stdio::piped())
+                            .output()
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "Bash executable not found",
+                        ))
+                    }
+                }
+                WindowsCompatMode::None => {
+                    let error_msg = "Error: 未找到兼容的 bash 环境。请安装 WSL2、Git Bash 或 Cygwin。";
+                    return tx.send(Err(std::io::Error::new(std::io::ErrorKind::Other, error_msg))).unwrap();
+                }
+            };
+
             let _ = tx.send(result);
         });
 
         match rx.recv_timeout(Duration::from_secs(120)) {
             Ok(Ok(output)) => {
-                // `String::from_utf8_lossy` 将字节转换为字符串，处理非法 UTF-8 序列
-                // `&output.stdout` 借用 output 的标准输出字段
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
 
-                // `format!` 宏创建格式化字符串
-                // `.trim()` 去除首尾空白，返回 &str
-                // `.to_string()` 将 &str 转换为拥有的 String
                 let combined = format!("{}{}", stdout, stderr).trim().to_string();
                 log_trace!(
                     "run_bash result | len={} | preview={}",
@@ -151,15 +179,10 @@ impl BasicTool {
                 if combined.is_empty() {
                     "(no output)".to_string()
                 } else {
-                    // `.chars()` 创建字符迭代器
-                    // `.take(50000)` 只取前 50000 个字符
-                    // `.collect()` 将迭代器收集为集合（这里是 String）
                     combined.chars().take(50000).collect()
                 }
             }
-            // `Ok(Err(e))`：命令执行失败
             Ok(Err(e)) => format!("Error: {}", e),
-            // `Err(_)`：timeout 超时，`_` 是通配符，忽略具体值
             Err(_) => "Error: Timeout (120s)".to_string(),
         }
     }
