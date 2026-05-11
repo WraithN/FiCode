@@ -200,11 +200,38 @@ impl BasicTool {
     pub fn run_write(path: &str, content: &str) -> Result<String, String> {
         let fp = Self::safe_path(path)?;
         log_trace!("run_write | path={:?} | content_len={}", fp, content.len());
+        
+        // 读取原文件内容（用于 diff）
+        let original_content = std::fs::read_to_string(&fp).ok();
+        let is_new_file = original_content.is_none();
+        
         if let Some(parent) = fp.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("Error: {e}"))?;
         }
         std::fs::write(&fp, content).map_err(|e| format!("Error: {e}"))?;
-        Ok(format!("Wrote {} bytes", content.len()))
+        
+        // 计算 diff
+        let diff_text = original_content.and_then(|orig| {
+            use similar::{TextDiff, ChangeTag};
+            let diff = TextDiff::from_lines(orig.as_str(), content);
+            let mut result = String::new();
+            for change in diff.iter_all_changes() {
+                let sign = match change.tag() {
+                    ChangeTag::Delete => "-",
+                    ChangeTag::Insert => "+",
+                    ChangeTag::Equal => " ",
+                };
+                result.push_str(&format!("{}{}", sign, change.value()));
+            }
+            if result.is_empty() { None } else { Some(result) }
+        });
+        
+        let result_json = serde_json::json!({
+            "content": format!("Wrote {} bytes", content.len()),
+            "diff": diff_text,
+            "is_new_file": is_new_file,
+        });
+        Ok(result_json.to_string())
     }
 
     // =========================================================================
@@ -229,9 +256,28 @@ impl BasicTool {
 
         let new_content = content.replacen(old_text, new_text, 1);
 
-        std::fs::write(&fp, new_content).map_err(|e| format!("Error: {}", e))?;
+        std::fs::write(&fp, &new_content).map_err(|e| format!("Error: {}", e))?;
 
-        Ok(format!("Edited {}", path))
+        // 计算 diff
+        use similar::{TextDiff, ChangeTag};
+        let diff = TextDiff::from_lines(&content, &new_content);
+        let mut diff_text = String::new();
+        for change in diff.iter_all_changes() {
+            let sign = match change.tag() {
+                ChangeTag::Delete => "-",
+                ChangeTag::Insert => "+",
+                ChangeTag::Equal => " ",
+            };
+            diff_text.push_str(&format!("{}{}", sign, change.value()));
+        }
+        let diff_opt = if diff_text.is_empty() { None } else { Some(diff_text) };
+
+        let result_json = serde_json::json!({
+            "content": format!("Edited {}", path),
+            "diff": diff_opt,
+            "is_new_file": false,
+        });
+        Ok(result_json.to_string())
     }
 
     // =========================================================================
