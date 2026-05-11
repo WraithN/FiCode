@@ -46,6 +46,14 @@ pub enum DetailBlock {
     },
 }
 
+/// 任务进度项
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskProgressItem {
+    pub id: String,
+    pub name: String,
+    pub status: crate::tools::task::TaskStatus,
+}
+
 /// SSE 事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -62,9 +70,21 @@ pub enum SseEvent {
     ToolResult {
         tool_use_id: String,
         content: String,
+        diff: Option<String>,
+        is_new_file: bool,
+    },
+    #[serde(rename = "task_progress")]
+    TaskProgress {
+        plan_id: String,
+        tasks: Vec<TaskProgressItem>,
     },
     #[serde(rename = "details")]
     MessageDetails { blocks: Vec<DetailBlock> },
+    #[serde(rename = "usage")]
+    Usage {
+        prompt_tokens: u32,
+        completion_tokens: u32,
+    },
     #[serde(rename = "error")]
     Error { message: String },
     #[serde(rename = "done")]
