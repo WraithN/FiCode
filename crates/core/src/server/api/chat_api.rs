@@ -87,12 +87,51 @@ pub async fn handle_chat_endpoint(
     log_debug!("[Server] SSE channel created | session_id={}", session_id);
 
     // 在后台 task 中运行 agent_chat
-    tokio::spawn(run_agent_chat(
-        state,
-        session_id.clone(),
-        req.message,
-        sse_sender,
-    ));
+    log_info!(
+        "[Server] spawning run_agent_chat task | session_id={}",
+        session_id
+    );
+    let spawn_session_id = session_id.clone();
+    tokio::spawn(async move {
+        use futures::FutureExt;
+        log_info!(
+            "[Server] run_agent_chat task started | session_id={}",
+            spawn_session_id
+        );
+        let result = std::panic::AssertUnwindSafe(run_agent_chat(
+            state,
+            spawn_session_id.clone(),
+            req.message,
+            sse_sender,
+        ))
+        .catch_unwind()
+        .await;
+        match result {
+            Ok(Ok(())) => {
+                log_info!(
+                    "[Server] run_agent_chat completed successfully | session_id={}",
+                    spawn_session_id
+                );
+            }
+            Ok(Err(e)) => {
+                log_error!("[Server] run_agent_chat returned error | {}", e);
+            }
+            Err(panic_info) => {
+                let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else {
+                    "unknown panic".to_string()
+                };
+                log_error!("[Server] run_agent_chat panicked | {}", msg);
+            }
+        }
+        log_info!(
+            "[Server] run_agent_chat task finished | session_id={}",
+            spawn_session_id
+        );
+    });
 
     // 返回 SSE 响应
     let stream = sse_stream.map(|event| {
@@ -162,7 +201,7 @@ async fn run_agent_chat(
     session_id: String,
     message: String,
     sse_sender: SseSender,
-) {
+) -> Result<(), String> {
     log_info!(
         "[Server] run_agent_chat start | session_id={} | message_len={}",
         session_id,
@@ -180,7 +219,7 @@ async fn run_agent_chat(
                     message: "Session not found".to_string(),
                 })
                 .await;
-            return;
+            return Ok(());
         }
     };
 
@@ -207,7 +246,7 @@ async fn run_agent_chat(
         Err(msg) => {
             log_error!("[Server] Failed to get client | {}", msg);
             let _ = sse_sender.send(SseEvent::Error { message: msg }).await;
-            return;
+            return Ok(());
         }
     };
 
@@ -276,6 +315,7 @@ async fn run_agent_chat(
         })
         .await;
     log_info!("[Server] SSE Done sent | session_id={}", session_id);
+    Ok(())
 }
 
 /// 模型切换请求体
