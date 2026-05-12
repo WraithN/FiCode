@@ -44,11 +44,17 @@ pub async fn list_sessions(
 }
 
 pub async fn create_session(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Json<ApiResponse<SessionDto>> {
+    let session_id = ulid::Ulid::new().to_string();
+
+    // 在 HttpSessionManager 中创建会话状态
+    let loop_state = crate::agent::LoopState::new(Vec::new());
+    state.sessions.save(&session_id, loop_state);
+
     let session = SessionDto {
-        id: ulid::Ulid::new().to_string(),
+        id: session_id,
         name: req.name,
         created_at: chrono::Utc::now().to_rfc3339(),
         last_active: chrono::Utc::now().to_rfc3339(),

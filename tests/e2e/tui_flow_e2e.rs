@@ -61,7 +61,32 @@ struct SseEvent {
     task_count: Option<usize>,
 }
 
-/// 发送对话消息并收集所有 SSE 事件
+/// 发送对话消息并收集所有 SSE 事件（指定 session_id）
+async fn chat_with_session(port: u16, session_id: &str, message: &str) -> Vec<SseEvent> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .unwrap();
+
+    let url = format!("http://127.0.0.1:{}/chat", port);
+    let req_body = serde_json::json!({
+        "session_id": session_id,
+        "message": message
+    });
+
+    let response = client
+        .post(&url)
+        .json(&req_body)
+        .send()
+        .await
+        .expect("Failed to send chat request");
+
+    assert_eq!(response.status(), 200);
+
+    collect_sse_events(response).await
+}
+
+/// 发送对话消息并收集所有 SSE 事件（新会话）
 async fn chat_and_collect_events(port: u16, message: &str) -> Vec<SseEvent> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
@@ -69,7 +94,7 @@ async fn chat_and_collect_events(port: u16, message: &str) -> Vec<SseEvent> {
         .unwrap();
 
     let url = format!("http://127.0.0.1:{}/chat", port);
-    let req_body = json!({
+    let req_body = serde_json::json!({
         "session_id": null,
         "message": message
     });
@@ -83,6 +108,11 @@ async fn chat_and_collect_events(port: u16, message: &str) -> Vec<SseEvent> {
 
     assert_eq!(response.status(), 200);
 
+    collect_sse_events(response).await
+}
+
+/// 从 HTTP 响应中收集 SSE 事件
+async fn collect_sse_events(response: reqwest::Response) -> Vec<SseEvent> {
     let mut events = Vec::new();
     let mut buffer = String::new();
     let mut stream = response.bytes_stream();
@@ -187,6 +217,21 @@ fn setup_test_workspace() -> std::path::PathBuf {
 fn cleanup_test_output() {
     let workspace = std::env::temp_dir().join("fi-code-tui-flow-test");
     let _ = std::fs::remove_dir_all(&workspace);
+}
+
+/// 创建会话并返回 session_id
+async fn create_session(port: u16) -> String {
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{}/api/sessions", port);
+    let resp = client
+        .post(&url)
+        .json(&serde_json::json!({"name": "test-session"}))
+        .send()
+        .await
+        .expect("Failed to create session");
+
+    let json: serde_json::Value = resp.json().await.expect("Failed to parse session response");
+    json["data"]["id"].as_str().unwrap().to_string()
 }
 
 mod e2e_tui_flow {
@@ -355,6 +400,115 @@ mod e2e_tui_flow {
         assert!(
             events.iter().any(|e| e.event_type == "Done"),
             "Should receive Done event"
+        );
+
+        server_handle.abort();
+        cleanup_test_output();
+    }
+
+    // =============================================================================
+    // 场景 4：SSE 流完整性验证
+    // =============================================================================
+    // 详细验证 SSE 流的事件顺序和完整性，确保不会出现"stream ended without Done"的情况
+
+    #[tokio::test]
+    async fn test_sse_stream_lifecycle() {
+        let _workspace = setup_test_workspace();
+        let port = get_available_port();
+        let server_handle = start_test_server(port).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let events = chat_and_collect_events(port, "你好").await;
+
+        // 打印所有事件用于调试
+        println!("SSE events:");
+        for (i, e) in events.iter().enumerate() {
+            println!("  [{}] {}: {:?}", i, e.event_type, e.content);
+        }
+
+        // 验证至少收到了 Message 事件
+        let message_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == "Message")
+            .collect();
+        assert!(!message_events.is_empty(), "Should receive at least one Message event");
+
+        // 验证消息内容非空
+        let all_text: String = message_events
+            .iter()
+            .filter_map(|e| e.content.clone())
+            .collect();
+        assert!(!all_text.is_empty(), "Message content should not be empty");
+
+        // 验证收到了 Usage 事件
+        assert!(
+            events.iter().any(|e| e.event_type == "Usage"),
+            "Should receive Usage event"
+        );
+
+        // 验证收到了 Done 事件（最后一条应该是 Done）
+        let last_event = events.last();
+        assert!(
+            last_event.map(|e| e.event_type.as_str()) == Some("Done"),
+            "Last event should be Done, got: {:?}",
+            last_event
+        );
+
+        // 验证没有 Error 事件
+        let error_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == "Error")
+            .collect();
+        assert!(
+            error_events.is_empty(),
+            "Should not receive Error events, got: {:?}",
+            error_events
+        );
+
+        server_handle.abort();
+        cleanup_test_output();
+    }
+
+    // =============================================================================
+    // 场景 5：在已有会话中继续对话
+    // =============================================================================
+    // 验证会话状态保持和后续消息处理正常
+
+    #[tokio::test]
+    async fn test_chat_with_existing_session() {
+        let _workspace = setup_test_workspace();
+        let port = get_available_port();
+        let server_handle = start_test_server(port).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // 创建会话
+        let session_id = create_session(port).await;
+        println!("Created session: {}", session_id);
+
+        // 第一轮对话
+        let events1 = chat_with_session(port, &session_id, "你好").await;
+        assert!(
+            events1.iter().any(|e| e.event_type == "Done"),
+            "First chat should receive Done event"
+        );
+
+        // 第二轮对话（使用同一个 session）
+        let events2 = chat_with_session(port, &session_id, "再见").await;
+        assert!(
+            events2.iter().any(|e| e.event_type == "Done"),
+            "Second chat should receive Done event"
+        );
+
+        // 验证第二轮也收到了 Message 事件
+        let message_events: Vec<_> = events2
+            .iter()
+            .filter(|e| e.event_type == "Message")
+            .collect();
+        assert!(
+            !message_events.is_empty(),
+            "Second chat should receive Message events"
         );
 
         server_handle.abort();
