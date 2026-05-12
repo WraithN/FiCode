@@ -31,6 +31,10 @@ use std::sync::Arc;
 use tokio_stream::StreamExt;
 
 use crate::agent::{agent_loop, LoopState};
+use crate::log_debug;
+use crate::log_error;
+use crate::log_info;
+use crate::log_trace;
 use crate::session::message::{Message, Part, Role};
 use crate::tools::set_task_provider;
 
@@ -51,6 +55,7 @@ pub async fn handle_chat_endpoint(
     headers: HeaderMap,
     Json(req): Json<ChatRequest>,
 ) -> Response {
+    log_info!("[Server] handle_chat_endpoint | session_id={:?} | message_len={}", req.session_id, req.message.len());
     // 认证检查
     if let Some(resp) = check_auth(&headers, &state.config).await {
         return Json(resp).into_response();
@@ -75,6 +80,7 @@ pub async fn handle_chat_endpoint(
     };
 
     let (sse_sender, sse_stream) = create_sse_channel(128);
+    log_debug!("[Server] SSE channel created | session_id={}", session_id);
 
     // 在后台 task 中运行 agent_chat
     tokio::spawn(run_agent_chat(
@@ -86,6 +92,7 @@ pub async fn handle_chat_endpoint(
 
     // 返回 SSE 响应
     let stream = sse_stream.map(|event| {
+        log_trace!("[Server] SSE outgoing | {:?}", std::mem::discriminant(&event));
         let data = serde_json::to_string(&event).unwrap_or_default();
         Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default().data(data))
     });
@@ -149,6 +156,7 @@ async fn run_agent_chat(
     message: String,
     sse_sender: SseSender,
 ) {
+    log_info!("[Server] run_agent_chat start | session_id={} | message_len={}", session_id, message.len());
     // 设置全局 Provider，供 handle_task_plan 工具使用
     set_task_provider(Arc::clone(&state.provider));
 
@@ -175,14 +183,18 @@ async fn run_agent_chat(
 
     // 获取客户端（先读取并释放锁，避免 guard 跨越 await）
     let client_result = match state.provider.read() {
-        Ok(p) => p
-            .get_client()
-            .map_err(|e| format!("Failed to create client: {}", e)),
+        Ok(p) => {
+            let model_name = p.model_name().unwrap_or("unknown").to_string();
+            log_info!("[Server] Provider config | model={}", model_name);
+            p.get_client()
+                .map_err(|e| format!("Failed to create client: {}", e))
+        }
         Err(_) => Err("Provider lock poisoned".to_string()),
     };
     let client = match client_result {
         Ok(c) => c,
         Err(msg) => {
+            log_error!("[Server] Failed to get client | {}", msg);
             let _ = sse_sender.send(SseEvent::Error { message: msg }).await;
             return;
         }
@@ -191,26 +203,49 @@ async fn run_agent_chat(
     // 运行 agent_loop，传入实时文本回调实现真流式
     let sse_sender_for_stream = sse_sender.clone();
     let mut on_text: Option<Box<dyn FnMut(&str) + Send>> = Some(Box::new(move |text: &str| {
+        log_trace!("[Server] on_text callback | len={}", text.len());
         let _ = sse_sender_for_stream.try_send(SseEvent::Message {
             content: text.to_string(),
         });
     }));
-    if let Err(e) = agent_loop(client.as_ref(), &mut loop_state, &mut on_text).await {
+    let sse_sender_for_tools = sse_sender.clone();
+    let mut on_tool_event: Option<Box<dyn FnMut(SseEvent) + Send>> = Some(Box::new(move |event: SseEvent| {
+        log_trace!("[Server] on_tool_event callback | {:?}", std::mem::discriminant(&event));
+        let _ = sse_sender_for_tools.try_send(event);
+    }));
+    log_info!("[Server] agent_loop starting | messages={}", loop_state.messages.len());
+    if let Err(e) = agent_loop(client.as_ref(), &mut loop_state, &mut on_text, &mut on_tool_event).await {
+        log_error!("[Server] agent_loop error | {}", e);
         let _ = sse_sender
             .send(SseEvent::Error {
                 message: format!("Agent loop error: {}", e),
             })
             .await;
     } else {
+        log_info!("[Server] agent_loop completed successfully");
         // 发送结构化详情（文本已通过实时流式发送，此处不再重复）
         send_last_assistant_details(&loop_state.messages, &sse_sender).await;
     }
+
+    log_info!("[Server] run_agent_chat end | prompt_tokens={} | completion_tokens={}",
+        loop_state.token_usage.prompt_tokens,
+        loop_state.token_usage.completion_tokens
+    );
+
+    // 发送 Token 使用量
+    let _ = sse_sender
+        .send(SseEvent::Usage {
+            prompt_tokens: loop_state.token_usage.prompt_tokens,
+            completion_tokens: loop_state.token_usage.completion_tokens,
+        })
+        .await;
 
     // 保存会话状态
     state.sessions.save(&session_id, loop_state);
 
     // 发送 done 事件
-    let _ = sse_sender.send(SseEvent::Done { session_id }).await;
+    let _ = sse_sender.send(SseEvent::Done { session_id: session_id.clone() }).await;
+    log_info!("[Server] SSE Done sent | session_id={}", session_id);
 }
 
 /// 模型切换请求体
@@ -283,6 +318,126 @@ pub async fn handle_switch_model(
             ),
         )
             .into_response(),
+    }
+}
+
+/// GET /api/config — 获取当前配置摘要
+pub async fn handle_get_config(State(state): State<AppState>) -> Response {
+    let provider_info = match state.provider.read() {
+        Ok(p) => p.info(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(super::super::models::ApiResponse::<serde_json::Value>::error(
+                    "Provider lock poisoned".to_string(),
+                    "INTERNAL_ERROR",
+                )),
+            )
+                .into_response();
+        }
+    };
+
+    let config_path = match state.config.read() {
+        Ok(c) => c.source_path.clone().unwrap_or_else(|| "unknown".to_string()),
+        Err(_) => "unknown".to_string(),
+    };
+
+    let resp = serde_json::json!({
+        "config_path": config_path,
+        "provider": provider_info,
+    });
+
+    Json(super::super::models::ApiResponse::success(resp)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::server::test_helpers::create_test_app_state;
+    use axum::{extract::State, Json};
+
+    #[tokio::test]
+    async fn test_handle_get_config() {
+        let state = create_test_app_state();
+        let response = handle_get_config(State(state)).await;
+
+        let (parts, body) = response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(json["success"].as_bool().unwrap());
+        assert_eq!(json["data"]["config_path"], "/test/config.json");
+        assert_eq!(json["data"]["provider"]["model_name"], "test-model");
+        assert_eq!(json["data"]["provider"]["base_url"], "http://localhost:11434");
+        assert_eq!(json["data"]["provider"]["model_type"], "openai_compatible");
+    }
+
+    #[tokio::test]
+    async fn test_handle_list_models_endpoint() {
+        let state = create_test_app_state();
+        let response = handle_list_models_endpoint(State(state)).await;
+
+        let (parts, body) = response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(json["success"].as_bool().unwrap());
+        assert_eq!(json["data"]["current_model"], "test-model");
+
+        let providers = json["data"]["providers"].as_array().unwrap();
+        assert!(!providers.is_empty());
+
+        // 验证预设 Provider 也被合并进来了
+        let provider_keys: Vec<&str> = providers
+            .iter()
+            .map(|p| p["key"].as_str().unwrap())
+            .collect();
+        assert!(provider_keys.contains(&"test-provider"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_switch_model_success() {
+        let state = create_test_app_state();
+        let req = SwitchModelRequest {
+            provider: "test-provider".to_string(),
+            model: "test-model".to_string(),
+            api_key: None,
+        };
+        let response = handle_switch_model(State(state.clone()), Json(req)).await;
+
+        let (parts, body) = response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(json["success"].as_bool().unwrap());
+        assert_eq!(json["data"]["provider"], "test-provider");
+        assert_eq!(json["data"]["model"], "test-model");
+
+        // 验证 Provider 确实被更新了
+        let provider = state.provider.read().unwrap();
+        assert_eq!(provider.model_name().unwrap(), "test-model");
+    }
+
+    #[tokio::test]
+    async fn test_handle_switch_model_not_found() {
+        let state = create_test_app_state();
+        let req = SwitchModelRequest {
+            provider: "nonexistent".to_string(),
+            model: "nonexistent".to_string(),
+            api_key: None,
+        };
+        let response = handle_switch_model(State(state), Json(req)).await;
+
+        let (parts, body) = response.into_parts();
+        assert_eq!(parts.status, StatusCode::BAD_REQUEST);
+
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(!json["success"].as_bool().unwrap());
+        assert!(json["error"].as_str().unwrap().contains("nonexistent"));
     }
 }
 

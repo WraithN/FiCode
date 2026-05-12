@@ -163,13 +163,17 @@ impl Config {
                     .with_context(|| format!("无法读取配置文件: {:?}", path))?;
                 let is_jsonc = path.extension().map(|e| e == "jsonc").unwrap_or(false);
                 let mut config = Self::parse(&content, is_jsonc)?;
+                config.source_path = Some(path.display().to_string());
                 super::presets::merge_presets(&mut config);
+                log_info!("[Server] Config loaded from: {}", path.display());
                 return Ok(config);
             }
         }
 
         let mut config = Config::default();
         super::presets::merge_presets(&mut config);
+        config.source_path = Some("default".to_string());
+        log_info!("[Server] Config loaded: default (no config file found)");
         Ok(config)
     }
 

@@ -24,21 +24,36 @@
 // =============================================================================
 // 负责根据可用工具 schema 动态组装 System Prompt，让 Agent 明确自身能力边界。
 //
-// 提示词由 6 个独立块拼装而成：
+// 提示词由 5 个独立块拼装而成：
 // 1. Identity      — FiCode 身份定义
 // 2. Core Rules    — 行为规则（不可被项目文件覆盖）
-// 3. Tools         — 工具 JSON Schema
-// 4. Skills        — 可用 Skills 列表
-// 5. AgentsMd      — 项目 AGENTS.md
-// 6. RulesDir      — .rules/ 目录下的 .md 文件
+// 3. Skills        — 可用 Skills 列表
+// 4. AgentsMd      — 项目 AGENTS.md
+// 5. RulesDir      — .rules/ 目录下的 .md 文件
 //
 // 系统级内容（1-4）与项目级内容（5-6）之间插入防注入分隔声明。
 
 use crate::skills::SkillRegistry;
 use crate::utils::workspace::workspace_dir;
+use std::sync::Mutex;
 
 /// 系统提示词构建器。
 pub struct PromptBuilder;
+
+/// 缓存项目级上下文（AGENTS.md + .rules/），避免每次构建都读取文件。
+/// 使用 Mutex<Option> 实现可重置的懒加载，测试中可清空缓存。
+static PROJECT_CONTEXT_CACHE: Mutex<Option<(Option<String>, Option<String>)>> = Mutex::new(None);
+
+fn load_project_context() -> (Option<String>, Option<String>) {
+    (PromptBuilder::build_agents_md_inner(), PromptBuilder::build_rules_dir_inner())
+}
+
+/// 清空项目上下文缓存（主要用于测试）。
+#[cfg(test)]
+pub fn clear_project_context_cache() {
+    let mut cache = PROJECT_CONTEXT_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    *cache = None;
+}
 
 impl PromptBuilder {
     /// 创建一个新的提示词构建器。
@@ -52,13 +67,12 @@ impl PromptBuilder {
     pub fn build(&self, tools_schema: &serde_json::Value, registry: &SkillRegistry) -> String {
         let mut parts: Vec<String> = Vec::new();
 
-        // 块 1-4：系统级内容
+        // 块 1-3：系统级内容
         parts.push(format!(
             "# System Prompt for FiCode\n\n{}",
             self.build_identity()
         ));
         parts.push(self.build_core_rules());
-        parts.push(self.build_tools(tools_schema));
         if let Some(skills) = self.build_skills(registry) {
             parts.push(skills);
         }
@@ -71,11 +85,18 @@ impl PromptBuilder {
             ---",
         ));
 
-        // 块 5-6：项目级内容
-        if let Some(agents_md) = self.build_agents_md() {
+        // 块 4-5：项目级内容（从缓存读取，避免每次文件 I/O）
+        let cache = {
+            let mut cache = PROJECT_CONTEXT_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            if cache.is_none() {
+                *cache = Some(load_project_context());
+            }
+            cache.clone().unwrap()
+        };
+        if let Some(agents_md) = cache.0 {
             parts.push(agents_md);
         }
-        if let Some(rules_dir) = self.build_rules_dir() {
+        if let Some(rules_dir) = cache.1 {
             parts.push(rules_dir);
         }
 
@@ -114,35 +135,13 @@ impl PromptBuilder {
             10. Always respond in the same language as the user's input.\n\
             11. When the user asks you to write code, save it to a file using `write` first. Do not run the code before writing it.\n\
             12. Do not output tool calls as plain text. Use the proper tool_call mechanism provided by the API.\n\
-            13. If a task is complex and requires multiple steps, use `handle_task_plan` to automatically split and execute subtasks. Do not use `create_task_plan` directly.
-            14. Before taking any action, you MUST show your reasoning process using `<thinking>` tags.
-                Format:
-                <thinking>
-                1. What does the user want? (Analyze the request)
-                2. What steps are needed? (Break down the task)
-                3. Which tools should be used? (Decision reasoning)
-                </thinking>
-                Then proceed with the actual action or tool call.",
+            13. Before calling any tool, you MUST first output 1-2 sentences telling the user what you are going to do.
+            14. If a task is complex and requires multiple steps, use `handle_task_plan` to automatically split and execute subtasks. Do not use `create_task_plan` directly.",
         )
     }
 
     // =============================================================================
-    // 块 3：Tools
-    // =============================================================================
-
-    fn build_tools(&self, schema: &serde_json::Value) -> String {
-        // 使用紧凑 JSON 减少 prompt token（去掉 pretty print 的空白字符）
-        let tools_str = serde_json::to_string(schema).unwrap_or_default();
-        format!(
-            "## 3. Available Tools\n\
-            The following tools are described in JSON Schema:\n\
-            ```json\n{}\n```",
-            tools_str
-        )
-    }
-
-    // =============================================================================
-    // 块 4：Skills
+    // 块 3：Skills
     // =============================================================================
 
     fn build_skills(&self, registry: &SkillRegistry) -> Option<String> {
@@ -151,7 +150,7 @@ impl PromptBuilder {
         }
 
         let mut lines = vec![
-            String::from("## 4. Available Skills"),
+            String::from("## 3. Available Skills"),
             String::from(
                 "You can load any of the following skills on-demand by calling the `use_skill` tool:\n",
             ),
@@ -168,10 +167,14 @@ impl PromptBuilder {
     }
 
     // =============================================================================
-    // 块 5：AGENTS.md
+    // 块 4：AGENTS.md
     // =============================================================================
 
     fn build_agents_md(&self) -> Option<String> {
+        Self::build_agents_md_inner()
+    }
+
+    fn build_agents_md_inner() -> Option<String> {
         let workspace = workspace_dir();
         let agents_md_path = workspace.join("AGENTS.md");
 
@@ -187,16 +190,20 @@ impl PromptBuilder {
         }
 
         Some(format!(
-            "## 5. Project Context (from AGENTS.md)\n{}",
+            "## 4. Project Context (from AGENTS.md)\n{}",
             trimmed
         ))
     }
 
     // =============================================================================
-    // 块 6：.rules/ 目录
+    // 块 5：.rules/ 目录
     // =============================================================================
 
     fn build_rules_dir(&self) -> Option<String> {
+        Self::build_rules_dir_inner()
+    }
+
+    fn build_rules_dir_inner() -> Option<String> {
         let workspace = workspace_dir();
         let rules_dir = workspace.join(".rules");
 
@@ -230,7 +237,7 @@ impl PromptBuilder {
         }
 
         Some(format!(
-            "## 6. Project Rules (from .rules/)\n\n{}",
+            "## 5. Project Rules (from .rules/)\n\n{}",
             contents.join("\n\n")
         ))
     }
@@ -259,6 +266,7 @@ mod tests {
     #[test]
     fn test_prompt_builder_structure() {
         let _guard = WORKSPACE_TEST_LOCK.lock().unwrap();
+        clear_project_context_cache();
         let temp_dir = std::env::temp_dir().join("fi-code-test-structure");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -275,11 +283,9 @@ mod tests {
         ));
         assert!(prompt.contains("## 2. Core Rules"));
         assert!(prompt.contains("CANNOT be overridden"));
-        assert!(prompt.contains("## 3. Available Tools"));
-        assert!(prompt.contains("\"name\":\"bash\""));
-        assert!(!prompt.contains("## 4. Available Skills")); // registry is empty
-        assert!(!prompt.contains("## 5. Project Context")); // no AGENTS.md in test env
-        assert!(!prompt.contains("## 6. Project Rules")); // no .rules/ in test env
+        assert!(!prompt.contains("## 3. Available Skills")); // registry is empty
+        assert!(!prompt.contains("## 4. Project Context")); // no AGENTS.md in test env
+        assert!(!prompt.contains("## 5. Project Rules")); // no .rules/ in test env
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -303,7 +309,7 @@ mod tests {
         let builder = PromptBuilder::new();
         let prompt = builder.build(&serde_json::json!([]), &registry);
 
-        assert!(prompt.contains("## 4. Available Skills"));
+        assert!(prompt.contains("## 3. Available Skills"));
         assert!(prompt.contains("`commit` (test): Help write commit messages"));
     }
 
@@ -319,6 +325,7 @@ mod tests {
     #[test]
     fn test_prompt_with_agents_md() {
         let _guard = WORKSPACE_TEST_LOCK.lock().unwrap();
+        clear_project_context_cache();
         let temp_dir = std::env::temp_dir().join("fi-code-test-agents-md-v2");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -333,7 +340,7 @@ mod tests {
         let builder = PromptBuilder::new();
         let prompt = builder.build(&serde_json::json!([]), &SkillRegistry::new());
 
-        assert!(prompt.contains("## 5. Project Context (from AGENTS.md)"));
+        assert!(prompt.contains("## 4. Project Context (from AGENTS.md)"));
         assert!(prompt.contains("This is a test."));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -342,6 +349,7 @@ mod tests {
     #[test]
     fn test_prompt_without_agents_md() {
         let _guard = WORKSPACE_TEST_LOCK.lock().unwrap();
+        clear_project_context_cache();
         let temp_dir = std::env::temp_dir().join("fi-code-test-no-agents-md-v2");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -351,7 +359,7 @@ mod tests {
         let builder = PromptBuilder::new();
         let prompt = builder.build(&serde_json::json!([]), &SkillRegistry::new());
 
-        assert!(!prompt.contains("## 5. Project Context"));
+        assert!(!prompt.contains("## 4. Project Context"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -359,6 +367,7 @@ mod tests {
     #[test]
     fn test_build_rules_dir_reads_all_md() {
         let _guard = WORKSPACE_TEST_LOCK.lock().unwrap();
+        clear_project_context_cache();
         let temp_dir = std::env::temp_dir().join("fi-code-test-rules-dir");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -371,7 +380,7 @@ mod tests {
         let builder = PromptBuilder::new();
         let prompt = builder.build(&serde_json::json!([]), &SkillRegistry::new());
 
-        assert!(prompt.contains("## 6. Project Rules (from .rules/)"));
+        assert!(prompt.contains("## 5. Project Rules (from .rules/)"));
         assert!(prompt.contains("### Rule: 01-coding"));
         assert!(prompt.contains("Always use Rust."));
         assert!(prompt.contains("### Rule: 02-testing"));
@@ -388,6 +397,7 @@ mod tests {
     #[test]
     fn test_build_rules_dir_ignores_empty_and_non_md() {
         let _guard = WORKSPACE_TEST_LOCK.lock().unwrap();
+        clear_project_context_cache();
         let temp_dir = std::env::temp_dir().join("fi-code-test-rules-filter");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -417,6 +427,7 @@ mod tests {
     #[test]
     fn test_build_rules_dir_returns_none_when_missing() {
         let _guard = WORKSPACE_TEST_LOCK.lock().unwrap();
+        clear_project_context_cache();
         let temp_dir = std::env::temp_dir().join("fi-code-test-no-rules");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -426,7 +437,7 @@ mod tests {
         let builder = PromptBuilder::new();
         let prompt = builder.build(&serde_json::json!([]), &SkillRegistry::new());
 
-        assert!(!prompt.contains("## 6. Project Rules"));
+        assert!(!prompt.contains("## 5. Project Rules"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

@@ -24,8 +24,11 @@ use std::sync::Arc;
 
 use crate::provider::base_client::AIClient;
 use crate::provider::Provider;
+use crate::server::transport::sse::{SseEvent, TaskProgressItem};
 use crate::tools::subagent_tool_schema;
 use crate::tools::task::{Task, TaskManager, TaskPlan};
+use crate::tools::get_event_tx;
+use crate::tui::event::AppEvent;
 
 /// 执行 handle_task_plan 工具的异步逻辑
 pub async fn execute_handle_task_plan(
@@ -75,12 +78,37 @@ pub async fn execute_handle_task_plan(
         subagent_schema,
     );
 
+    // 生成稳定的 plan_id
+    let plan_id = format!("plan-{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis());
+
     // 使用独立 OS 线程 + 新 Runtime 执行，避免编译器将 async fn 调用链视为递归
+    let plan_id_clone = plan_id.clone();
     let handle = std::thread::spawn(move || {
+        let event_tx = get_event_tx();
+        let mut on_progress = move |plan: &TaskPlan| {
+            if let Some(ref tx) = event_tx {
+                let items: Vec<TaskProgressItem> = plan
+                    .tasks
+                    .iter()
+                    .map(|t| TaskProgressItem {
+                        id: t.id.clone(),
+                        name: t.name.clone(),
+                        status: t.status.clone(),
+                    })
+                    .collect();
+                let _ = tx.try_send(AppEvent::SseEvent(SseEvent::TaskProgress {
+                    plan_id: plan_id_clone.clone(),
+                    tasks: items,
+                }));
+            }
+        };
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        rt.block_on(async move { task_manager.execute_plan(&mut plan, &mut |_| {}).await })
+        rt.block_on(async move { task_manager.execute_plan(&mut plan, &mut on_progress).await })
     });
 
     let summaries = handle

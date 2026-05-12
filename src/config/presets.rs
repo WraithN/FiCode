@@ -378,6 +378,7 @@ mod tests {
             provider: HashMap::new(),
             mcp: None,
             server: None,
+            source_path: None,
         };
         merge_presets(&mut config);
         assert!(config.provider.contains_key("openai"));
@@ -410,6 +411,7 @@ mod tests {
             },
             mcp: None,
             server: None,
+            source_path: None,
         };
         merge_presets(&mut config);
         let openai = config.provider.get("openai").unwrap();
@@ -443,6 +445,7 @@ mod tests {
             },
             mcp: None,
             server: None,
+            source_path: None,
         };
         merge_presets(&mut config);
         assert!(config.provider.contains_key("my-custom"));

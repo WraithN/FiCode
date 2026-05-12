@@ -38,8 +38,10 @@ use anyhow::Result;
 use crate::agent::PromptBuilder;
 use crate::log_block;
 use crate::log_debug;
+use crate::log_error;
+use crate::log_info;
 use crate::log_trace;
-use crate::provider::base_client::{AIClient, ChunkContent, FinishReason};
+use crate::provider::base_client::{AIClient, ChunkContent, FinishReason, TokenUsage};
 use crate::provider::execute_tool_calls;
 use crate::provider::Chunk;
 use crate::session::message::{Message, Part, Role};
@@ -56,6 +58,8 @@ pub struct LoopState {
     pub messages: Vec<Message>,
     pub turn_count: usize,
     pub transition_reason: Option<String>,
+    /// 累计 Token 使用量
+    pub token_usage: TokenUsage,
 }
 
 impl LoopState {
@@ -64,6 +68,7 @@ impl LoopState {
             messages,
             turn_count: 1,
             transition_reason: None,
+            token_usage: TokenUsage::default(),
         }
     }
 }
@@ -87,6 +92,7 @@ fn process_chunk(
     chunk: Chunk,
     content_blocks: &mut Vec<Part>,
     finish_reason: &mut Option<FinishReason>,
+    token_usage: &mut TokenUsage,
 ) {
     match chunk.content {
         ChunkContent::Text(text) => {
@@ -121,6 +127,17 @@ fn process_chunk(
                 );
             }
             content_blocks.push(tool.clone());
+        }
+        ChunkContent::Usage(usage) => {
+            token_usage.prompt_tokens += usage.prompt_tokens;
+            token_usage.completion_tokens += usage.completion_tokens;
+            log_debug!(
+                "LLM usage | prompt={} | completion={} | total_prompt={} | total_completion={}",
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                token_usage.prompt_tokens,
+                token_usage.completion_tokens
+            );
         }
         ChunkContent::Finish(ref reason) => {
             log_debug!("LLM finish_reason={:?}", reason);
@@ -161,9 +178,11 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     client: &C,
     state: &mut LoopState,
     on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
+    on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Result<bool> {
     let mut content_blocks = Vec::new();
     let mut finish_reason = None;
+    let mut turn_usage = TokenUsage::default();
 
     let registry = get_registry();
     let schema = tool_schema().await;
@@ -183,11 +202,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         &system_prompt
     );
 
-    log_debug!(
-        "run_one_turn start | turn={} | messages={}",
-        state.turn_count,
-        state.messages.len()
-    );
+    log_info!("[Agent] run_one_turn start | turn={} | messages={}", state.turn_count, state.messages.len());
 
     for (idx, msg) in state.messages.iter().enumerate() {
         let preview: String = msg
@@ -226,11 +241,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     } else {
         &state.messages[..]
     };
-    log_debug!(
-        "context truncated | total={} | sent={}",
-        state.messages.len(),
-        messages_for_llm.len()
-    );
+    log_debug!("[Agent] context truncated | total={} | sent={}", state.messages.len(), messages_for_llm.len());
 
     client
         .stream_message(&system_prompt, messages_for_llm, &schema, &mut |chunk| {
@@ -243,7 +254,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
                 }
                 _ => {}
             }
-            process_chunk(chunk, &mut content_blocks, &mut finish_reason)
+            process_chunk(chunk, &mut content_blocks, &mut finish_reason, &mut turn_usage)
         })
         .await?;
 
@@ -254,10 +265,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         .map(|m| m.session_id.clone())
         .unwrap_or_default();
 
-    log_debug!(
-        "assistant message appended | blocks={}",
-        content_blocks.len()
-    );
+    log_debug!("[Agent] assistant message appended | blocks={}", content_blocks.len());
 
     // 将 Assistant 的完整回复追加到状态
     for (idx, block) in content_blocks.iter().enumerate() {
@@ -271,10 +279,14 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         content_blocks.clone(),
     ));
 
+    // 累加本轮 Token 使用量到全局状态
+    state.token_usage.prompt_tokens += turn_usage.prompt_tokens;
+    state.token_usage.completion_tokens += turn_usage.completion_tokens;
+
     // 判断停止原因：只有明确为 ToolUse 时才继续执行工具调用回合
     if finish_reason != Some(FinishReason::ToolUse) {
         state.transition_reason = None;
-        log_debug!("run_one_turn end | no tool use");
+        log_info!("[Agent] run_one_turn end | no tool use | finish_reason={:?}", finish_reason);
         return Ok(false);
     }
 
@@ -316,7 +328,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
             client
                 .stream_message(&system_prompt, &state.messages, &schema, &mut |chunk| {
-                    process_chunk(chunk, &mut content_blocks, &mut finish_reason)
+                    process_chunk(chunk, &mut content_blocks, &mut finish_reason, &mut turn_usage)
                 })
                 .await?;
 
@@ -328,20 +340,58 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         }
     }
 
+    // 发送 ToolUse 事件
+    for block in &content_blocks {
+        if let Part::ToolUse { id, name, arguments } = block {
+            if let Some(ref mut cb) = on_tool_event {
+                let _ = cb(crate::server::transport::sse::SseEvent::ToolUse {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments: arguments.clone(),
+                });
+            }
+        }
+    }
+
     // 执行所有工具调用，并收集结果
-    let tool_results = execute_tool_calls(&content_blocks).await;
+    let tool_results = execute_tool_calls(&content_blocks, on_tool_event).await;
     if tool_results.is_empty() {
         state.transition_reason = None;
-        log_debug!("run_one_turn end | tool_use finish but no results");
+        log_info!("[Agent] run_one_turn end | tool_use finish but no results");
         return Ok(false);
     }
 
-    log_debug!(
-        "pushing tool_results back to LLM | results={}",
-        tool_results.len()
-    );
+    log_info!("[Agent] pushing tool_results back to LLM | results={}", tool_results.len());
     for (idx, tr) in tool_results.iter().enumerate() {
         log_trace!("tool_result[{}] | {:?}", idx, tr);
+    }
+
+    // 客户端直出优化：如果所有工具都成功，且 Turn 1 已有前置文本说明，
+    // 则跳过 Turn 2（不再请求 LLM 写总结），直接格式化输出工具结果。
+    let all_success = tool_results.iter().all(|p| {
+        matches!(p, Part::ToolResult { is_error: false, .. })
+    });
+    let has_preamble = content_blocks.iter().any(|p| matches!(p, Part::Text { .. }));
+
+    if all_success && has_preamble {
+        let summary = format_tool_results(&content_blocks, &tool_results);
+        log_info!("[Agent] direct output | summary_len={}", summary.len());
+
+        // 通过 SSE 实时发送总结文本到前端
+        if let Some(ref mut cb) = on_text {
+            cb(&summary);
+        }
+
+        // 将总结追加到最后一条 Assistant 消息中
+        if let Some(last) = state.messages.last_mut() {
+            if last.role == Role::Assistant {
+                last.parts.push(Part::Text { text: summary });
+            }
+        }
+
+        state.transition_reason = Some("direct_output".to_string());
+        log_info!("[Agent] run_one_turn end | direct output, no turn 2");
+        return Ok(false);
     }
 
     // 将工具结果封装为 User 消息回传（符合 OpenAI / Anthropic API 的角色交替要求）
@@ -352,8 +402,40 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     state.turn_count += 1;
     state.transition_reason = Some("tool_result".to_string());
 
-    log_debug!("run_one_turn end | will continue next turn");
+    log_info!("[Agent] run_one_turn end | will continue next turn | next_turn={}", state.turn_count);
     Ok(true)
+}
+
+/// 将工具执行结果格式化为直出文本。
+fn format_tool_results(content_blocks: &[Part], tool_results: &[Part]) -> String {
+    let mut lines = Vec::new();
+    for result in tool_results {
+        if let Part::ToolResult {
+            tool_call_id,
+            content,
+            is_error,
+        } = result
+        {
+            let emoji = if *is_error { "❌" } else { "✅" };
+            let tool_name = content_blocks.iter().find_map(|p| {
+                if let Part::ToolUse { id, name, .. } = p {
+                    if id == tool_call_id {
+                        Some(name.as_str())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+            if let Some(name) = tool_name {
+                lines.push(format!("{} {} | {}", emoji, name, content));
+            } else {
+                lines.push(format!("{} {}", emoji, content));
+            }
+        }
+    }
+    lines.join("\n")
 }
 
 // =============================================================================
@@ -368,7 +450,19 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
     client: &C,
     state: &mut LoopState,
     on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
+    on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Result<()> {
-    while run_one_turn(client, state, on_text).await? {}
+    const MAX_TURNS: usize = 25;
+    log_info!("[Agent] agent_loop start | messages={} | turn_count={}", state.messages.len(), state.turn_count);
+    while run_one_turn(client, state, on_text, on_tool_event).await? {
+        if state.turn_count > MAX_TURNS {
+            log_error!("[Agent] agent_loop max turns exceeded | {}", MAX_TURNS);
+            return Err(anyhow::anyhow!(
+                "Agent exceeded maximum turns ({})",
+                MAX_TURNS
+            ));
+        }
+    }
+    log_info!("[Agent] agent_loop end | total_turns={} | transition_reason={:?}", state.turn_count, state.transition_reason);
     Ok(())
 }

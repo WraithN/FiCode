@@ -86,6 +86,10 @@ impl Input {
         self.session_id = id;
     }
 
+    pub fn session_id(&self) -> Option<String> {
+        self.session_id.clone()
+    }
+
     pub fn set_commands(&mut self, commands: Vec<CommandMeta>) {
         self.dropdown_items = commands;
         self.commands_loaded = true;
@@ -224,20 +228,18 @@ impl Component for Input {
     /// 渲染输入框：包含可选的会话 ID 标签、带边框的输入区域、placeholder、光标位置，
     /// 以及斜杠命令下拉菜单。
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_focused: bool) {
-        // 在输入框上方显示会话 ID
-        let mut y_offset = 0u16;
-        if let Some(ref id) = self.session_id {
-            let session_label = format!("--[Session: {}]---", id);
-            let label_rect = Rect::new(area.x, area.y, area.width, 1);
-            let label = Paragraph::new(session_label).style(theme.style_muted());
-            frame.render_widget(label, label_rect);
-            y_offset = 1;
-        }
-
-        let placeholder = if self.content.is_empty() {
-            "Type your message, or paste code..."
+        let border_color = if is_focused {
+            theme.brand
         } else {
-            ""
+            theme.border
+        };
+
+        // 实线边框，顶部标题显示 session
+        let title = if let Some(ref id) = self.session_id {
+            let short_id = if id.len() >= 4 { &id[..4] } else { id.as_str() };
+            format!(" session: #{} ", short_id)
+        } else {
+            String::new()
         };
 
         let border_type = if is_focused {
@@ -245,14 +247,22 @@ impl Component for Input {
         } else {
             ratatui::widgets::BorderType::Plain
         };
+
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(border_type)
-            .border_style(Style::default().fg(theme.border))
+            .border_style(Style::default().fg(border_color))
+            .title_top(title)
             .style(theme.input_style());
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
+
+        let placeholder = if self.content.is_empty() {
+            "Type your message, or paste code..."
+        } else {
+            ""
+        };
 
         if self.content.is_empty() {
             let text = Paragraph::new(placeholder).style(

@@ -123,10 +123,15 @@ impl StatusBar {
     }
 
     /// 计算当前应填充的格数。
+    /// Running 状态下每 tick 随机 1~19 格，只要没返回就持续有动态效果。
     fn current_filled(&self) -> usize {
         match self.progress_state {
             ProgressState::Idle => 0,
-            ProgressState::Running => (self.progress_tick as usize).min(PROGRESS_BAR_WIDTH),
+            ProgressState::Running => {
+                // 使用 progress_tick 作为随机种子，每 tick 生成 1~19 的随机值
+                let seed = self.progress_tick.wrapping_mul(1103515245).wrapping_add(12345);
+                ((seed % 19) + 1) as usize
+            }
             ProgressState::Paused => self.last_filled,
         }
     }
@@ -164,8 +169,9 @@ impl StatusBar {
         // 进度条
         let progress_bar = self.render_progress_bar();
         let progress_style = match self.progress_state {
-            ProgressState::Idle => Style::default().fg(theme.text_muted),
-            ProgressState::Running | ProgressState::Paused => Style::default().fg(theme.brand),
+            ProgressState::Idle => Style::default().fg(theme.success), // 完成：绿色
+            ProgressState::Running => Style::default().fg(theme.warning), // 进行中：黄色
+            ProgressState::Paused => Style::default().fg(theme.success), // 完成：绿色
         };
         spans.push(Span::styled(progress_bar, progress_style));
 
@@ -267,28 +273,34 @@ mod tests {
     fn test_progress_bar_running() {
         let mut bar = StatusBar::new();
         bar.set_generating(true);
-        bar.on_tick(); // tick = 1, filled = 1
+        bar.on_tick(); // tick = 1, filled = 10
         let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[█░░░░░░░░░░░░░░░░░░░]");
+        assert_eq!(pb, "[██████████░░░░░░░░░░]");
 
-        // 前进到第 5 格
+        // 前进到 tick = 5, filled = 9
         for _ in 0..4 {
             bar.on_tick();
         }
         let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[█████░░░░░░░░░░░░░░░]");
+        assert_eq!(pb, "[█████████░░░░░░░░░░░]");
     }
 
     #[test]
     fn test_progress_bar_capped_at_width() {
         let mut bar = StatusBar::new();
         bar.set_generating(true);
-        // 前进超过 20 格
-        for _ in 0..30 {
+        // tick=40 时 filled = 5
+        for _ in 0..40 {
             bar.on_tick();
         }
         let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[████████████████████]");
+        assert_eq!(pb, "[█████░░░░░░░░░░░░░░░]");
+
+        // tick=42 时 filled = 14
+        bar.on_tick();
+        bar.on_tick();
+        let pb = bar.render_progress_bar();
+        assert_eq!(pb, "[██████████████░░░░░░]");
     }
 
     #[test]
@@ -298,13 +310,14 @@ mod tests {
         for _ in 0..5 {
             bar.on_tick();
         }
-        bar.set_generating(false); // 暂停，定格在 5 格
+        // tick=5, filled=9
+        bar.set_generating(false); // 暂停，定格在 9 格
 
         // 即使继续 tick，也不应前进
         bar.on_tick();
         bar.on_tick();
         let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[█████░░░░░░░░░░░░░░░]");
+        assert_eq!(pb, "[█████████░░░░░░░░░░░]");
     }
 
     #[test]

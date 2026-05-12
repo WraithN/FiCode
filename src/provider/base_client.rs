@@ -21,6 +21,7 @@
 
 use crate::log_info;
 use crate::log_trace;
+use crate::log_warn;
 use crate::session::message::Part;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -88,7 +89,15 @@ pub enum ChunkContent {
     Text(String),
     Think(String),
     ToolUse(Part),
+    Usage(TokenUsage),
     Finish(FinishReason),
+}
+
+/// Token 使用量统计。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
 }
 
 /// 闭包参数结构体，包装单次回调的内容。
@@ -186,13 +195,13 @@ fn compute_backoff(attempt: u32, base: Duration, max: Duration) -> Duration {
 async fn do_retry_backoff(attempt: u32, config: &RetryConfig, context: &str, detail: &str) {
     let backoff = compute_backoff(attempt, config.base_delay, config.max_delay);
     log_trace!(
-        "send_with_retry | attempt={} | {} | backoff={:?}",
+        "[Server] send_with_retry | attempt={} | {} | backoff={:?}",
         attempt + 1,
         context,
         backoff
     );
-    log_info!(
-        "[retry] {} (attempt {}/{}), retry in {:?}: {}",
+    log_warn!(
+        "[Server] HTTP retry | {} (attempt {}/{}), retry in {:?}: {}",
         context,
         attempt + 1,
         config.max_retries,

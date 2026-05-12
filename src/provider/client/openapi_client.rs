@@ -28,6 +28,8 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::log_debug;
+use crate::log_error;
+use crate::log_info;
 use crate::log_trace;
 use crate::provider::base_client::{
     send_with_retry, AIClient, Chunk, ChunkContent, FinishReason, RetryConfig,
@@ -104,7 +106,8 @@ impl AIClient for OpenAiClient {
             "model": self.model_name,
             "messages": openai_messages,
             "max_tokens": 8000,
-            "stream": true
+            "stream": true,
+            "stream_options": { "include_usage": true }
         });
         // 如果 tools_schema 非空则附加（部分平台不支持 tools，会导致 404）
         let tools = convert_tools_schema(tools_schema);
@@ -126,8 +129,7 @@ impl AIClient for OpenAiClient {
         } else {
             format!("{}/v1/chat/completions", self.base_url)
         };
-        log_debug!(
-            "OpenAI request | url={} | model={} | messages={} | tools_count={}",
+        log_info!("[Server] OpenAI request | url={} | model={} | messages={} | tools_count={}",
             url,
             self.model_name,
             openai_messages.len(),
@@ -137,7 +139,12 @@ impl AIClient for OpenAiClient {
                 .unwrap_or(0)
         );
         let body_str = serde_json::to_string_pretty(&body).unwrap_or_default();
-        log_trace!("OpenAI request body | {}", body_str);
+        let truncated_body = if body_str.len() > 2000 {
+            format!("{}... [{} bytes total]", &body_str[..2000], body_str.len())
+        } else {
+            body_str
+        };
+        log_debug!("[Server] OpenAI request body | {}", truncated_body);
         let request = self
             .client
             .post(&url)
@@ -149,8 +156,7 @@ impl AIClient for OpenAiClient {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            log_debug!(
-                "OpenAI API error | url={} | status={} | response={}",
+            log_error!("[Server] OpenAI API error | url={} | status={} | response={}",
                 url,
                 status,
                 text
@@ -227,7 +233,7 @@ fn flush_openai_tool_calls(
         };
         let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
         log_debug!(
-            "OpenAI assembled tool_call | id={} | name={} | args={}",
+            "[Server] OpenAI assembled tool_call | id={} | name={} | args={}",
             id,
             name,
             arguments
@@ -275,7 +281,7 @@ fn handle_openai_finish(
         flush_openai_tool_calls(index_to_tool, on_chunk);
     }
     let reason = FinishReason::from_openai(finish);
-    log_debug!("OpenAI finish_reason={:?}", reason);
+    log_debug!("[Server] OpenAI finish_reason={:?}", reason);
     on_chunk(Chunk {
         content: ChunkContent::Finish(reason),
     });
@@ -321,17 +327,42 @@ where
 
             let data = line[5..].trim();
             if data == "[DONE]" {
-                log_debug!("OpenAI SSE [DONE]");
+                log_debug!("[Server] OpenAI SSE [DONE]");
                 continue;
             }
 
             log_trace!(
-                "OpenAI SSE raw | {}",
+                "[Server] OpenAI SSE raw | {}",
                 data.chars().take(300).collect::<String>()
             );
 
             let json: serde_json::Value = serde_json::from_str(data)
                 .with_context(|| format!("Failed to parse OpenAI SSE data: {}", data))?;
+
+            // 解析 usage（通常出现在最后一个 chunk，此时 choices 可能为空）
+            if let Some(usage) = json.get("usage") {
+                let prompt_tokens = usage
+                    .get("prompt_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let completion_tokens = usage
+                    .get("completion_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                if prompt_tokens > 0 || completion_tokens > 0 {
+                    log_debug!(
+                        "[Server] OpenAI SSE usage | prompt={} | completion={}",
+                        prompt_tokens,
+                        completion_tokens
+                    );
+                    on_chunk(Chunk {
+                        content: ChunkContent::Usage(crate::provider::base_client::TokenUsage {
+                            prompt_tokens,
+                            completion_tokens,
+                        }),
+                    });
+                }
+            }
 
             let Some(choices) = json.get("choices").and_then(|v| v.as_array()) else {
                 continue;
@@ -424,6 +455,37 @@ fn build_user_messages(msg: &Message) -> Vec<OpenAiMessage> {
     result
 }
 
+/// 压缩工具参数，避免 Turn 2 的 Prompt 因重复传大段代码而膨胀。
+fn compact_tool_arguments(name: &str, arguments: &serde_json::Value) -> serde_json::Value {
+    let mut compact = arguments.clone();
+    match name {
+        "write" | "edit" => {
+            if let Some(obj) = compact.as_object_mut() {
+                if let Some(content) = obj.get("content").and_then(|v| v.as_str()) {
+                    obj.insert(
+                        "content".to_string(),
+                        json!(format!("[{} bytes omitted]", content.len())),
+                    );
+                }
+            }
+        }
+        "bash" => {
+            if let Some(obj) = compact.as_object_mut() {
+                if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
+                    let truncated = if cmd.len() > 100 {
+                        format!("{}... [{} chars total]", &cmd[..100], cmd.len())
+                    } else {
+                        cmd.to_string()
+                    };
+                    obj.insert("command".to_string(), json!(truncated));
+                }
+            }
+        }
+        _ => {}
+    }
+    compact
+}
+
 fn build_assistant_message(msg: &Message) -> OpenAiMessage {
     let mut text_parts = Vec::new();
     let mut tool_calls = Vec::new();
@@ -436,12 +498,14 @@ fn build_assistant_message(msg: &Message) -> OpenAiMessage {
                 name,
                 arguments,
             } => {
+                // 上下文压缩：截断大参数，避免 Turn 2 Prompt 膨胀
+                let compact = compact_tool_arguments(name, arguments);
                 tool_calls.push(OpenAiToolCall {
                     id: id.clone(),
                     call_type: "function".to_string(),
                     function: OpenAiFunctionCall {
                         name: name.clone(),
-                        arguments: arguments.to_string(),
+                        arguments: compact.to_string(),
                     },
                 });
             }

@@ -28,7 +28,7 @@
 use anyhow::Result;
 
 use crate::log_debug;
-use crate::provider::base_client::{AIClient, ChunkContent, FinishReason};
+use crate::provider::base_client::{AIClient, ChunkContent, FinishReason, TokenUsage};
 use crate::provider::execute_tool_calls;
 use crate::provider::Chunk;
 use crate::session::message::{Message, Part, Role};
@@ -43,6 +43,7 @@ pub struct AgentRunResult {
     pub messages: Vec<Message>,
     pub turn_count: usize,
     pub finish_reason: Option<FinishReason>,
+    pub token_usage: TokenUsage,
 }
 
 // =============================================================================
@@ -94,14 +95,17 @@ impl AgentRunner {
         let mut messages = initial_messages;
         let mut turn_count = 0usize;
         let mut last_finish_reason = None;
+        let mut token_usage = TokenUsage::default();
 
         while turn_count < self.max_turns {
             turn_count += 1;
             log_debug!("AgentRunner::run | turn={}/{} ", turn_count, self.max_turns);
 
-            let (should_continue, finish_reason) =
-                self.run_one_turn(&mut messages, on_text).await?;
+            let (should_continue, finish_reason, turn_usage) =
+                self.run_one_turn(&mut messages, on_text, &mut None).await?;
             last_finish_reason = finish_reason;
+            token_usage.prompt_tokens += turn_usage.prompt_tokens;
+            token_usage.completion_tokens += turn_usage.completion_tokens;
             if !should_continue {
                 break;
             }
@@ -111,6 +115,7 @@ impl AgentRunner {
             messages,
             turn_count,
             finish_reason: last_finish_reason,
+            token_usage,
         })
     }
 
@@ -123,9 +128,11 @@ impl AgentRunner {
         &self,
         messages: &mut Vec<Message>,
         on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
-    ) -> Result<(bool, Option<FinishReason>)> {
+        on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
+    ) -> Result<(bool, Option<FinishReason>, TokenUsage)> {
         let mut content_blocks = Vec::new();
         let mut finish_reason = None;
+        let mut turn_usage = TokenUsage::default();
 
         // 消息历史截断：超过 30 条时只保留最近 30 条
         const MAX_CONTEXT_MESSAGES: usize = 30;
@@ -150,7 +157,7 @@ impl AgentRunner {
                         }
                         _ => {}
                     }
-                    Self::process_chunk(chunk, &mut content_blocks, &mut finish_reason)
+                    Self::process_chunk(chunk, &mut content_blocks, &mut finish_reason, &mut turn_usage)
                 },
             )
             .await?;
@@ -174,14 +181,14 @@ impl AgentRunner {
                 "AgentRunner::run_one_turn | finish_reason={:?}, stopping",
                 finish_reason
             );
-            return Ok((false, finish_reason));
+            return Ok((false, finish_reason, turn_usage));
         }
 
         // 执行所有工具调用并收集结果
-        let tool_results = execute_tool_calls(&content_blocks).await;
+        let tool_results = execute_tool_calls(&content_blocks, on_tool_event).await;
         if tool_results.is_empty() {
             log_debug!("AgentRunner::run_one_turn | tool_use but no results, stopping");
-            return Ok((false, finish_reason));
+            return Ok((false, finish_reason, turn_usage));
         }
 
         log_debug!(
@@ -189,10 +196,34 @@ impl AgentRunner {
             tool_results.len()
         );
 
+        // 客户端直出优化：如果所有工具都成功，且 Turn 1 已有前置文本说明，
+        // 则跳过 Turn 2，直接格式化输出工具结果。
+        let all_success = tool_results.iter().all(|p| {
+            matches!(p, Part::ToolResult { is_error: false, .. })
+        });
+        let has_preamble = content_blocks.iter().any(|p| matches!(p, Part::Text { .. }));
+
+        if all_success && has_preamble {
+            let summary = format_tool_results(&content_blocks, &tool_results);
+            log_debug!("AgentRunner::direct output | summary_len={}", summary.len());
+
+            if let Some(ref mut cb) = on_text {
+                cb(&summary);
+            }
+
+            if let Some(last) = messages.last_mut() {
+                if last.role == Role::Assistant {
+                    last.parts.push(Part::Text { text: summary });
+                }
+            }
+
+            return Ok((false, finish_reason, turn_usage));
+        }
+
         // 将工具结果封装为 User 消息回传
         messages.push(Message::new(session_id, Role::User, tool_results));
 
-        Ok((true, finish_reason))
+        Ok((true, finish_reason, turn_usage))
     }
 
     /// 处理流式 chunk，将内容聚合到 `content_blocks`。
@@ -200,6 +231,7 @@ impl AgentRunner {
         chunk: Chunk,
         content_blocks: &mut Vec<Part>,
         finish_reason: &mut Option<FinishReason>,
+        token_usage: &mut TokenUsage,
     ) {
         match chunk.content {
             ChunkContent::Text(text) => {
@@ -235,10 +267,46 @@ impl AgentRunner {
                 }
                 content_blocks.push(tool.clone());
             }
+            ChunkContent::Usage(usage) => {
+                token_usage.prompt_tokens += usage.prompt_tokens;
+                token_usage.completion_tokens += usage.completion_tokens;
+            }
             ChunkContent::Finish(ref reason) => {
                 log_debug!("LLM finish_reason={:?}", reason);
                 *finish_reason = Some(reason.clone());
             }
         }
     }
+}
+
+/// 将工具执行结果格式化为直出文本。
+fn format_tool_results(content_blocks: &[Part], tool_results: &[Part]) -> String {
+    let mut lines = Vec::new();
+    for result in tool_results {
+        if let Part::ToolResult {
+            tool_call_id,
+            content,
+            is_error,
+        } = result
+        {
+            let emoji = if *is_error { "❌" } else { "✅" };
+            let tool_name = content_blocks.iter().find_map(|p| {
+                if let Part::ToolUse { id, name, .. } = p {
+                    if id == tool_call_id {
+                        Some(name.as_str())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+            if let Some(name) = tool_name {
+                lines.push(format!("{} {} | {}", emoji, name, content));
+            } else {
+                lines.push(format!("{} {}", emoji, content));
+            }
+        }
+    }
+    lines.join("\n")
 }

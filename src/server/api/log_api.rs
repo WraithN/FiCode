@@ -74,3 +74,91 @@ pub async fn handle_log_stream(
 
     Sse::new(stream)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::server::test_helpers::create_test_app_state;
+    use axum::{extract::State, response::IntoResponse};
+    use axum::http::StatusCode;
+
+    #[tokio::test]
+    async fn test_handle_list_logs_empty() {
+        let state = create_test_app_state();
+        let query = ListLogsQuery { limit: None };
+        let response = handle_list_logs(State(state), Query(query)).await;
+
+        assert!(response.0.success);
+        let logs = response.0.data.unwrap();
+        assert!(logs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_handle_list_logs_with_entries() {
+        let state = create_test_app_state();
+
+        // 先发送一些日志
+        if let Some(broadcaster) = &state.log_broadcaster {
+            broadcaster.send("INFO", "test_module", "test message 1".to_string());
+            broadcaster.send("DEBUG", "test_module", "test message 2".to_string());
+            broadcaster.send("ERROR", "test_module", "test message 3".to_string());
+        }
+
+        let query = ListLogsQuery { limit: Some(10) };
+        let response = handle_list_logs(State(state), Query(query)).await;
+
+        assert!(response.0.success);
+        let logs = response.0.data.unwrap();
+        assert_eq!(logs.len(), 3);
+        assert_eq!(logs[0].message, "test message 1");
+        assert_eq!(logs[1].level, "DEBUG");
+        assert_eq!(logs[2].level, "ERROR");
+    }
+
+    #[tokio::test]
+    async fn test_handle_list_logs_limit() {
+        let state = create_test_app_state();
+
+        if let Some(broadcaster) = &state.log_broadcaster {
+            for i in 0..5 {
+                broadcaster.send("INFO", "test", format!("msg {}", i));
+            }
+        }
+
+        let query = ListLogsQuery { limit: Some(2) };
+        let response = handle_list_logs(State(state), Query(query)).await;
+
+        assert!(response.0.success);
+        let logs = response.0.data.unwrap();
+        assert_eq!(logs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_handle_log_stream() {
+        let state = create_test_app_state();
+
+        let sse = handle_log_stream(State(state)).await;
+        let response = sse.into_response();
+        let (parts, _body) = response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+        assert_eq!(
+            parts.headers.get("content-type").unwrap(),
+            "text/event-stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_log_stream_no_broadcaster() {
+        let mut state = create_test_app_state();
+        state.log_broadcaster = None;
+
+        let sse = handle_log_stream(State(state)).await;
+        let response = sse.into_response();
+        let (parts, body) = response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        // 没有 broadcaster，body 应该为空
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        assert!(bytes.is_empty());
+    }
+}

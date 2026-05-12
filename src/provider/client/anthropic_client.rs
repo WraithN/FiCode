@@ -27,6 +27,7 @@ use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde_json::json;
 
 use crate::log_debug;
+use crate::log_info;
 use crate::log_trace;
 use crate::provider::base_client::{
     send_with_retry, AIClient, Chunk, ChunkContent, FinishReason, RetryConfig,
@@ -94,8 +95,8 @@ impl AIClient for AnthropicClient {
         });
 
         let url = format!("{}/v1/messages", self.base_url);
-        log_debug!(
-            "Anthropic request | url={} | model={} | messages={} | tools_count={}",
+        log_info!(
+            "[Server] Anthropic request | url={} | model={} | messages={} | tools_count={}",
             url,
             self.model_name,
             anthropic_messages.len(),
@@ -104,10 +105,13 @@ impl AIClient for AnthropicClient {
                 .map(|a| a.len())
                 .unwrap_or(0)
         );
-        log_trace!(
-            "Anthropic request body | {}",
-            serde_json::to_string_pretty(&body).unwrap_or_default()
-        );
+        let body_str = serde_json::to_string_pretty(&body).unwrap_or_default();
+        let truncated_body = if body_str.len() > 2000 {
+            format!("{}... [{} bytes total]", &body_str[..2000], body_str.len())
+        } else {
+            body_str
+        };
+        log_debug!("[Server] Anthropic request body | {}", truncated_body);
         let request = self
             .client
             .post(&url)
@@ -173,6 +177,37 @@ fn convert_image_source_to_anthropic(source: &ImageSource) -> serde_json::Value 
     }
 }
 
+/// 压缩工具参数，避免 Turn 2 的 Prompt 因重复传大段代码而膨胀。
+fn compact_tool_arguments(name: &str, arguments: &serde_json::Value) -> serde_json::Value {
+    let mut compact = arguments.clone();
+    match name {
+        "write" | "edit" => {
+            if let Some(obj) = compact.as_object_mut() {
+                if let Some(content) = obj.get("content").and_then(|v| v.as_str()) {
+                    obj.insert(
+                        "content".to_string(),
+                        json!(format!("[{} bytes omitted]", content.len())),
+                    );
+                }
+            }
+        }
+        "bash" => {
+            if let Some(obj) = compact.as_object_mut() {
+                if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
+                    let truncated = if cmd.len() > 100 {
+                        format!("{}... [{} chars total]", &cmd[..100], cmd.len())
+                    } else {
+                        cmd.to_string()
+                    };
+                    obj.insert("command".to_string(), json!(truncated));
+                }
+            }
+        }
+        _ => {}
+    }
+    compact
+}
+
 fn convert_part_to_anthropic(part: &Part) -> serde_json::Value {
     match part {
         Part::Text { text } => json!({"type": "text", "text": text}),
@@ -181,12 +216,16 @@ fn convert_part_to_anthropic(part: &Part) -> serde_json::Value {
             id,
             name,
             arguments,
-        } => json!({
-            "type": "tool_use",
-            "id": id,
-            "name": name,
-            "input": arguments
-        }),
+        } => {
+            // 上下文压缩：截断大参数，避免 Turn 2 Prompt 膨胀
+            let compact = compact_tool_arguments(name, arguments);
+            json!({
+                "type": "tool_use",
+                "id": id,
+                "name": name,
+                "input": compact
+            })
+        }
         Part::ToolResult {
             tool_call_id,
             content: c,
@@ -367,10 +406,28 @@ fn handle_message_delta(json: &serde_json::Value, on_chunk: &mut dyn FnMut(Chunk
         return;
     };
     let reason = FinishReason::from_anthropic(stop);
-    log_debug!("Anthropic finish_reason={:?}", reason);
+    log_debug!("[Server] Anthropic finish_reason={:?}", reason);
     on_chunk(Chunk {
         content: ChunkContent::Finish(reason),
     });
+
+    // 解析 usage（可能在 delta.usage 或顶层 usage 中）
+    let usage = json
+        .get("delta")
+        .and_then(|d| d.get("usage"))
+        .or_else(|| json.get("usage"));
+    if let Some(u) = usage {
+        let output_tokens = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        if output_tokens > 0 {
+            log_debug!("[Server] Anthropic SSE usage | output={}", output_tokens);
+            on_chunk(Chunk {
+                content: ChunkContent::Usage(crate::provider::base_client::TokenUsage {
+                    prompt_tokens: 0,
+                    completion_tokens: output_tokens,
+                }),
+            });
+        }
+    }
 }
 
 async fn parse_anthropic_sse<S>(
@@ -410,13 +467,13 @@ where
 
             let data = line[5..].trim();
             if data == "[DONE]" {
-                log_debug!("Anthropic SSE [DONE]");
+                log_debug!("[Server] Anthropic SSE [DONE]");
                 continue;
             }
 
             let event_type = current_event_type.take().unwrap_or_default();
             log_trace!(
-                "Anthropic SSE raw | event={} | {}",
+                "[Server] Anthropic SSE raw | event={} | {}",
                 event_type,
                 data.chars().take(300).collect::<String>()
             );
@@ -425,6 +482,24 @@ where
                 .with_context(|| format!("Failed to parse Anthropic SSE data: {}", data))?;
 
             match event_type.as_str() {
+                "message_start" => {
+                    // message_start 携带输入 token 使用量
+                    let usage = json
+                        .get("message")
+                        .and_then(|m| m.get("usage"));
+                    if let Some(u) = usage {
+                        let input_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        if input_tokens > 0 {
+                            log_debug!("[Server] Anthropic SSE usage | input={}", input_tokens);
+                            on_chunk(Chunk {
+                                content: ChunkContent::Usage(crate::provider::base_client::TokenUsage {
+                                    prompt_tokens: input_tokens,
+                                    completion_tokens: 0,
+                                }),
+                            });
+                        }
+                    }
+                }
                 "content_block_start" => handle_content_block_start(&json, &mut index_to_tool),
                 "content_block_delta" => {
                     handle_content_block_delta(&json, &mut index_to_tool, on_chunk)

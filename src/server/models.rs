@@ -79,3 +79,47 @@ pub struct CreateSessionRequest {
 pub struct RenameSessionRequest {
     pub name: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_api_response_success() {
+        let resp: ApiResponse<i32> = ApiResponse::success(42);
+        assert!(resp.success);
+        assert_eq!(resp.data, Some(42));
+        assert!(resp.error.is_none());
+        assert!(resp.code.is_none());
+
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"success\":true"));
+        assert!(json.contains("\"data\":42"));
+        assert!(!json.contains("error"));
+        assert!(!json.contains("code"));
+    }
+
+    #[test]
+    fn test_api_response_error() {
+        let resp: ApiResponse<()> = ApiResponse::error("not found", "NOT_FOUND");
+        assert!(!resp.success);
+        assert!(resp.data.is_none());
+        assert_eq!(resp.error, Some("not found".to_string()));
+        assert_eq!(resp.code, Some("NOT_FOUND".to_string()));
+
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"success\":false"));
+        assert!(json.contains("\"error\":\"not found\""));
+        assert!(json.contains("\"code\":\"NOT_FOUND\""));
+    }
+
+    #[test]
+    fn test_api_response_success_with_complex_data() {
+        let data = serde_json::json!({"key": "value", "num": 123});
+        let resp = ApiResponse::success(data);
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"success\":true"));
+        assert!(json.contains("\"key\":\"value\""));
+        assert!(json.contains("\"num\":123"));
+    }
+}

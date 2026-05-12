@@ -27,10 +27,14 @@ use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
 use crate::commands::registry::CommandMeta;
+use crate::log_debug;
+use crate::log_error;
+use crate::log_info;
+use crate::log_trace;
+use crate::log_warn;
 use crate::server::transport::sse::SseEvent;
 use crate::tui::components::{
     chat::Chat,
-    header::{Header, HeaderStatus},
     input::Input,
     left_drawer::LeftDrawer,
     log_window::LogWindow,
@@ -39,7 +43,7 @@ use crate::tui::components::{
     status_bar::StatusBar,
     Component,
 };
-use crate::tui::event::{AppEvent, FocusArea, ModelItem, ProviderItem, QuestionAnswer};
+use crate::tui::event::{AppEvent, CardAction, FocusArea, ModelItem, ProviderItem, QuestionAnswer};
 use crate::tui::layout::{LayoutManager, PanelState};
 use crate::tui::theme::Theme;
 
@@ -120,12 +124,11 @@ pub struct TuiApp {
     preview_theme_backup: Option<(usize, Arc<Theme>)>,
 
     // === 各区域 UI 组件 ===
-    header: Header,            // 顶部标题栏（Logo、模型、状态）
     left_drawer: LeftDrawer,   // 左侧文件抽屉
     right_drawer: RightDrawer, // 右侧会话历史抽屉
     chat: Chat,                // 中间聊天消息区
     input: Input,              // 底部输入框
-    status_bar: StatusBar,     // 最底部快捷键提示栏
+    status_bar: StatusBar,     // 最底部状态栏
     log_window: LogWindow,     // 日志浮窗
 
     // === 应用状态 ===
@@ -137,6 +140,7 @@ pub struct TuiApp {
     api_key_dialog: Option<ApiKeyDialog>,         // API Key 输入模态框
     question_dialog: Option<QuestionDialog>,      // 问题询问模态框
     generation_start: Option<std::time::Instant>, // 当前生成轮次的开始时间
+    providers: Vec<ProviderItem>,                  // 模型提供商列表（从后端加载）
 
     // === 后端通信与事件通道 ===
     client: TuiClient,                  // HTTP 客户端，对接本地 4040 端口服务
@@ -148,6 +152,7 @@ pub struct TuiApp {
 impl TuiApp {
     /// 创建应用实例，初始化默认主题、布局与各个子组件。
     pub fn new() -> Self {
+        log_info!("[Client] TuiApp initializing...");
         let (event_tx, event_rx) = mpsc::channel(100);
         let (crossterm_tx, crossterm_rx) = mpsc::channel(100);
 
@@ -178,6 +183,7 @@ impl TuiApp {
         // 设置全局事件发送器，供工具调用时发送事件
         crate::tools::set_event_tx(event_tx.clone());
 
+        log_info!("[Client] TuiApp initialized | theme={} | size={}x{}", presets[0].name, term_w, term_h);
         Self {
             layout: LayoutManager::new(term_w, term_h),
             theme: themes[0].clone(),
@@ -185,7 +191,6 @@ impl TuiApp {
             theme_index: 0,
             theme_presets: presets,
             preview_theme_backup: None,
-            header: Header::new(),
             left_drawer: LeftDrawer::new(),
             right_drawer: RightDrawer::new(),
             chat: Chat::new(),
@@ -200,6 +205,7 @@ impl TuiApp {
             api_key_dialog: None,
             question_dialog: None,
             generation_start: None,
+            providers: Vec::new(),
             client: TuiClient::new(),
             event_tx,
             event_rx,
@@ -216,12 +222,37 @@ impl TuiApp {
     ///    - 异步任务通过 `event_rx` 发来的应用事件（如 SSE 消息到达、会话切换完成）。
     ///    - 终端键盘/鼠标事件（通过 `crossterm` 读取）。
     pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
-        // 启动时先请求后端状态，获取当前使用的模型名并显示在标题栏
-        if let Ok(model) = self.client.get_status().await {
-            self.header.set_current_model(model);
+        log_info!("[Client] TuiApp run starting");
+
+        // 启动时获取后端配置信息（config.json 路径、Provider 等）
+        match self.client.get_config().await {
+            Ok(config) => {
+                let config_path = config["config_path"].as_str().unwrap_or("unknown");
+                let provider = &config["provider"];
+                let model_name = provider["model_name"].as_str().unwrap_or("unknown");
+                let base_url = provider["base_url"].as_str().unwrap_or("unknown");
+                let model_type = provider["model_type"].as_str().unwrap_or("unknown");
+                log_info!("[Client] Backend config | path={} | model={} | type={} | url={}",
+                    config_path, model_name, model_type, base_url);
+                self.status_bar.set_model(model_name.to_string());
+            }
+            Err(e) => {
+                log_error!("[Client] Failed to get backend config | {}", e);
+            }
         }
 
-        let mut interval = tokio::time::interval(Duration::from_millis(80));
+        // 启动时创建一个默认会话，确保 input 边框始终显示 session
+        match self.client.create_session("default").await {
+            Ok(info) => {
+                log_info!("[Client] Session created | id={}", info.id);
+                self.input.set_session_id(Some(info.id));
+            }
+            Err(e) => {
+                log_error!("[Client] Failed to create session | {}", e);
+            }
+        }
+
+        let mut interval = tokio::time::interval(Duration::from_millis(40));
 
         while !self.should_quit {
             // 只有状态发生变化（dirty）时才执行重绘，避免无意义的 CPU 消耗。
@@ -252,21 +283,9 @@ impl TuiApp {
         self.layout.resize(area.width, area.height);
         let areas = self.layout.calculate();
         let input_lines = self.input.visible_lines();
-        // 如果有会话 ID，给输入框额外加一行显示
-        let input_extra = if self.header.session_id().is_some() {
-            1
-        } else {
-            0
-        };
         let (messages_area, input_area) =
-            LayoutManager::split_main(areas.main, input_lines + input_extra);
+            LayoutManager::split_main(areas.main, input_lines);
 
-        self.header.draw(
-            frame,
-            areas.header,
-            &self.theme,
-            self.focus == FocusArea::Header,
-        );
         self.chat.draw(
             frame,
             messages_area,
@@ -477,32 +496,7 @@ impl TuiApp {
                 self.exit_confirm_pending = false;
                 self.handle_execute_slash_command("models", &None);
             }
-            'n' => {
-                self.exit_confirm_pending = false;
-                let was_open = self.header.has_dropdown_open();
-                self.header.toggle_model_dropdown();
-                if !was_open && self.header.needs_load_models() {
-                    let client = self.client.clone();
-                    let tx = self.event_tx.clone();
-                    tokio::spawn(async move {
-                        match client.list_models().await {
-                            Ok(data) => {
-                                let providers = parse_model_list(&data);
-                                let _ = tx.send(AppEvent::SetModelList(providers)).await;
-                            }
-                            Err(e) => {
-                                let _ = tx
-                                    .send(AppEvent::ShowSystemMessage(format!(
-                                        "Load models failed: {}",
-                                        e
-                                    )))
-                                    .await;
-                            }
-                        }
-                    });
-                }
-                self.focus = FocusArea::Header;
-            }
+
             't' => {
                 self.exit_confirm_pending = false;
                 self.handle_execute_slash_command("themes", &None);
@@ -536,8 +530,6 @@ impl TuiApp {
         }
         if self.layout.panel != PanelState::LeftClosed {
             self.layout.close_left();
-        } else if self.header.has_dropdown_open() {
-            self.header.close_dropdowns();
         } else {
             self.focus = FocusArea::Main;
         }
@@ -689,7 +681,6 @@ impl TuiApp {
         }
 
         let app_event = match self.focus {
-            FocusArea::Header => self.header.handle_event(&event, true),
             FocusArea::LeftDrawer => self.left_drawer.handle_event(&event, true),
             FocusArea::RightDrawer => self.right_drawer.handle_event(&event, true),
             FocusArea::Main => self.chat.handle_event(&event, true),
@@ -746,7 +737,9 @@ impl TuiApp {
             }
             AppEvent::Tick => {
                 self.chat.on_tick();
-                self.header.on_tick();
+                self.status_bar.on_tick();
+                // Tick 日志太频繁，只在 Debug 级别输出
+                log_trace!("[Client] Tick | is_generating={}", self.is_generating);
                 // 更新状态栏的耗时
                 if let Some(start) = self.generation_start {
                     let elapsed = start.elapsed().as_secs();
@@ -758,39 +751,51 @@ impl TuiApp {
             }
             // 用户提交消息：标记生成中、添加到聊天区，并启动 SSE 流请求
             AppEvent::SubmitMessage(ref msg) => {
+                log_info!("[Client] SubmitMessage | len={}", msg.len());
                 self.is_generating = true;
                 self.generation_start = Some(std::time::Instant::now());
-                self.header.set_status(HeaderStatus::Generating);
                 self.chat.add_user_message(msg);
                 self.start_chat_stream(msg.clone()).await;
             }
             // SSE 事件到达：将内容追加到聊天区；若为 Done 事件则更新会话 ID
             AppEvent::SseEvent(ref sse_event) => {
+                log_debug!("[Client] AppEvent::SseEvent received");
                 self.chat.handle_sse_event(sse_event);
-                // 当内容到达时，设置为 Streaming 状态
-                match sse_event {
-                    SseEvent::Message { .. }
-                    | SseEvent::ToolUse { .. }
-                    | SseEvent::ToolResult { .. }
-                    | SseEvent::MessageDetails { .. } => {
-                        self.header.set_status(HeaderStatus::Streaming);
-                    }
-                    _ => {}
-                }
-                if let SseEvent::Done { session_id } = sse_event {
-                    self.header.set_session_id(session_id.clone());
+                if let SseEvent::Done { session_id } = &sse_event {
                     self.input.set_session_id(Some(session_id.clone()));
+                }
+                if let SseEvent::Usage { prompt_tokens, completion_tokens } = &sse_event {
+                    self.status_bar.set_tokens(*prompt_tokens as usize, *completion_tokens as usize);
                 }
             }
             AppEvent::ChatComplete => {
+                log_info!("[Client] ChatComplete");
                 self.is_generating = false;
                 self.generation_start = None;
-                self.header.set_status(HeaderStatus::Ready);
             }
             AppEvent::StopGeneration => {
+                log_info!("[Client] StopGeneration");
                 self.is_generating = false;
                 self.generation_start = None;
-                self.header.set_status(HeaderStatus::Ready);
+            }
+            AppEvent::CardAction(ref action) => {
+                self.chat.handle_card_action(action);
+                if let CardAction::Retry(ref card_id) = action {
+                    if let Some(turn_idx) = self.chat.find_turn_index_by_card_id(card_id) {
+                        if let Some(user_msg) = self.chat.retry_turn(turn_idx) {
+                            self.is_generating = true;
+                            self.generation_start = Some(std::time::Instant::now());
+                            self.start_chat_stream(user_msg).await;
+                        }
+                    }
+                }
+            }
+            AppEvent::RetryTurn { turn_index } => {
+                if let Some(user_msg) = self.chat.retry_turn(turn_index) {
+                    self.is_generating = true;
+                    self.generation_start = Some(std::time::Instant::now());
+                    self.start_chat_stream(user_msg).await;
+                }
             }
             // 切换左侧文件抽屉：打开时自动将焦点移入，并异步请求当前目录文件树
             AppEvent::ToggleLeftDrawer => {
@@ -821,7 +826,6 @@ impl TuiApp {
                 self.layout.close_left();
             }
             AppEvent::SelectModel(ref model) => {
-                self.header.set_current_model(model.clone());
                 self.status_bar.set_model(model.clone());
             }
             AppEvent::SwitchModel {
@@ -854,7 +858,7 @@ impl TuiApp {
                 });
             }
             AppEvent::SetModelList(ref providers) => {
-                self.header.set_providers(providers.clone());
+                self.providers = providers.clone();
                 // 如果当前正在 /models 的 ModelProvider 子菜单中，填充 provider 列表
                 if self.input.is_submenu_open() {
                     let items: Vec<(String, String, String)> = providers
@@ -865,7 +869,7 @@ impl TuiApp {
                 }
             }
             AppEvent::SelectModelProvider(ref provider_key) => {
-                if let Some(provider) = self.header.get_provider(provider_key) {
+                if let Some(provider) = self.providers.iter().find(|p| p.key == *provider_key) {
                     let items: Vec<(String, String, String)> = provider
                         .models
                         .iter()
@@ -944,6 +948,7 @@ impl TuiApp {
                 self.handle_execute_slash_command(name, args_hint);
             }
             AppEvent::ShowSystemMessage(ref msg) => {
+                log_debug!("[Client] ShowSystemMessage | {}", msg);
                 self.chat.add_system_message(msg);
             }
             AppEvent::ClearChat => {
@@ -1030,6 +1035,20 @@ impl TuiApp {
             }
             AppEvent::LogDisconnected => {
                 self.log_window.set_disconnected(true);
+                // 如果 Log 窗口仍然可见，延迟 2 秒后自动重连
+                if self.log_window.is_visible() {
+                    log_debug!("[Client] Log stream disconnected, will reconnect in 2s");
+                    let client = self.client.clone();
+                    let tx = self.event_tx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        log_debug!("[Client] Log stream reconnecting...");
+                        if let Err(e) = client.subscribe_logs(tx.clone()).await {
+                            log_warn!("[Client] Log stream reconnect failed: {}", e);
+                            let _ = tx.send(AppEvent::LogDisconnected).await;
+                        }
+                    });
+                }
             }
             AppEvent::SetFileTree(ref files) => {
                 self.left_drawer.set_files(files.clone());
@@ -1040,7 +1059,7 @@ impl TuiApp {
         // 同步底部状态栏的生成状态
         self.status_bar.set_generating(self.is_generating);
 
-        self.header.update(&event);
+
         self.chat.update(&event);
         self.input.update(&event);
         self.left_drawer.update(&event);
@@ -1055,31 +1074,22 @@ impl TuiApp {
     /// 1. 调用 `client.chat` 建立 SSE 连接。
     /// 2. 使用内部 channel (`sse_tx`/`sse_rx`) 将收到的每个 SSE 事件转发到主事件通道。
     /// 3. 流结束后发送 `ChatComplete`；若出错则发送 `SseEvent::Error`。
-    async fn start_chat_stream(&self, message: String) {
+    async fn start_chat_stream(&mut self, message: String) {
+        log_info!("[Client] start_chat_stream | session_id={:?} | message_len={}", self.input.session_id(), message.len());
+        self.chat.set_generating(true);
+        self.chat.create_thinking_card();
         let client = self.client.clone();
         let tx = self.event_tx.clone();
-        let session_id = self.header.session_id();
+        let session_id = self.input.session_id();
 
         tokio::spawn(async move {
-            let (sse_tx, mut sse_rx) = mpsc::channel(100);
-
-            // 转发任务：将 SSE channel 中的事件桥接到主事件通道
-            let forward_handle = {
-                let tx = tx.clone();
-                tokio::spawn(async move {
-                    while let Some(event) = sse_rx.recv().await {
-                        let _ = tx.send(AppEvent::SseEvent(event)).await;
-                    }
-                })
-            };
-
-            match client.chat(session_id, message, sse_tx).await {
-                Ok(_) => {
-                    let _ = forward_handle.await;
+            match client.chat(session_id, message, tx.clone()).await {
+                Ok(sid) => {
+                    log_info!("[Client] chat stream completed | session_id={}", sid);
                     let _ = tx.send(AppEvent::ChatComplete).await;
                 }
                 Err(e) => {
-                    let _ = forward_handle.await;
+                    log_error!("[Client] chat stream error | {}", e);
                     let _ = tx
                         .send(AppEvent::SseEvent(SseEvent::Error {
                             message: e.to_string(),
@@ -1162,7 +1172,8 @@ impl TuiApp {
         let client = self.client.clone();
         let tx = self.event_tx.clone();
         tokio::spawn(async move {
-            if let Err(_) = client.subscribe_logs(tx.clone()).await {
+            if let Err(e) = client.subscribe_logs(tx.clone()).await {
+                log_warn!("[Client] Log stream error: {}", e);
                 let _ = tx.send(AppEvent::LogDisconnected).await;
             }
         });
@@ -1257,7 +1268,7 @@ impl TuiApp {
         } else {
             let client = self.client.clone();
             let tx = self.event_tx.clone();
-            let session_id = self.header.session_id();
+            let session_id = self.input.session_id();
             let cmd_name = name.to_string();
             tokio::spawn(async move {
                 match client.execute_command(&cmd_name, None, session_id).await {

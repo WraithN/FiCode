@@ -49,6 +49,23 @@ pub struct Provider {
     http_client: reqwest::Client,
 }
 
+/// Provider 配置摘要信息（用于前端展示）
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProviderInfo {
+    pub model_name: String,
+    pub base_url: String,
+    pub model_type: String,
+    pub api_key_masked: String,
+}
+
+fn mask_api_key(key: &str) -> String {
+    if key.len() <= 8 {
+        "***".to_string()
+    } else {
+        format!("{}...{} ({} chars)", &key[..4], &key[key.len()-4..], key.len())
+    }
+}
+
 impl Default for Provider {
     fn default() -> Self {
         Self {
@@ -248,6 +265,27 @@ impl Provider {
             .as_ref()
             .map(|m| m.model_name.as_str())
             .ok_or_else(|| anyhow!("Model not set"))
+    }
+
+    /// 返回当前 Provider 的配置摘要信息
+    pub fn info(&self) -> ProviderInfo {
+        match &self.model {
+            Some(m) => ProviderInfo {
+                model_name: m.model_name.clone(),
+                base_url: m.base_url.clone(),
+                model_type: match m.model_type {
+                    ModelType::OpenAiCompatible => "openai_compatible".to_string(),
+                    ModelType::Anthropic => "anthropic".to_string(),
+                },
+                api_key_masked: mask_api_key(&m.api_key),
+            },
+            None => ProviderInfo {
+                model_name: "not_set".to_string(),
+                base_url: String::new(),
+                model_type: "unknown".to_string(),
+                api_key_masked: String::new(),
+            },
+        }
     }
 
     /// 运行时切换模型。

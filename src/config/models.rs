@@ -42,6 +42,9 @@ pub struct Config {
     pub provider: HashMap<String, ProviderConfig>,
     pub mcp: Option<HashMap<String, McpServerConfig>>,
     pub server: Option<ServerConfig>,
+    /// 加载此配置的文件路径（运行时填充，不序列化）
+    #[serde(skip)]
+    pub source_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

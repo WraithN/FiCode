@@ -43,7 +43,6 @@ pub struct LayoutManager {
 /// 计算出的各区域坐标与尺寸。
 #[derive(Debug)]
 pub struct LayoutAreas {
-    pub header: Rect,
     pub left_drawer: Option<Rect>,
     pub main: Rect,
     pub right_drawer: Rect, // 改为非 Option，右侧边栏始终常驻
@@ -85,12 +84,11 @@ impl LayoutManager {
 
     /// 根据当前状态计算每个组件应占据的 `Rect`。
     ///
-    /// 固定行高：header = 3，status_bar = 1，剩余为 main 区域。
+    /// 固定行高：status_bar = 1，剩余为 main 区域。
     pub fn calculate(&self) -> LayoutAreas {
         let (width, height) = self.terminal_size;
-        let header_height = 3u16;
         let status_height = 1u16;
-        let main_height = height.saturating_sub(header_height + status_height);
+        let main_height = height.saturating_sub(status_height);
 
         let right_width = ((width as f32 * 0.28) as u16).clamp(24, 40);
 
@@ -101,7 +99,7 @@ impl LayoutManager {
 
             let mut main = Rect::new(
                 0,
-                header_height,
+                0,
                 width.saturating_sub(right_width),
                 main_height,
             );
@@ -119,19 +117,18 @@ impl LayoutManager {
             };
 
             LayoutAreas {
-                header: Rect::new(0, 0, width, header_height),
                 left_drawer: None,
                 main,
                 right_drawer: Rect::new(
                     width.saturating_sub(right_width),
-                    header_height,
+                    0,
                     right_width,
                     main_height,
                 ),
                 status_bar: Rect::new(0, height - status_height, width, status_height),
                 overlay: Some(Rect::new(
                     overlay_x,
-                    header_height,
+                    0,
                     overlay_width,
                     main_height,
                 )),
@@ -151,7 +148,7 @@ impl LayoutManager {
             let main_x = if left_open { left_width } else { 0 };
             let right_x = main_x + main_width;
 
-            let mut main = Rect::new(main_x, header_height, main_width, main_height);
+            let mut main = Rect::new(main_x, 0, main_width, main_height);
             let log_window = if self.log_window {
                 let log_height = (main.height as f32 * 0.6) as u16;
                 main.height = main.height.saturating_sub(log_height);
@@ -166,11 +163,10 @@ impl LayoutManager {
             };
 
             LayoutAreas {
-                header: Rect::new(0, 0, width, header_height),
                 left_drawer: left_open
-                    .then(|| Rect::new(left_x, header_height, left_width, main_height)),
+                    .then(|| Rect::new(left_x, 0, left_width, main_height)),
                 main,
-                right_drawer: Rect::new(right_x, header_height, right_width, main_height),
+                right_drawer: Rect::new(right_x, 0, right_width, main_height),
                 status_bar: Rect::new(0, height - status_height, width, status_height),
                 overlay: None,
                 log_window,
@@ -202,7 +198,6 @@ mod tests {
         let layout = LayoutManager::new(120, 30);
         let areas = layout.calculate();
 
-        assert_eq!(areas.header.height, 3);
         assert_eq!(areas.status_bar.height, 1);
         assert!(areas.left_drawer.is_none());
         // 右侧边栏始终存在
@@ -264,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_main_split() {
-        let main = Rect::new(0, 3, 100, 20);
+        let main = Rect::new(0, 0, 100, 20);
         let (messages, input) = LayoutManager::split_main(main, 3);
 
         assert_eq!(input.height, 5);
@@ -281,7 +276,7 @@ mod tests {
         assert!(areas.log_window.is_some());
         let log = areas.log_window.unwrap();
         let main = areas.main;
-        assert_eq!(main.height + log.height, 30 - 3 - 1); // minus header + status
+        assert_eq!(main.height + log.height, 30 - 1); // minus status
         assert!(log.height > main.height);
         assert_eq!(log.y, main.y + main.height);
         assert_eq!(log.width, main.width);

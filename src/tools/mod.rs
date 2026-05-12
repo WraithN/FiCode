@@ -65,6 +65,11 @@ pub fn set_event_tx(tx: mpsc::Sender<AppEvent>) {
     *event_tx = Some(tx);
 }
 
+// 获取全局事件发送器
+pub fn get_event_tx() -> Option<mpsc::Sender<AppEvent>> {
+    EVENT_TX.read().unwrap().clone()
+}
+
 // =============================================================================
 // 辅助函数：从 JSON 对象中提取字符串参数
 // =============================================================================
@@ -722,9 +727,18 @@ async fn execute_single_tool_call(
     }
 }
 
-pub async fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
+pub async fn execute_tool_calls(
+    parts: &[Part],
+    on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
+) -> Vec<Part> {
     use colored::Colorize;
     use futures::future::join_all;
+    use crate::server::transport::sse::SseEvent;
+    use std::sync::{Arc, Mutex};
+
+    // 将回调提取到 Arc<Mutex<...>> 中，以便在并行的 async 块之间安全共享
+    let callback = on_tool_event.take();
+    let shared_cb = Arc::new(Mutex::new(callback));
 
     let futures: Vec<_> = parts
         .iter()
@@ -741,10 +755,38 @@ pub async fn execute_tool_calls(parts: &[Part]) -> Vec<Part> {
             let id = id.clone();
             let name = name.clone();
             let arguments = arguments.clone();
+            let cb = shared_cb.clone();
             Some(async move {
                 log_info!("calling tool: ${}", name);
                 log_debug!("execute_tool_call | name={} | args={}", name, arguments);
                 let (content, is_error) = execute_single_tool_call(&id, &name, &arguments).await;
+                
+                // Parse JSON content to extract diff if present
+                let (display_content, diff, is_new_file) = if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if json_val.get("diff").is_some() {
+                        (
+                            json_val["content"].as_str().unwrap_or(&content).to_string(),
+                            json_val["diff"].as_str().map(|s| s.to_string()),
+                            json_val["is_new_file"].as_bool().unwrap_or(false),
+                        )
+                    } else {
+                        (content.clone(), None, false)
+                    }
+                } else {
+                    (content.clone(), None, false)
+                };
+                
+                if let Ok(mut guard) = cb.lock() {
+                    if let Some(ref mut callback) = *guard {
+                        let _ = callback(SseEvent::ToolResult {
+                            tool_use_id: id.clone(),
+                            content: display_content,
+                            diff,
+                            is_new_file,
+                        });
+                    }
+                }
+                
                 Part::ToolResult {
                     tool_call_id: id,
                     content,

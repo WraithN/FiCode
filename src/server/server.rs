@@ -128,6 +128,7 @@ impl Server {
                 post(super::commands::handle_execute_command),
             )
             .route("/api/themes", get(handle_list_themes))
+            .route("/api/config", get(super::api::chat_api::handle_get_config))
             .route(
                 "/api/models",
                 get(super::api::chat_api::handle_list_models_endpoint),
@@ -227,4 +228,161 @@ async fn handle_list_themes(
     State(state): State<AppState>,
 ) -> Json<ApiResponse<Vec<crate::tui::theme::ThemePreset>>> {
     Json(ApiResponse::success(state.themes.clone()))
+}
+
+#[cfg(test)]
+pub mod test_helpers {
+    use super::*;
+    use std::collections::HashMap;
+    use crate::config::models::{Config, ProviderConfig, ProviderOptions, ModelConfig, ProviderType, ServerConfig};
+    use crate::provider::Provider;
+
+    /// 创建一个测试用的 Config，包含一个测试 Provider 和模型
+    pub fn create_test_config() -> Config {
+        let mut models = HashMap::new();
+        models.insert("test-model".to_string(), ModelConfig {
+            name: "Test Model".to_string(),
+            ..Default::default()
+        });
+
+        let mut provider = HashMap::new();
+        provider.insert("test-provider".to_string(), ProviderConfig {
+            provider_type: ProviderType::OpenAiCompatible,
+            npm: "@test".to_string(),
+            name: "Test Provider".to_string(),
+            options: ProviderOptions {
+                api_key: "test-api-key".to_string(),
+                base_url: "http://localhost:11434".to_string(),
+                timeout: 300_000,
+                chunk_timeout: 10_000,
+                headers: None,
+            },
+            models,
+        });
+
+        Config {
+            model: "test-provider/test-model".to_string(),
+            provider,
+            mcp: None,
+            server: Some(ServerConfig {
+                port: Some(4040),
+                api_token: Some("test-token".to_string()),
+                allowed_origins: None,
+            }),
+            source_path: Some("/test/config.json".to_string()),
+        }
+    }
+
+    /// 创建一个测试用的 AppState
+    pub fn create_test_app_state() -> AppState {
+        let config = create_test_config();
+        let config_arc = Arc::new(RwLock::new(config.clone()));
+
+        let mut provider = Provider::default();
+        provider.set_model("test-provider/test-model", &config).unwrap();
+        let provider_arc = Arc::new(RwLock::new(provider));
+
+        let sessions = Arc::new(HttpSessionManager::new());
+        let (commands, current_theme) = crate::server::commands::build_command_registry(sessions.clone());
+
+        AppState {
+            provider: provider_arc,
+            config: config_arc,
+            sessions,
+            commands: Arc::new(commands),
+            themes: crate::tui::theme::ThemePreset::all_presets(),
+            current_theme,
+            log_broadcaster: Some(Arc::new(crate::utils::log_store::LogBroadcaster::new(100))),
+        }
+    }
+
+    /// 创建一个没有 api_token 的 Config（用于测试无需认证的场景）
+    pub fn create_test_config_no_auth() -> Config {
+        let mut config = create_test_config();
+        config.server = Some(ServerConfig {
+            port: Some(4040),
+            api_token: None,
+            allowed_origins: None,
+        });
+        config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::test_helpers::*;
+    use axum::http::HeaderMap;
+
+    #[tokio::test]
+    async fn test_check_auth_no_token_required() {
+        let config = Arc::new(RwLock::new(create_test_config_no_auth()));
+        let headers = HeaderMap::new();
+        let result = check_auth(&headers, &config).await;
+        assert!(result.is_none(), "无 token 配置时应直接通过");
+    }
+
+    #[tokio::test]
+    async fn test_check_auth_missing_header() {
+        let config = Arc::new(RwLock::new(create_test_config()));
+        let headers = HeaderMap::new();
+        let result = check_auth(&headers, &config).await;
+        assert!(result.is_some(), "缺少 Authorization 头应返回错误");
+        let resp = result.unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().message, "Unauthorized");
+    }
+
+    #[tokio::test]
+    async fn test_check_auth_invalid_token() {
+        let config = Arc::new(RwLock::new(create_test_config()));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer wrong-token"),
+        );
+        let result = check_auth(&headers, &config).await;
+        assert!(result.is_some(), "错误的 token 应返回错误");
+    }
+
+    #[tokio::test]
+    async fn test_check_auth_valid_token() {
+        let config = Arc::new(RwLock::new(create_test_config()));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer test-token"),
+        );
+        let result = check_auth(&headers, &config).await;
+        assert!(result.is_none(), "正确的 token 应通过认证");
+    }
+
+    #[tokio::test]
+    async fn test_check_auth_malformed_header() {
+        let config = Arc::new(RwLock::new(create_test_config()));
+        let mut headers = HeaderMap::new();
+        // 不以 "Bearer " 开头
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Basic dXNlcjpwYXNz"),
+        );
+        let result = check_auth(&headers, &config).await;
+        assert!(result.is_some(), "非 Bearer 认证应返回错误");
+    }
+
+    #[test]
+    fn test_create_test_app_state() {
+        let state = create_test_app_state();
+        let provider = state.provider.read().unwrap();
+        assert_eq!(provider.model_name().unwrap(), "test-model");
+    }
+
+    #[test]
+    fn test_cors_layer_no_origins() {
+        let config = Arc::new(RwLock::new(create_test_config_no_auth()));
+        let layer = cors_layer(config);
+        // CorsLayer::permissive 应该允许所有来源
+        // 这里主要测试不 panic
+        drop(layer);
+    }
 }

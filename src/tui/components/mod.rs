@@ -25,8 +25,8 @@ use ratatui::{layout::Rect, Frame};
 use crate::tui::event::AppEvent;
 use crate::tui::theme::Theme;
 
+pub mod card_widget;
 pub mod chat;
-pub mod header;
 pub mod input;
 pub mod left_drawer;
 pub mod log_window;

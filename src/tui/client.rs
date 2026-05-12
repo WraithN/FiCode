@@ -27,6 +27,11 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::commands::registry::{CommandMeta, CommandOutput};
+use crate::log_debug;
+use crate::log_error;
+use crate::log_info;
+use crate::log_trace;
+use crate::log_warn;
 use crate::server::transport::rpc::{JsonRpcRequest, JsonRpcResponse};
 use crate::server::transport::sse::SseEvent;
 use crate::tui::event::{AppEvent, LogLevel, LogLine};
@@ -85,30 +90,40 @@ pub struct TuiClient {
 
 impl TuiClient {
     /// 创建客户端，默认连接 `http://localhost:4040`。
+    /// 配置 tcp_nodelay 禁用 Nagle 算法，对小数据包（SSE token）更友好。
     pub fn new() -> Self {
+        let client = Client::builder()
+            .tcp_nodelay(true)
+            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| Client::new());
         Self {
-            client: Client::new(),
+            client,
             base_url: "http://localhost:4040".to_string(),
         }
     }
 
     /// 获取当前模型名
     pub async fn get_status(&self) -> Result<String> {
+        let url = format!("{}/rpc", self.base_url);
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "get_status".to_string(),
             params: None,
             id: Some(json!(1)),
         };
+        log_debug!("[Client] HTTP -> POST {} | method=get_status", url);
 
         let resp = self
             .client
-            .post(format!("{}/rpc", self.base_url))
+            .post(&url)
             .json(&req)
             .send()
-            .await?
-            .json::<JsonRpcResponse>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<JsonRpcResponse>().await?;
+        log_debug!("[Client] HTTP <- POST {} | status={} | result={:?}", url, status, resp.result.is_some());
 
         match resp.result {
             Some(result) => Ok(result["current_model"]
@@ -123,21 +138,24 @@ impl TuiClient {
     ///
     /// 返回执行结果中的 `message` 字段。
     pub async fn execute(&self, command: &str) -> Result<String> {
+        let url = format!("{}/rpc", self.base_url);
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "execute".to_string(),
             params: Some(json!({ "command": command })),
             id: Some(json!(1)),
         };
+        log_debug!("[Client] HTTP -> POST {} | method=execute | command={}", url, command);
 
         let resp = self
             .client
-            .post(format!("{}/rpc", self.base_url))
+            .post(&url)
             .json(&req)
             .send()
-            .await?
-            .json::<JsonRpcResponse>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<JsonRpcResponse>().await?;
+        log_debug!("[Client] HTTP <- POST {} | status={} | result={:?}", url, status, resp.result.is_some());
 
         match resp.result {
             Some(result) => Ok(result["message"].as_str().unwrap_or("OK").to_string()),
@@ -147,62 +165,88 @@ impl TuiClient {
 
     /// 发起对话并接收 SSE 流式响应。
     ///
-    /// 解析每行 `data: ` 后的 JSON，转换为 `SseEvent` 并通过 channel 实时发送。
+    /// 解析每行 `data: ` 后的 JSON，转换为 `AppEvent::SseEvent` 并通过 channel 实时发送到主事件循环。
     /// 当收到 `SseEvent::Done` 时返回最终的 `session_id`。
     pub async fn chat(
         &self,
         session_id: Option<String>,
         message: String,
-        tx: mpsc::Sender<SseEvent>,
+        tx: mpsc::Sender<AppEvent>,
     ) -> Result<String> {
+        let url = format!("{}/chat", self.base_url);
         let req_body = json!({
             "session_id": session_id,
             "message": message
         });
+        log_info!("[Client] HTTP -> POST {} | session_id={:?} | message_len={}", url, session_id, message.len());
 
         let response = self
             .client
-            .post(format!("{}/chat", self.base_url))
+            .post(&url)
             .json(&req_body)
             .send()
             .await?;
+        log_debug!("[Client] HTTP <- POST {} | status={}", url, response.status());
 
         let mut stream = response.bytes_stream();
         let mut final_session_id = session_id.clone();
+        let mut buffer = String::new();
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
-            if let Ok(text) = std::str::from_utf8(&chunk) {
-                for line in text.lines() {
-                    if line.starts_with("data: ") {
-                        let json_str = &line[6..];
-                        if let Ok(event) = serde_json::from_str::<SseEvent>(json_str) {
-                            if let SseEvent::Done { session_id: sid } = &event {
-                                final_session_id = Some(sid.clone());
-                            }
-                            let is_done = matches!(event, SseEvent::Done { .. });
-                            tx.send(event).await?;
-                            if is_done {
-                                return Ok(final_session_id.unwrap_or_default());
-                            }
-                        }
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(pos) = buffer.find('\n') {
+                let line = buffer.drain(..=pos).collect::<String>();
+                let line = line.trim_end();
+
+                if !line.starts_with("data: ") {
+                    continue;
+                }
+
+                let json_str = &line[6..];
+                if let Ok(event) = serde_json::from_str::<SseEvent>(json_str) {
+                    let event_preview = match &event {
+                        SseEvent::Message { content } => format!("Message(len={})", content.len()),
+                        SseEvent::ToolUse { name, .. } => format!("ToolUse(name={})", name),
+                        SseEvent::ToolResult { tool_use_id, .. } => format!("ToolResult(id={})", tool_use_id),
+                        SseEvent::TaskProgress { plan_id, tasks } => format!("TaskProgress(plan={} tasks={})", plan_id, tasks.len()),
+                        SseEvent::Error { message } => format!("Error(msg={})", message),
+                        SseEvent::Done { .. } => "Done".to_string(),
+                        SseEvent::Usage { prompt_tokens, completion_tokens } => format!("Usage(p={} c={})", prompt_tokens, completion_tokens),
+                        SseEvent::MessageDetails { blocks } => format!("MessageDetails(blocks={})", blocks.len()),
+                    };
+                    log_debug!("[Client] HTTP SSE event | {}", event_preview);
+                    if let SseEvent::Done { session_id: sid } = &event {
+                        final_session_id = Some(sid.clone());
+                    }
+                    let is_done = matches!(event, SseEvent::Done { .. });
+                    let _ = tx.send(AppEvent::SseEvent(event)).await;
+                    if is_done {
+                        log_info!("[Client] HTTP SSE stream done | session_id={:?}", final_session_id);
+                        return Ok(final_session_id.unwrap_or_default());
                     }
                 }
             }
         }
 
+        log_warn!("[Client] HTTP SSE stream ended without Done");
         Ok(final_session_id.unwrap_or_default())
     }
 
     /// 获取所有会话列表。
     pub async fn list_sessions(&self) -> anyhow::Result<SessionListResult> {
+        let url = format!("{}/api/sessions", self.base_url);
+        log_debug!("HTTP -> GET {}", url);
+
         let resp = self
             .client
-            .get(format!("{}/api/sessions", self.base_url))
+            .get(&url)
             .send()
-            .await?
-            .json::<ApiResponse<SessionListResult>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<SessionListResult>>().await?;
+        log_debug!("HTTP <- GET {} | status={} | sessions={}", url, status, resp.data.as_ref().map(|d| d.sessions.len()).unwrap_or(0));
 
         match resp.data {
             Some(data) => Ok(data),
@@ -212,15 +256,19 @@ impl TuiClient {
 
     /// 创建新会话。
     pub async fn create_session(&self, name: &str) -> anyhow::Result<SessionInfo> {
+        let url = format!("{}/api/sessions", self.base_url);
         let body = serde_json::json!({"name": name});
+        log_debug!("HTTP -> POST {} | name={}", url, name);
+
         let resp = self
             .client
-            .post(format!("{}/api/sessions", self.base_url))
+            .post(&url)
             .json(&body)
             .send()
-            .await?
-            .json::<ApiResponse<SessionInfo>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<SessionInfo>>().await?;
+        log_debug!("HTTP <- POST {} | status={} | id={:?}", url, status, resp.data.as_ref().map(|d| &d.id));
 
         match resp.data {
             Some(data) => Ok(data),
@@ -230,13 +278,17 @@ impl TuiClient {
 
     /// 切换到指定会话。
     pub async fn switch_session(&self, id: &str) -> anyhow::Result<SessionInfo> {
+        let url = format!("{}/api/sessions/{}/switch", self.base_url, id);
+        log_debug!("HTTP -> POST {} | id={}", url, id);
+
         let resp = self
             .client
-            .post(format!("{}/api/sessions/{}/switch", self.base_url, id))
+            .post(&url)
             .send()
-            .await?
-            .json::<ApiResponse<SessionInfo>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<SessionInfo>>().await?;
+        log_debug!("HTTP <- POST {} | status={} | result={:?}", url, status, resp.data.as_ref().map(|d| &d.id));
 
         match resp.data {
             Some(data) => Ok(data),
@@ -246,13 +298,17 @@ impl TuiClient {
 
     /// 获取指定路径下的文件树。
     pub async fn get_file_tree(&self, path: &str) -> anyhow::Result<FileTreeResult> {
+        let url = format!("{}/api/files?path={}", self.base_url, path);
+        log_debug!("HTTP -> GET {} | path={}", url, path);
+
         let resp = self
             .client
-            .get(format!("{}/api/files?path={}", self.base_url, path))
+            .get(&url)
             .send()
-            .await?
-            .json::<ApiResponse<FileTreeResult>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<FileTreeResult>>().await?;
+        log_debug!("HTTP <- GET {} | status={} | entries={}", url, status, resp.data.as_ref().map(|d| d.entries.len()).unwrap_or(0));
 
         match resp.data {
             Some(data) => Ok(data),
@@ -262,13 +318,17 @@ impl TuiClient {
 
     /// 获取所有可用命令的元数据列表
     pub async fn list_commands(&self) -> Result<Vec<CommandMeta>> {
+        let url = format!("{}/api/commands", self.base_url);
+        log_debug!("HTTP -> GET {}", url);
+
         let resp = self
             .client
-            .get(format!("{}/api/commands", self.base_url))
+            .get(&url)
             .send()
-            .await?
-            .json::<ApiResponse<Vec<CommandMeta>>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<Vec<CommandMeta>>>().await?;
+        log_debug!("HTTP <- GET {} | status={} | count={}", url, status, resp.data.as_ref().map(|d| d.len()).unwrap_or(0));
 
         match resp.data {
             Some(data) => Ok(data),
@@ -283,19 +343,22 @@ impl TuiClient {
         args: Option<String>,
         session_id: Option<String>,
     ) -> Result<CommandOutput> {
+        let url = format!("{}/api/commands/{}/execute", self.base_url, name);
         let body = serde_json::json!({
             "args": args,
             "session_id": session_id,
         });
+        log_debug!("HTTP -> POST {} | name={} | session_id={:?}", url, name, session_id);
 
         let resp = self
             .client
-            .post(format!("{}/api/commands/{}/execute", self.base_url, name))
+            .post(&url)
             .json(&body)
             .send()
-            .await?
-            .json::<ApiResponse<CommandOutput>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<CommandOutput>>().await?;
+        log_debug!("HTTP <- POST {} | status={} | result={:?}", url, status, resp.data.as_ref().map(|d| d.r#type.clone()));
 
         match resp.data {
             Some(data) => Ok(data),
@@ -305,13 +368,17 @@ impl TuiClient {
 
     /// 获取所有可用主题预设列表
     pub async fn list_themes(&self) -> Result<Vec<crate::tui::theme::ThemePreset>> {
+        let url = format!("{}/api/themes", self.base_url);
+        log_debug!("HTTP -> GET {}", url);
+
         let resp = self
             .client
-            .get(format!("{}/api/themes", self.base_url))
+            .get(&url)
             .send()
-            .await?
-            .json::<ApiResponse<Vec<crate::tui::theme::ThemePreset>>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<Vec<crate::tui::theme::ThemePreset>>>().await?;
+        log_debug!("HTTP <- GET {} | status={} | count={}", url, status, resp.data.as_ref().map(|d| d.len()).unwrap_or(0));
 
         match resp.data {
             Some(data) => Ok(data),
@@ -320,13 +387,37 @@ impl TuiClient {
     }
 
     pub async fn get_logs(&self, limit: usize) -> Result<Vec<LogEntry>> {
+        let url = format!("{}/api/logs?limit={}", self.base_url, limit);
+        log_debug!("HTTP -> GET {} | limit={}", url, limit);
+
         let resp = self
             .client
-            .get(format!("{}/api/logs?limit={}", self.base_url, limit))
+            .get(&url)
             .send()
-            .await?
-            .json::<ApiResponse<Vec<LogEntry>>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<Vec<LogEntry>>>().await?;
+        log_debug!("HTTP <- GET {} | status={} | count={}", url, status, resp.data.as_ref().map(|d| d.len()).unwrap_or(0));
+
+        match resp.data {
+            Some(data) => Ok(data),
+            None => Err(anyhow::anyhow!(resp.error.unwrap_or_default())),
+        }
+    }
+
+    /// 获取当前配置摘要（config.json 路径、Provider 信息等）。
+    pub async fn get_config(&self) -> Result<serde_json::Value> {
+        let url = format!("{}/api/config", self.base_url);
+        log_debug!("[Client] HTTP -> GET {}", url);
+
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<serde_json::Value>>().await?;
+        log_debug!("[Client] HTTP <- GET {} | status={} | has_data={}", url, status, resp.data.is_some());
 
         match resp.data {
             Some(data) => Ok(data),
@@ -336,13 +427,17 @@ impl TuiClient {
 
     /// 获取所有可用模型列表（按 Provider 分组）。
     pub async fn list_models(&self) -> Result<serde_json::Value> {
+        let url = format!("{}/api/models", self.base_url);
+        log_debug!("HTTP -> GET {}", url);
+
         let resp = self
             .client
-            .get(format!("{}/api/models", self.base_url))
+            .get(&url)
             .send()
-            .await?
-            .json::<ApiResponse<serde_json::Value>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<serde_json::Value>>().await?;
+        log_debug!("HTTP <- GET {} | status={} | has_data={}", url, status, resp.data.is_some());
 
         match resp.data {
             Some(data) => Ok(data),
@@ -357,19 +452,23 @@ impl TuiClient {
         model: &str,
         api_key: Option<&str>,
     ) -> Result<serde_json::Value> {
+        let url = format!("{}/api/model/switch", self.base_url);
         let body = serde_json::json!({
             "provider": provider,
             "model": model,
-            "api_key": api_key,
+            "api_key": api_key.is_some(),
         });
+        log_info!("HTTP -> POST {} | provider={} | model={}", url, provider, model);
+
         let resp = self
             .client
-            .post(format!("{}/api/model/switch", self.base_url))
+            .post(&url)
             .json(&body)
             .send()
-            .await?
-            .json::<ApiResponse<serde_json::Value>>()
             .await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<serde_json::Value>>().await?;
+        log_info!("HTTP <- POST {} | status={} | success={}", url, status, resp.success);
 
         match resp.data {
             Some(data) => Ok(data),
@@ -379,7 +478,9 @@ impl TuiClient {
 
     pub async fn subscribe_logs(&self, tx: mpsc::Sender<AppEvent>) -> Result<()> {
         let url = format!("{}/api/logs/stream", self.base_url);
+        log_debug!("[Client] HTTP -> GET {} | subscribe_logs", url);
         let response = self.client.get(&url).send().await?;
+        log_debug!("[Client] HTTP <- GET {} | status={}", url, response.status());
 
         let mut stream = response.bytes_stream();
         let mut buf = String::new();

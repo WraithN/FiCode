@@ -121,6 +121,32 @@ macro_rules! log_trace {
 }
 
 #[macro_export]
+macro_rules! log_error {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        {
+            if $crate::utils::log::current_log_level().enabled($crate::utils::log::LogLevel::Info) {
+                let msg = format!($($arg)*);
+                $crate::utils::log::send_log("ERROR", module_path!(), msg);
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_warn {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        {
+            if $crate::utils::log::current_log_level().enabled($crate::utils::log::LogLevel::Info) {
+                let msg = format!($($arg)*);
+                $crate::utils::log::send_log("WARN", module_path!(), msg);
+            }
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! log_block {
     ($level:expr, $title:expr, $content:expr) => {
         #[cfg(debug_assertions)]

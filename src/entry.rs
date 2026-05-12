@@ -277,7 +277,7 @@ async fn run_single_command(
 
     let mut state = LoopState::new(session.messages.clone());
     let client = provider.get_client()?;
-    agent_loop(client.as_ref(), &mut state, &mut None).await?;
+    agent_loop(client.as_ref(), &mut state, &mut None, &mut None).await?;
 
     handle_task_plan_and_save(
         provider,
@@ -369,7 +369,7 @@ async fn run_interactive(
 
                 let mut state = LoopState::new(session.messages.clone());
                 let client = provider.get_client()?;
-                agent_loop(client.as_ref(), &mut state, &mut None).await?;
+                agent_loop(client.as_ref(), &mut state, &mut None, &mut None).await?;
 
                 handle_task_plan_and_save(
                     Arc::clone(&provider),

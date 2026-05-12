@@ -74,6 +74,14 @@ pub struct LogLine {
 ///
 /// 设计意图：将终端输入（`crossterm::Event`）与业务事件解耦，
 /// 使组件只需关心自身业务，无需直接处理底层终端细节。
+/// 卡片交互动作。
+#[derive(Debug, Clone)]
+pub enum CardAction {
+    Expand(String),    // card_id
+    Collapse(String),  // card_id
+    Retry(String),     // card_id
+}
+
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     Tick,
@@ -145,13 +153,14 @@ pub enum AppEvent {
     QuestionAnswered {
         answer: QuestionAnswer,
     },
+    CardAction(CardAction),
+    RetryTurn { turn_index: usize },
     Quit,
 }
 
 /// 当前焦点所在的 UI 区域，用于决定键盘事件下发给哪个组件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusArea {
-    Header,      // 顶部标题栏
     Main,        // 聊天消息区
     Input,       // 底部输入框
     LeftDrawer,  // 左侧文件抽屉
