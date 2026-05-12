@@ -432,7 +432,10 @@ mod e2e_tui_flow {
             .iter()
             .filter(|e| e.event_type == "Message")
             .collect();
-        assert!(!message_events.is_empty(), "Should receive at least one Message event");
+        assert!(
+            !message_events.is_empty(),
+            "Should receive at least one Message event"
+        );
 
         // 验证消息内容非空
         let all_text: String = message_events
@@ -456,10 +459,7 @@ mod e2e_tui_flow {
         );
 
         // 验证没有 Error 事件
-        let error_events: Vec<_> = events
-            .iter()
-            .filter(|e| e.event_type == "Error")
-            .collect();
+        let error_events: Vec<_> = events.iter().filter(|e| e.event_type == "Error").collect();
         assert!(
             error_events.is_empty(),
             "Should not receive Error events, got: {:?}",

@@ -462,10 +462,10 @@ impl Component for Chat {
             let prefix_height = 1u16;
             if is_visible(current_y, prefix_height) {
                 let y = render_y(current_y);
-                let para = Paragraph::new(Line::from(vec![Span::styled(
-                    "You",
-                    theme.style_user().add_modifier(Modifier::BOLD),
-                )]));
+                let para = Paragraph::new(Line::from(vec![
+                    Span::styled("● ", theme.style_user()),
+                    Span::styled("You", theme.style_user().add_modifier(Modifier::BOLD)),
+                ]));
                 frame.render_widget(
                     para,
                     Rect {
@@ -523,9 +523,10 @@ impl Component for Chat {
         for msg in &self.messages {
             let (prefix, style) = match msg.role {
                 MessageRole::User => ("You", theme.style_user().add_modifier(Modifier::BOLD)),
-                MessageRole::Assistant => {
-                    ("◆ AI", theme.style_brand().add_modifier(Modifier::BOLD))
-                }
+                MessageRole::Assistant => (
+                    "◆ FiCodeAgent",
+                    theme.style_brand().add_modifier(Modifier::BOLD),
+                ),
                 MessageRole::System => ("ℹ️ ", Style::default().fg(theme.warning)),
                 MessageRole::Error => ("❌ ", Style::default().fg(theme.error)),
             };
@@ -570,7 +571,11 @@ impl Component for Chat {
             if is_visible(current_y, spinner_height) {
                 let y = render_y(current_y);
                 let spinner_line = Line::from(vec![
-                    Span::styled("◆ AI ", theme.style_brand().add_modifier(Modifier::BOLD)),
+                    Span::styled("◆ ", theme.style_brand()),
+                    Span::styled(
+                        "FiCodeAgent ",
+                        theme.style_brand().add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(spinner, theme.style_brand()),
                 ]);
                 frame.render_widget(
