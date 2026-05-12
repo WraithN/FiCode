@@ -45,13 +45,18 @@ pub struct PromptBuilder;
 static PROJECT_CONTEXT_CACHE: Mutex<Option<(Option<String>, Option<String>)>> = Mutex::new(None);
 
 fn load_project_context() -> (Option<String>, Option<String>) {
-    (PromptBuilder::build_agents_md_inner(), PromptBuilder::build_rules_dir_inner())
+    (
+        PromptBuilder::build_agents_md_inner(),
+        PromptBuilder::build_rules_dir_inner(),
+    )
 }
 
 /// 清空项目上下文缓存（主要用于测试）。
 #[cfg(test)]
 pub fn clear_project_context_cache() {
-    let mut cache = PROJECT_CONTEXT_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = PROJECT_CONTEXT_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     *cache = None;
 }
 
@@ -87,7 +92,9 @@ impl PromptBuilder {
 
         // 块 4-5：项目级内容（从缓存读取，避免每次文件 I/O）
         let cache = {
-            let mut cache = PROJECT_CONTEXT_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            let mut cache = PROJECT_CONTEXT_CACHE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if cache.is_none() {
                 *cache = Some(load_project_context());
             }

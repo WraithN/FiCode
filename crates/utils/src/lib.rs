@@ -19,9 +19,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Output;
-use anyhow::Result;
 
 /// 创建临时测试工作目录
 pub fn create_temp_workspace() -> Result<tempfile::TempDir> {
@@ -33,11 +33,14 @@ pub fn create_temp_workspace() -> Result<tempfile::TempDir> {
 pub fn init_test_project<P: AsRef<Path>>(workspace: P) -> Result<()> {
     let workspace = workspace.as_ref();
     std::fs::create_dir_all(workspace.join("src"))?;
-    std::fs::write(workspace.join("Cargo.toml"), r#"[package]
+    std::fs::write(
+        workspace.join("Cargo.toml"),
+        r#"[package]
 name = "test-project"
 version = "0.1.0"
 edition = "2021"
-"#)?;
+"#,
+    )?;
     std::fs::write(workspace.join("src/main.rs"), "fn main() {}")?;
     Ok(())
 }
@@ -46,12 +49,12 @@ edition = "2021"
 pub async fn run_cli(args: &[&str]) -> Result<Output> {
     let cli_path = std::env::var("CARGO_BIN_EXE_fi-code-cli")
         .unwrap_or_else(|_| "./target/debug/fi-code-cli".to_string());
-    
+
     let output = tokio::process::Command::new(&cli_path)
         .args(args)
         .output()
         .await?;
-    
+
     Ok(output)
 }
 
@@ -59,12 +62,12 @@ pub async fn run_cli(args: &[&str]) -> Result<Output> {
 pub async fn run_server(port: u16) -> Result<tokio::process::Child> {
     let server_path = std::env::var("CARGO_BIN_EXE_fi-code-server")
         .unwrap_or_else(|_| "./target/debug/fi-code-server".to_string());
-    
+
     let child = tokio::process::Command::new(&server_path)
         .arg("--port")
         .arg(port.to_string())
         .spawn()?;
-    
+
     Ok(child)
 }
 

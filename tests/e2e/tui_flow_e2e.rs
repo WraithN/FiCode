@@ -31,8 +31,8 @@
 use std::net::TcpListener;
 use std::sync::{Arc, RwLock};
 
-use tokio_stream::StreamExt;
 use serde_json::json;
+use tokio_stream::StreamExt;
 
 /// 获取一个随机可用端口
 fn get_available_port() -> u16 {
@@ -100,7 +100,9 @@ async fn chat_and_collect_events(port: u16, message: &str) -> Vec<SseEvent> {
             }
 
             let json_str = &line[6..];
-            if let Ok(event) = serde_json::from_str::<fi_code_core::server::transport::sse::SseEvent>(json_str) {
+            if let Ok(event) =
+                serde_json::from_str::<fi_code_core::server::transport::sse::SseEvent>(json_str)
+            {
                 use fi_code_core::server::transport::sse::SseEvent as Ev;
                 let sse_event = match &event {
                     Ev::Message { content } => SseEvent {
@@ -210,10 +212,7 @@ mod e2e_tui_flow {
             .iter()
             .filter(|e| e.event_type == "Message")
             .collect();
-        assert!(
-            !message_events.is_empty(),
-            "Should receive Message events"
-        );
+        assert!(!message_events.is_empty(), "Should receive Message events");
 
         // 验证消息内容包含问候语
         let all_text: String = message_events
@@ -261,14 +260,13 @@ mod e2e_tui_flow {
             .iter()
             .filter(|e| e.event_type == "ToolUse")
             .collect();
-        assert!(
-            !tool_use_events.is_empty(),
-            "Should receive ToolUse events"
-        );
+        assert!(!tool_use_events.is_empty(), "Should receive ToolUse events");
 
         // 验证工具名是 write
         assert!(
-            tool_use_events.iter().any(|e| e.tool_name.as_deref() == Some("write")),
+            tool_use_events
+                .iter()
+                .any(|e| e.tool_name.as_deref() == Some("write")),
             "Should use write tool"
         );
 
@@ -322,14 +320,13 @@ mod e2e_tui_flow {
             .iter()
             .filter(|e| e.event_type == "ToolUse")
             .collect();
-        assert!(
-            !tool_use_events.is_empty(),
-            "Should receive ToolUse events"
-        );
+        assert!(!tool_use_events.is_empty(), "Should receive ToolUse events");
 
         // 验证工具名是 handle_task_plan
         assert!(
-            tool_use_events.iter().any(|e| e.tool_name.as_deref() == Some("handle_task_plan")),
+            tool_use_events
+                .iter()
+                .any(|e| e.tool_name.as_deref() == Some("handle_task_plan")),
             "Should use handle_task_plan tool"
         );
 

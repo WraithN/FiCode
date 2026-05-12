@@ -23,16 +23,15 @@ use std::process::Output;
 
 /// 获取 CLI 二进制路径
 fn cli_bin() -> String {
-    std::env::var("CARGO_BIN_EXE_fi-code-cli")
-        .unwrap_or_else(|_| {
-            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-            std::path::Path::new(&manifest_dir)
-                .parent()
-                .unwrap()
-                .join("target/debug/fi-code-cli")
-                .to_string_lossy()
-                .to_string()
-        })
+    std::env::var("CARGO_BIN_EXE_fi-code-cli").unwrap_or_else(|_| {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        std::path::Path::new(&manifest_dir)
+            .parent()
+            .unwrap()
+            .join("target/debug/fi-code-cli")
+            .to_string_lossy()
+            .to_string()
+    })
 }
 
 /// 运行 CLI 命令并返回输出
@@ -85,7 +84,9 @@ mod e2e_cli {
 
     #[tokio::test]
     async fn test_cli_single_command_mode() {
-        let output = run_cli(&["--command", "你好"]).await.expect("Failed to run CLI");
+        let output = run_cli(&["--command", "你好"])
+            .await
+            .expect("Failed to run CLI");
         assert_contains(&output, "你好");
     }
 
@@ -109,10 +110,10 @@ mod e2e_cli {
             .timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap();
-        
+
         let result = client.get("http://localhost:9999/api/config").send().await;
         assert!(result.is_ok(), "Server should be accessible");
-        
+
         if let Ok(resp) = result {
             assert_eq!(resp.status(), 200);
         }

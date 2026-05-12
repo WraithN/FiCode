@@ -233,32 +233,40 @@ async fn handle_list_themes(
 #[cfg(test)]
 pub mod test_helpers {
     use super::*;
-    use std::collections::HashMap;
-    use crate::config::models::{Config, ProviderConfig, ProviderOptions, ModelConfig, ProviderType, ServerConfig};
+    use crate::config::models::{
+        Config, ModelConfig, ProviderConfig, ProviderOptions, ProviderType, ServerConfig,
+    };
     use crate::provider::Provider;
+    use std::collections::HashMap;
 
     /// 创建一个测试用的 Config，包含一个测试 Provider 和模型
     pub fn create_test_config() -> Config {
         let mut models = HashMap::new();
-        models.insert("test-model".to_string(), ModelConfig {
-            name: "Test Model".to_string(),
-            ..Default::default()
-        });
+        models.insert(
+            "test-model".to_string(),
+            ModelConfig {
+                name: "Test Model".to_string(),
+                ..Default::default()
+            },
+        );
 
         let mut provider = HashMap::new();
-        provider.insert("test-provider".to_string(), ProviderConfig {
-            provider_type: ProviderType::OpenAiCompatible,
-            npm: "@test".to_string(),
-            name: "Test Provider".to_string(),
-            options: ProviderOptions {
-                api_key: "test-api-key".to_string(),
-                base_url: "http://localhost:11434".to_string(),
-                timeout: 300_000,
-                chunk_timeout: 10_000,
-                headers: None,
+        provider.insert(
+            "test-provider".to_string(),
+            ProviderConfig {
+                provider_type: ProviderType::OpenAiCompatible,
+                npm: "@test".to_string(),
+                name: "Test Provider".to_string(),
+                options: ProviderOptions {
+                    api_key: "test-api-key".to_string(),
+                    base_url: "http://localhost:11434".to_string(),
+                    timeout: 300_000,
+                    chunk_timeout: 10_000,
+                    headers: None,
+                },
+                models,
             },
-            models,
-        });
+        );
 
         Config {
             model: "test-provider/test-model".to_string(),
@@ -279,11 +287,14 @@ pub mod test_helpers {
         let config_arc = Arc::new(RwLock::new(config.clone()));
 
         let mut provider = Provider::default();
-        provider.set_model("test-provider/test-model", &config).unwrap();
+        provider
+            .set_model("test-provider/test-model", &config)
+            .unwrap();
         let provider_arc = Arc::new(RwLock::new(provider));
 
         let sessions = Arc::new(HttpSessionManager::new());
-        let (commands, current_theme) = crate::server::commands::build_command_registry(sessions.clone());
+        let (commands, current_theme) =
+            crate::server::commands::build_command_registry(sessions.clone());
 
         AppState {
             provider: provider_arc,
@@ -310,8 +321,8 @@ pub mod test_helpers {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::test_helpers::*;
+    use super::*;
     use axum::http::HeaderMap;
 
     #[tokio::test]

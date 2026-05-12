@@ -140,7 +140,7 @@ pub struct TuiApp {
     api_key_dialog: Option<ApiKeyDialog>,         // API Key 输入模态框
     question_dialog: Option<QuestionDialog>,      // 问题询问模态框
     generation_start: Option<std::time::Instant>, // 当前生成轮次的开始时间
-    providers: Vec<ProviderItem>,                  // 模型提供商列表（从后端加载）
+    providers: Vec<ProviderItem>,                 // 模型提供商列表（从后端加载）
 
     // === 后端通信与事件通道 ===
     client: TuiClient,                  // HTTP 客户端，对接本地 4040 端口服务
@@ -183,7 +183,12 @@ impl TuiApp {
         // 设置全局事件发送器，供工具调用时发送事件
         crate::tools::set_event_tx(event_tx.clone());
 
-        log_info!("[Client] TuiApp initialized | theme={} | size={}x{}", presets[0].name, term_w, term_h);
+        log_info!(
+            "[Client] TuiApp initialized | theme={} | size={}x{}",
+            presets[0].name,
+            term_w,
+            term_h
+        );
         Self {
             layout: LayoutManager::new(term_w, term_h),
             theme: themes[0].clone(),
@@ -232,8 +237,13 @@ impl TuiApp {
                 let model_name = provider["model_name"].as_str().unwrap_or("unknown");
                 let base_url = provider["base_url"].as_str().unwrap_or("unknown");
                 let model_type = provider["model_type"].as_str().unwrap_or("unknown");
-                log_info!("[Client] Backend config | path={} | model={} | type={} | url={}",
-                    config_path, model_name, model_type, base_url);
+                log_info!(
+                    "[Client] Backend config | path={} | model={} | type={} | url={}",
+                    config_path,
+                    model_name,
+                    model_type,
+                    base_url
+                );
                 self.status_bar.set_model(model_name.to_string());
             }
             Err(e) => {
@@ -283,8 +293,7 @@ impl TuiApp {
         self.layout.resize(area.width, area.height);
         let areas = self.layout.calculate();
         let input_lines = self.input.visible_lines();
-        let (messages_area, input_area) =
-            LayoutManager::split_main(areas.main, input_lines);
+        let (messages_area, input_area) = LayoutManager::split_main(areas.main, input_lines);
 
         self.chat.draw(
             frame,
@@ -760,12 +769,62 @@ impl TuiApp {
             // SSE 事件到达：将内容追加到聊天区；若为 Done 事件则更新会话 ID
             AppEvent::SseEvent(ref sse_event) => {
                 log_debug!("[Client] AppEvent::SseEvent received");
+                match sse_event {
+                    SseEvent::Message { content } => {
+                        log_trace!("[Client] SSE Message | len={}", content.len());
+                    }
+                    SseEvent::ToolUse { name, .. } => {
+                        log_debug!("[Client] SSE ToolUse | name={}", name);
+                    }
+                    SseEvent::ToolResult {
+                        tool_use_id,
+                        is_new_file,
+                        ..
+                    } => {
+                        log_debug!(
+                            "[Client] SSE ToolResult | id={} | is_new_file={}",
+                            tool_use_id,
+                            is_new_file
+                        );
+                    }
+                    SseEvent::TaskProgress { plan_id, tasks } => {
+                        log_debug!(
+                            "[Client] SSE TaskProgress | plan={} | tasks={}",
+                            plan_id,
+                            tasks.len()
+                        );
+                    }
+                    SseEvent::MessageDetails { blocks } => {
+                        log_debug!("[Client] SSE MessageDetails | blocks={}", blocks.len());
+                    }
+                    SseEvent::Usage {
+                        prompt_tokens,
+                        completion_tokens,
+                    } => {
+                        log_debug!(
+                            "[Client] SSE Usage | prompt={} | completion={}",
+                            prompt_tokens,
+                            completion_tokens
+                        );
+                    }
+                    SseEvent::Error { message } => {
+                        log_error!("[Client] SSE Error | {}", message);
+                    }
+                    SseEvent::Done { session_id } => {
+                        log_info!("[Client] SSE Done | session_id={}", session_id);
+                    }
+                }
                 self.chat.handle_sse_event(sse_event);
                 if let SseEvent::Done { session_id } = &sse_event {
                     self.input.set_session_id(Some(session_id.clone()));
                 }
-                if let SseEvent::Usage { prompt_tokens, completion_tokens } = &sse_event {
-                    self.status_bar.set_tokens(*prompt_tokens as usize, *completion_tokens as usize);
+                if let SseEvent::Usage {
+                    prompt_tokens,
+                    completion_tokens,
+                } = &sse_event
+                {
+                    self.status_bar
+                        .set_tokens(*prompt_tokens as usize, *completion_tokens as usize);
                 }
             }
             AppEvent::ChatComplete => {
@@ -1059,7 +1118,6 @@ impl TuiApp {
         // 同步底部状态栏的生成状态
         self.status_bar.set_generating(self.is_generating);
 
-
         self.chat.update(&event);
         self.input.update(&event);
         self.left_drawer.update(&event);
@@ -1075,7 +1133,11 @@ impl TuiApp {
     /// 2. 使用内部 channel (`sse_tx`/`sse_rx`) 将收到的每个 SSE 事件转发到主事件通道。
     /// 3. 流结束后发送 `ChatComplete`；若出错则发送 `SseEvent::Error`。
     async fn start_chat_stream(&mut self, message: String) {
-        log_info!("[Client] start_chat_stream | session_id={:?} | message_len={}", self.input.session_id(), message.len());
+        log_info!(
+            "[Client] start_chat_stream | session_id={:?} | message_len={}",
+            self.input.session_id(),
+            message.len()
+        );
         self.chat.set_generating(true);
         self.chat.create_thinking_card();
         let client = self.client.clone();

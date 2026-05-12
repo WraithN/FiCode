@@ -79,8 +79,8 @@ pub async fn handle_log_stream(
 mod tests {
     use super::*;
     use crate::server::server::test_helpers::create_test_app_state;
-    use axum::{extract::State, response::IntoResponse};
     use axum::http::StatusCode;
+    use axum::{extract::State, response::IntoResponse};
 
     #[tokio::test]
     async fn test_handle_list_logs_empty() {

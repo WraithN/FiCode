@@ -1,8 +1,8 @@
 // MIT License
 // Copyright (c) 2025 fi-code contributors
 
-use cucumber::{given, when, then};
 use crate::bdd::AgentWorld;
+use cucumber::{given, then};
 
 // =============================================================================
 // Agent 技能调用步骤定义
@@ -17,9 +17,9 @@ async fn skill_registered(world: &mut AgentWorld, skill_name: String) {
 #[then("Agent 应该调用 use_skill 工具")]
 async fn agent_calls_use_skill(world: &mut AgentWorld) {
     let tool_use_events = world.tool_use_events();
-    let has_use_skill = tool_use_events.iter().any(|e| {
-        e.tool_name.as_deref() == Some("use_skill")
-    });
+    let has_use_skill = tool_use_events
+        .iter()
+        .any(|e| e.tool_name.as_deref() == Some("use_skill"));
     assert!(has_use_skill, "Expected Agent to call use_skill tool");
 }
 

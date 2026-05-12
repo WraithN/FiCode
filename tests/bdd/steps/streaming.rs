@@ -1,8 +1,8 @@
 // MIT License
 // Copyright (c) 2025 fi-code contributors
 
-use cucumber::{given, when, then};
 use crate::bdd::AgentWorld;
+use cucumber::{then, when};
 
 // =============================================================================
 // 流式输出与卡片渲染步骤定义
@@ -21,7 +21,9 @@ async fn user_receives_thinking_card(world: &mut AgentWorld) {
 
 #[then("用户应该看到流式的文本消息")]
 async fn user_sees_streaming_text(world: &mut AgentWorld) {
-    let message_events: Vec<_> = world.events.iter()
+    let message_events: Vec<_> = world
+        .events
+        .iter()
         .filter(|e| e.event_type == "Message")
         .collect();
     assert!(
@@ -42,15 +44,16 @@ async fn card_status_changes(world: &mut AgentWorld, from: String, to: String) {
     let has_done = world.events.iter().any(|e| e.event_type == "Done");
     assert!(
         has_done,
-        "Expected card status to change from '{}' to '{}'", 
-        from, 
-        to
+        "Expected card status to change from '{}' to '{}'",
+        from, to
     );
 }
 
 #[then(regex = r#"^用户应该收到 ToolUse 卡片，显示工具名称和参数$"#)]
 async fn user_receives_tool_use_card(world: &mut AgentWorld) {
-    let tool_use_events: Vec<_> = world.events.iter()
+    let tool_use_events: Vec<_> = world
+        .events
+        .iter()
         .filter(|e| e.event_type == "ToolUse")
         .collect();
     assert!(
@@ -78,9 +81,10 @@ async fn final_result_contains(world: &mut AgentWorld, expected: String) {
 
 #[then(regex = r#"^用户应该收到 WriteFile 卡片，显示文件路径和内容摘要$"#)]
 async fn user_receives_write_file_card(world: &mut AgentWorld) {
-    let has_tool_use = world.events.iter().any(|e| {
-        e.event_type == "ToolUse" && e.tool_name.as_deref() == Some("write")
-    });
+    let has_tool_use = world
+        .events
+        .iter()
+        .any(|e| e.event_type == "ToolUse" && e.tool_name.as_deref() == Some("write"));
     assert!(
         has_tool_use,
         "Expected WriteFile card showing file path and content"
@@ -103,7 +107,10 @@ async fn user_receives_truncation_notice(world: &mut AgentWorld) {
     // Mock 客户端目前不模拟长内容截断
     // 此步骤作为占位，实际实现需要 MockAIClient 支持长文本响应
     assert!(
-        world.events.iter().any(|e| e.event_type == "Message" || e.event_type == "Done"),
+        world
+            .events
+            .iter()
+            .any(|e| e.event_type == "Message" || e.event_type == "Done"),
         "Expected some response (truncation test placeholder)"
     );
 }
@@ -118,8 +125,5 @@ async fn user_clicks_expand(_world: &mut AgentWorld) {
 async fn user_sees_full_content(world: &mut AgentWorld) {
     // 对应展开后的完整内容
     let text = world.all_message_text();
-    assert!(
-        !text.is_empty(),
-        "Expected full content after expansion"
-    );
+    assert!(!text.is_empty(), "Expected full content after expansion");
 }

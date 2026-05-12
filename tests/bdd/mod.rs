@@ -146,7 +146,9 @@ impl AgentWorld {
                 }
 
                 let json_str = &line[6..];
-                if let Ok(event) = serde_json::from_str::<fi_code_core::server::transport::sse::SseEvent>(json_str) {
+                if let Ok(event) =
+                    serde_json::from_str::<fi_code_core::server::transport::sse::SseEvent>(json_str)
+                {
                     use fi_code_core::server::transport::sse::SseEvent as Ev;
                     let sse_event = match &event {
                         Ev::Message { content } => SseEvent {
@@ -157,7 +159,9 @@ impl AgentWorld {
                             plan_id: None,
                             task_count: None,
                         },
-                        Ev::ToolUse { name, arguments, .. } => SseEvent {
+                        Ev::ToolUse {
+                            name, arguments, ..
+                        } => SseEvent {
                             event_type: "ToolUse".to_string(),
                             content: None,
                             tool_name: Some(name.clone()),

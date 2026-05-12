@@ -55,7 +55,11 @@ pub async fn handle_chat_endpoint(
     headers: HeaderMap,
     Json(req): Json<ChatRequest>,
 ) -> Response {
-    log_info!("[Server] handle_chat_endpoint | session_id={:?} | message_len={}", req.session_id, req.message.len());
+    log_info!(
+        "[Server] handle_chat_endpoint | session_id={:?} | message_len={}",
+        req.session_id,
+        req.message.len()
+    );
     // 认证检查
     if let Some(resp) = check_auth(&headers, &state.config).await {
         return Json(resp).into_response();
@@ -92,7 +96,10 @@ pub async fn handle_chat_endpoint(
 
     // 返回 SSE 响应
     let stream = sse_stream.map(|event| {
-        log_trace!("[Server] SSE outgoing | {:?}", std::mem::discriminant(&event));
+        log_trace!(
+            "[Server] SSE outgoing | {:?}",
+            std::mem::discriminant(&event)
+        );
         let data = serde_json::to_string(&event).unwrap_or_default();
         Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default().data(data))
     });
@@ -156,7 +163,11 @@ async fn run_agent_chat(
     message: String,
     sse_sender: SseSender,
 ) {
-    log_info!("[Server] run_agent_chat start | session_id={} | message_len={}", session_id, message.len());
+    log_info!(
+        "[Server] run_agent_chat start | session_id={} | message_len={}",
+        session_id,
+        message.len()
+    );
     // 设置全局 Provider，供 handle_task_plan 工具使用
     set_task_provider(Arc::clone(&state.provider));
 
@@ -209,12 +220,26 @@ async fn run_agent_chat(
         });
     }));
     let sse_sender_for_tools = sse_sender.clone();
-    let mut on_tool_event: Option<Box<dyn FnMut(SseEvent) + Send>> = Some(Box::new(move |event: SseEvent| {
-        log_trace!("[Server] on_tool_event callback | {:?}", std::mem::discriminant(&event));
-        let _ = sse_sender_for_tools.try_send(event);
-    }));
-    log_info!("[Server] agent_loop starting | messages={}", loop_state.messages.len());
-    if let Err(e) = agent_loop(client.as_ref(), &mut loop_state, &mut on_text, &mut on_tool_event).await {
+    let mut on_tool_event: Option<Box<dyn FnMut(SseEvent) + Send>> =
+        Some(Box::new(move |event: SseEvent| {
+            log_trace!(
+                "[Server] on_tool_event callback | {:?}",
+                std::mem::discriminant(&event)
+            );
+            let _ = sse_sender_for_tools.try_send(event);
+        }));
+    log_info!(
+        "[Server] agent_loop starting | messages={}",
+        loop_state.messages.len()
+    );
+    if let Err(e) = agent_loop(
+        client.as_ref(),
+        &mut loop_state,
+        &mut on_text,
+        &mut on_tool_event,
+    )
+    .await
+    {
         log_error!("[Server] agent_loop error | {}", e);
         let _ = sse_sender
             .send(SseEvent::Error {
@@ -227,7 +252,8 @@ async fn run_agent_chat(
         send_last_assistant_details(&loop_state.messages, &sse_sender).await;
     }
 
-    log_info!("[Server] run_agent_chat end | prompt_tokens={} | completion_tokens={}",
+    log_info!(
+        "[Server] run_agent_chat end | prompt_tokens={} | completion_tokens={}",
         loop_state.token_usage.prompt_tokens,
         loop_state.token_usage.completion_tokens
     );
@@ -244,7 +270,11 @@ async fn run_agent_chat(
     state.sessions.save(&session_id, loop_state);
 
     // 发送 done 事件
-    let _ = sse_sender.send(SseEvent::Done { session_id: session_id.clone() }).await;
+    let _ = sse_sender
+        .send(SseEvent::Done {
+            session_id: session_id.clone(),
+        })
+        .await;
     log_info!("[Server] SSE Done sent | session_id={}", session_id);
 }
 
@@ -328,17 +358,22 @@ pub async fn handle_get_config(State(state): State<AppState>) -> Response {
         Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(super::super::models::ApiResponse::<serde_json::Value>::error(
-                    "Provider lock poisoned".to_string(),
-                    "INTERNAL_ERROR",
-                )),
+                Json(
+                    super::super::models::ApiResponse::<serde_json::Value>::error(
+                        "Provider lock poisoned".to_string(),
+                        "INTERNAL_ERROR",
+                    ),
+                ),
             )
                 .into_response();
         }
     };
 
     let config_path = match state.config.read() {
-        Ok(c) => c.source_path.clone().unwrap_or_else(|| "unknown".to_string()),
+        Ok(c) => c
+            .source_path
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
         Err(_) => "unknown".to_string(),
     };
 
@@ -369,7 +404,10 @@ mod tests {
         assert!(json["success"].as_bool().unwrap());
         assert_eq!(json["data"]["config_path"], "/test/config.json");
         assert_eq!(json["data"]["provider"]["model_name"], "test-model");
-        assert_eq!(json["data"]["provider"]["base_url"], "http://localhost:11434");
+        assert_eq!(
+            json["data"]["provider"]["base_url"],
+            "http://localhost:11434"
+        );
         assert_eq!(json["data"]["provider"]["model_type"], "openai_compatible");
     }
 

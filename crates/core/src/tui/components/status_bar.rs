@@ -129,7 +129,10 @@ impl StatusBar {
             ProgressState::Idle => 0,
             ProgressState::Running => {
                 // 使用 progress_tick 作为随机种子，每 tick 生成 1~19 的随机值
-                let seed = self.progress_tick.wrapping_mul(1103515245).wrapping_add(12345);
+                let seed = self
+                    .progress_tick
+                    .wrapping_mul(1103515245)
+                    .wrapping_add(12345);
                 ((seed % 19) + 1) as usize
             }
             ProgressState::Paused => self.last_filled,
@@ -368,7 +371,10 @@ mod tests {
         let row_text: String = (0..buffer.area().width)
             .map(|x| buffer.get(x, 0).symbol().to_string())
             .collect();
-        assert!(row_text.contains("FiCode"), "Status bar should show FiCode brand");
+        assert!(
+            row_text.contains("FiCode"),
+            "Status bar should show FiCode brand"
+        );
         assert!(
             row_text.contains("Model:unknown"),
             "Status bar should show default model"

@@ -129,7 +129,8 @@ impl AIClient for OpenAiClient {
         } else {
             format!("{}/v1/chat/completions", self.base_url)
         };
-        log_info!("[Server] OpenAI request | url={} | model={} | messages={} | tools_count={}",
+        log_info!(
+            "[Server] OpenAI request | url={} | model={} | messages={} | tools_count={}",
             url,
             self.model_name,
             openai_messages.len(),
@@ -156,7 +157,8 @@ impl AIClient for OpenAiClient {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            log_error!("[Server] OpenAI API error | url={} | status={} | response={}",
+            log_error!(
+                "[Server] OpenAI API error | url={} | status={} | response={}",
                 url,
                 status,
                 text

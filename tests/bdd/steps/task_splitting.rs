@@ -1,8 +1,8 @@
 // MIT License
 // Copyright (c) 2025 fi-code contributors
 
-use cucumber::{given, when, then};
 use crate::bdd::AgentWorld;
+use cucumber::{then, when};
 
 // =============================================================================
 // 任务拆分与执行步骤定义
@@ -12,19 +12,19 @@ use crate::bdd::AgentWorld;
 #[then("Agent 应该调用 handle_task_plan 工具")]
 async fn agent_calls_handle_task_plan(world: &mut AgentWorld) {
     let tool_use_events = world.tool_use_events();
-    let has_plan = tool_use_events.iter().any(|e| {
-        e.tool_name.as_deref() == Some("handle_task_plan")
-    });
+    let has_plan = tool_use_events
+        .iter()
+        .any(|e| e.tool_name.as_deref() == Some("handle_task_plan"));
     assert!(has_plan, "Expected Agent to call handle_task_plan tool");
 }
 
 #[then(regex = r#"^任务计划应该包含至少 (\d+) 个子任务$"#)]
 async fn task_plan_has_subtasks(world: &mut AgentWorld, min_count: usize) {
     let tool_use_events = world.tool_use_events();
-    let plan_event = tool_use_events.iter().find(|e| {
-        e.tool_name.as_deref() == Some("handle_task_plan")
-    });
-    
+    let plan_event = tool_use_events
+        .iter()
+        .find(|e| e.tool_name.as_deref() == Some("handle_task_plan"));
+
     if let Some(event) = plan_event {
         if let Some(ref args) = event.tool_args {
             if let Some(tasks) = args.get("tasks").and_then(|v| v.as_array()) {
@@ -38,12 +38,14 @@ async fn task_plan_has_subtasks(world: &mut AgentWorld, min_count: usize) {
             }
         }
     }
-    
+
     // 如果没有直接检查到参数，检查 TaskProgress 事件
-    let progress_events: Vec<_> = world.events.iter()
+    let progress_events: Vec<_> = world
+        .events
+        .iter()
         .filter(|e| e.event_type == "TaskProgress")
         .collect();
-    
+
     for ev in &progress_events {
         if let Some(count) = ev.task_count {
             assert!(
@@ -55,18 +57,23 @@ async fn task_plan_has_subtasks(world: &mut AgentWorld, min_count: usize) {
             return;
         }
     }
-    
+
     // 如果 Mock 客户端没有返回明确的任务数量，只要调用了 handle_task_plan 就算通过
-    assert!(plan_event.is_some(), "Expected handle_task_plan to be called");
+    assert!(
+        plan_event.is_some(),
+        "Expected handle_task_plan to be called"
+    );
 }
 
 #[then("每个子任务应该有唯一 ID 和描述")]
 async fn tasks_have_id_and_description(world: &mut AgentWorld) {
     // 对于 Mock 客户端，我们验证 TaskProgress 事件的存在即可
-    let progress_events: Vec<_> = world.events.iter()
+    let progress_events: Vec<_> = world
+        .events
+        .iter()
         .filter(|e| e.event_type == "TaskProgress")
         .collect();
-    
+
     // Mock 模式下可能没有 TaskProgress，只要流程完成即可
     assert!(
         !progress_events.is_empty() || world.events.iter().any(|e| e.event_type == "Done"),
@@ -95,24 +102,26 @@ async fn tasks_executed_serially(world: &mut AgentWorld) {
 
 #[then(regex = r#"^每个子任务完成后状态应该更新为 (.*)$"#)]
 async fn tasks_updated_to_status(world: &mut AgentWorld, status: String) {
-    let progress_events: Vec<_> = world.events.iter()
+    let progress_events: Vec<_> = world
+        .events
+        .iter()
         .filter(|e| e.event_type == "TaskProgress")
         .collect();
-    
+
     if !progress_events.is_empty() {
         // 验证所有任务状态符合预期
         // Mock 模式下只要收到 Done 就算通过
     }
-    
+
     assert!(
         world.events.iter().any(|e| e.event_type == "Done"),
-        "Expected all tasks to reach '{}' status", 
+        "Expected all tasks to reach '{}' status",
         status
     );
 }
 
 #[when("某个子任务执行失败")]
-async fn a_task_fails(world: &mut AgentWorld) {
+async fn a_task_fails(_world: &mut AgentWorld) {
     // Mock 客户端目前不支持模拟失败场景
     // 此步骤标记为需要扩展
 }
@@ -120,9 +129,10 @@ async fn a_task_fails(world: &mut AgentWorld) {
 #[then("Agent 应该报告错误信息")]
 async fn agent_reports_error(world: &mut AgentWorld) {
     // Mock 客户端不支持模拟失败场景，因此只要流程到达终止状态即视为通过
-    let has_terminal = world.events.iter().any(|e| {
-        e.event_type == "Done" || e.event_type == "Error"
-    });
+    let has_terminal = world
+        .events
+        .iter()
+        .any(|e| e.event_type == "Done" || e.event_type == "Error");
     assert!(
         has_terminal,
         "Expected Agent to reach terminal state (Done or Error)"
@@ -132,12 +142,13 @@ async fn agent_reports_error(world: &mut AgentWorld) {
 #[then(regex = r#"^任务状态应该更新为 (.*)$"#)]
 async fn task_status_updated_to(world: &mut AgentWorld, status: String) {
     // Mock 模式下验证 Done 或 Error 事件
-    let has_terminal = world.events.iter().any(|e| {
-        e.event_type == "Done" || e.event_type == "Error"
-    });
+    let has_terminal = world
+        .events
+        .iter()
+        .any(|e| e.event_type == "Done" || e.event_type == "Error");
     assert!(
         has_terminal,
-        "Expected task status to be updated to '{}'", 
+        "Expected task status to be updated to '{}'",
         status
     );
 }

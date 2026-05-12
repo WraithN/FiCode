@@ -731,9 +731,9 @@ pub async fn execute_tool_calls(
     parts: &[Part],
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Vec<Part> {
+    use crate::server::transport::sse::SseEvent;
     use colored::Colorize;
     use futures::future::join_all;
-    use crate::server::transport::sse::SseEvent;
     use std::sync::{Arc, Mutex};
 
     // 将回调提取到 Arc<Mutex<...>> 中，以便在并行的 async 块之间安全共享
@@ -760,22 +760,23 @@ pub async fn execute_tool_calls(
                 log_info!("calling tool: ${}", name);
                 log_debug!("execute_tool_call | name={} | args={}", name, arguments);
                 let (content, is_error) = execute_single_tool_call(&id, &name, &arguments).await;
-                
+
                 // Parse JSON content to extract diff if present
-                let (display_content, diff, is_new_file) = if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if json_val.get("diff").is_some() {
-                        (
-                            json_val["content"].as_str().unwrap_or(&content).to_string(),
-                            json_val["diff"].as_str().map(|s| s.to_string()),
-                            json_val["is_new_file"].as_bool().unwrap_or(false),
-                        )
+                let (display_content, diff, is_new_file) =
+                    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if json_val.get("diff").is_some() {
+                            (
+                                json_val["content"].as_str().unwrap_or(&content).to_string(),
+                                json_val["diff"].as_str().map(|s| s.to_string()),
+                                json_val["is_new_file"].as_bool().unwrap_or(false),
+                            )
+                        } else {
+                            (content.clone(), None, false)
+                        }
                     } else {
                         (content.clone(), None, false)
-                    }
-                } else {
-                    (content.clone(), None, false)
-                };
-                
+                    };
+
                 if let Ok(mut guard) = cb.lock() {
                     if let Some(ref mut callback) = *guard {
                         let _ = callback(SseEvent::ToolResult {
@@ -786,7 +787,7 @@ pub async fn execute_tool_calls(
                         });
                     }
                 }
-                
+
                 Part::ToolResult {
                     tool_call_id: id,
                     content,

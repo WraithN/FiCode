@@ -157,7 +157,12 @@ impl AgentRunner {
                         }
                         _ => {}
                     }
-                    Self::process_chunk(chunk, &mut content_blocks, &mut finish_reason, &mut turn_usage)
+                    Self::process_chunk(
+                        chunk,
+                        &mut content_blocks,
+                        &mut finish_reason,
+                        &mut turn_usage,
+                    )
                 },
             )
             .await?;
@@ -199,9 +204,17 @@ impl AgentRunner {
         // 客户端直出优化：如果所有工具都成功，且 Turn 1 已有前置文本说明，
         // 则跳过 Turn 2，直接格式化输出工具结果。
         let all_success = tool_results.iter().all(|p| {
-            matches!(p, Part::ToolResult { is_error: false, .. })
+            matches!(
+                p,
+                Part::ToolResult {
+                    is_error: false,
+                    ..
+                }
+            )
         });
-        let has_preamble = content_blocks.iter().any(|p| matches!(p, Part::Text { .. }));
+        let has_preamble = content_blocks
+            .iter()
+            .any(|p| matches!(p, Part::Text { .. }));
 
         if all_success && has_preamble {
             let summary = format_tool_results(&content_blocks, &tool_results);

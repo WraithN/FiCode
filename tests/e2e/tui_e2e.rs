@@ -24,16 +24,15 @@ use std::process::Output;
 
 /// 获取 TUI 二进制路径
 fn tui_bin() -> String {
-    std::env::var("CARGO_BIN_EXE_fi-code-tui")
-        .unwrap_or_else(|_| {
-            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-            std::path::Path::new(&manifest_dir)
-                .parent()
-                .unwrap()
-                .join("target/debug/fi-code-tui")
-                .to_string_lossy()
-                .to_string()
-        })
+    std::env::var("CARGO_BIN_EXE_fi-code-tui").unwrap_or_else(|_| {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        std::path::Path::new(&manifest_dir)
+            .parent()
+            .unwrap()
+            .join("target/debug/fi-code-tui")
+            .to_string_lossy()
+            .to_string()
+    })
 }
 
 /// 获取一个随机可用端口
@@ -96,13 +95,13 @@ mod e2e_tui {
             .timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap();
-        
+
         let result = client
             .get(&format!("http://localhost:{}/api/config", port))
             .send()
             .await;
         assert!(result.is_ok(), "TUI backend server should be accessible");
-        
+
         if let Ok(resp) = result {
             assert_eq!(resp.status(), 200);
         }

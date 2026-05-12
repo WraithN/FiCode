@@ -238,34 +238,19 @@ mod tests {
 
     #[test]
     fn test_max_index_with_custom() {
-        let dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         assert_eq!(dialog.max_index(), 2); // 2 options + custom
     }
 
     #[test]
     fn test_max_index_without_custom() {
-        let dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            false,
-        );
+        let dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, false);
         assert_eq!(dialog.max_index(), 1); // 2 options - 1
     }
 
     #[test]
     fn test_is_custom_selected() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 2;
         assert!(dialog.is_custom_selected());
 
@@ -275,24 +260,14 @@ mod tests {
 
     #[test]
     fn test_is_custom_selected_not_allowed() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            false,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, false);
         dialog.selected_index = 1;
         assert!(!dialog.is_custom_selected());
     }
 
     #[test]
     fn test_handle_key_down() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         let action = dialog.handle_key(KeyCode::Down);
         assert!(action.is_none());
         assert_eq!(dialog.selected_index, 1);
@@ -300,12 +275,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_down_stops_at_max() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 2;
         let action = dialog.handle_key(KeyCode::Down);
         assert!(action.is_none());
@@ -314,12 +284,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_up() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 1;
         let action = dialog.handle_key(KeyCode::Up);
         assert!(action.is_none());
@@ -328,12 +293,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_up_stops_at_zero() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         let action = dialog.handle_key(KeyCode::Up);
         assert!(action.is_none());
         assert_eq!(dialog.selected_index, 0); // should not go below 0
@@ -341,12 +301,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_enter_option() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         let action = dialog.handle_key(KeyCode::Enter);
         assert!(matches!(
             action,
@@ -357,12 +312,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_enter_custom() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 2; // custom option
         dialog.custom_input = "my answer".to_string();
         let action = dialog.handle_key(KeyCode::Enter);
@@ -375,24 +325,14 @@ mod tests {
 
     #[test]
     fn test_handle_key_esc() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         let action = dialog.handle_key(KeyCode::Esc);
         assert!(matches!(action, Some(QuestionDialogAction::Cancel)));
     }
 
     #[test]
     fn test_handle_key_char_in_custom() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 2; // custom option
         let action = dialog.handle_key(KeyCode::Char('a'));
         assert!(action.is_none());
@@ -402,12 +342,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_char_not_in_custom_ignored() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 0; // not custom
         let action = dialog.handle_key(KeyCode::Char('a'));
         assert!(action.is_none());
@@ -416,12 +351,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_backspace_in_custom() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 2;
         dialog.custom_input = "ab".to_string();
         dialog.cursor_position = 2;
@@ -433,12 +363,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_backspace_at_start() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 2;
         let action = dialog.handle_key(KeyCode::Backspace);
         assert!(action.is_none());
@@ -448,12 +373,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_left_right_in_custom() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 2;
         dialog.custom_input = "abc".to_string();
         dialog.cursor_position = 2;
@@ -469,12 +389,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_left_at_start() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 2;
         let action = dialog.handle_key(KeyCode::Left);
         assert!(action.is_none());
@@ -483,12 +398,7 @@ mod tests {
 
     #[test]
     fn test_handle_key_right_at_end() {
-        let mut dialog = QuestionDialog::new(
-            "Choose".to_string(),
-            make_options(),
-            None,
-            true,
-        );
+        let mut dialog = QuestionDialog::new("Choose".to_string(), make_options(), None, true);
         dialog.selected_index = 2;
         dialog.custom_input = "ab".to_string();
         dialog.cursor_position = 2;

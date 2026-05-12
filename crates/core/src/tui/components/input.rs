@@ -807,6 +807,10 @@ mod tests {
         let text: String = (0..buffer.area().width)
             .map(|x| buffer.get(x, 1).symbol().to_string())
             .collect();
-        assert!(text.contains("Hello"), "Input should render content: got {}", text);
+        assert!(
+            text.contains("Hello"),
+            "Input should render content: got {}",
+            text
+        );
     }
 }

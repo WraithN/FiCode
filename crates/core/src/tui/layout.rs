@@ -97,12 +97,7 @@ impl LayoutManager {
             let overlay_width = (width as f32 * 0.75).max(30.0).min(width as f32) as u16;
             let overlay_x = 0;
 
-            let mut main = Rect::new(
-                0,
-                0,
-                width.saturating_sub(right_width),
-                main_height,
-            );
+            let mut main = Rect::new(0, 0, width.saturating_sub(right_width), main_height);
             let log_window = if self.log_window {
                 let log_height = (main.height as f32 * 0.6) as u16;
                 main.height = main.height.saturating_sub(log_height);
@@ -126,12 +121,7 @@ impl LayoutManager {
                     main_height,
                 ),
                 status_bar: Rect::new(0, height - status_height, width, status_height),
-                overlay: Some(Rect::new(
-                    overlay_x,
-                    0,
-                    overlay_width,
-                    main_height,
-                )),
+                overlay: Some(Rect::new(overlay_x, 0, overlay_width, main_height)),
                 log_window,
             }
         } else {
@@ -163,8 +153,7 @@ impl LayoutManager {
             };
 
             LayoutAreas {
-                left_drawer: left_open
-                    .then(|| Rect::new(left_x, 0, left_width, main_height)),
+                left_drawer: left_open.then(|| Rect::new(left_x, 0, left_width, main_height)),
                 main,
                 right_drawer: Rect::new(right_x, 0, right_width, main_height),
                 status_bar: Rect::new(0, height - status_height, width, status_height),

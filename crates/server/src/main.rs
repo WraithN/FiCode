@@ -19,10 +19,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::sync::{Arc, RwLock};
 use fi_code_core::config::Config;
 use fi_code_core::provider::Provider;
 use fi_code_core::server::Server;
+use std::sync::{Arc, RwLock};
 
 #[tokio::main]
 async fn main() {

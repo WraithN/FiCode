@@ -1,8 +1,8 @@
 // MIT License
 // Copyright (c) 2025 fi-code contributors
 
-use cucumber::{given, when, then};
 use crate::bdd::AgentWorld;
+use cucumber::{given, then, when};
 
 // =============================================================================
 // 日志窗口步骤定义
@@ -21,10 +21,7 @@ async fn user_presses_ctrl_l(world: &mut AgentWorld) {
 
 #[then("日志窗口应该显示")]
 async fn log_window_should_display(world: &mut AgentWorld) {
-    assert!(
-        world.tui_log_visible,
-        "Expected log window to be visible"
-    );
+    assert!(world.tui_log_visible, "Expected log window to be visible");
 }
 
 #[then("日志窗口应该显示历史日志信息")]
@@ -39,10 +36,7 @@ async fn log_window_shows_history(world: &mut AgentWorld) {
 #[then("日志窗口应该实时更新并显示新日志")]
 async fn log_window_updates_realtime(world: &mut AgentWorld) {
     // 验证有事件被接收
-    assert!(
-        !world.events.is_empty(),
-        "Expected real-time log updates"
-    );
+    assert!(!world.events.is_empty(), "Expected real-time log updates");
 }
 
 #[then("日志窗口应该自动滚动到最新日志")]
@@ -57,10 +51,7 @@ async fn log_window_auto_scrolls(world: &mut AgentWorld) {
 
 #[then("日志窗口应该关闭")]
 async fn log_window_should_close(world: &mut AgentWorld) {
-    assert!(
-        !world.tui_log_visible,
-        "Expected log window to be closed"
-    );
+    assert!(!world.tui_log_visible, "Expected log window to be closed");
 }
 
 #[then("TUI 应该返回正常聊天界面")]

@@ -1,12 +1,18 @@
-use std::process::{Child, Command, Stdio};
-use std::time::Duration;
 use std::net::TcpStream;
-use tauri::AppHandle;
+use std::process::{Child, Command, Stdio};
 use std::thread;
+use std::time::Duration;
+use tauri::AppHandle;
 
 pub struct SidecarManager {
     process: Option<Child>,
     pub port: u16,
+}
+
+impl Default for SidecarManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SidecarManager {
@@ -27,7 +33,9 @@ impl SidecarManager {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
-        let child = cmd.spawn().map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
         self.process = Some(child);
         Ok(())
     }
@@ -45,10 +53,7 @@ impl SidecarManager {
         let start = std::time::Instant::now();
 
         while start.elapsed().as_secs() < timeout_secs {
-            if TcpStream::connect_timeout(
-                &addr.parse().unwrap(),
-                Duration::from_secs(1),
-            ).is_ok() {
+            if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_secs(1)).is_ok() {
                 return Ok(());
             }
             thread::sleep(Duration::from_millis(500));

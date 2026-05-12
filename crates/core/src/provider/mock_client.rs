@@ -75,19 +75,34 @@ enum MessageType {
 fn classify_message(text: &str) -> MessageType {
     if text.contains("你好") || text.contains("你是谁") || text.contains("hi") {
         MessageType::Greeting
-    } else if text.contains("复杂") || text.contains("拆分任务") || text.contains("任务计划")
-        || text.contains("设计并实现") || text.contains("注定失败")
+    } else if text.contains("复杂")
+        || text.contains("拆分任务")
+        || text.contains("任务计划")
+        || text.contains("设计并实现")
+        || text.contains("注定失败")
     {
         MessageType::ComplexTask
     } else if text.contains("写") && (text.contains("代码") || text.contains("文件")) {
         MessageType::CodeTask
     } else if text.contains("读取") || text.contains("read") {
         MessageType::ReadTask
-    } else if text.contains("运行") || text.contains("bash") || text.contains("命令") || text.contains("ls ") {
+    } else if text.contains("运行")
+        || text.contains("bash")
+        || text.contains("命令")
+        || text.contains("ls ")
+    {
         MessageType::BashTask
-    } else if text.contains("编辑") || text.contains("修改") || text.contains("edit") || text.contains("添加") {
+    } else if text.contains("编辑")
+        || text.contains("修改")
+        || text.contains("edit")
+        || text.contains("添加")
+    {
         MessageType::EditTask
-    } else if text.contains("技能") || text.contains("skill") || text.contains("提交") || text.contains("审查") {
+    } else if text.contains("技能")
+        || text.contains("skill")
+        || text.contains("提交")
+        || text.contains("审查")
+    {
         MessageType::SkillTask
     } else if text.contains("/init") {
         MessageType::InitTask
@@ -151,10 +166,7 @@ impl AIClient for MockAIClient {
             }
 
             MessageType::CodeTask => {
-                send_text(
-                    on_chunk,
-                    "好的，文件写入成功。",
-                );
+                send_text(on_chunk, "好的，文件写入成功。");
                 send_tool_use(
                     on_chunk,
                     "write_1",
@@ -168,10 +180,7 @@ impl AIClient for MockAIClient {
             }
 
             MessageType::ComplexTask => {
-                send_text(
-                    on_chunk,
-                    "我来帮你拆分这个复杂任务，制定执行计划。",
-                );
+                send_text(on_chunk, "我来帮你拆分这个复杂任务，制定执行计划。");
                 send_tool_use(
                     on_chunk,
                     "plan_1",
@@ -229,7 +238,8 @@ impl AIClient for MockAIClient {
             }
 
             MessageType::SkillTask => {
-                let skill_name = if last_text.contains("审查") || last_text.contains("code-review") {
+                let skill_name = if last_text.contains("审查") || last_text.contains("code-review")
+                {
                     "code-review"
                 } else {
                     "commit"

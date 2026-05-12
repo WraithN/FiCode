@@ -47,9 +47,13 @@ pub struct Card {
 #[derive(Debug, Clone)]
 pub enum CardKind {
     Thinking,
-    ToolUse { name: String },
+    ToolUse {
+        name: String,
+    },
     ToolResult,
-    WriteFile { path: String },
+    WriteFile {
+        path: String,
+    },
     TodoList {
         plan_id: String,
         tasks: Vec<TaskProgressItem>,
@@ -132,8 +136,7 @@ impl<'a> CardWidget<'a> {
         frame.render_widget(Paragraph::new(title_line), chunks[0]);
 
         // Content area (with optional right panel)
-        if self.card.right_content.is_some()
-            && !matches!(self.card.kind, CardKind::TodoList { .. })
+        if self.card.right_content.is_some() && !matches!(self.card.kind, CardKind::TodoList { .. })
         {
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
@@ -232,7 +235,12 @@ mod tests {
 
     #[test]
     fn test_calculate_height_basic() {
-        let card = make_card(CardKind::Summary, CardState::Collapsed, "line1\nline2", None);
+        let card = make_card(
+            CardKind::Summary,
+            CardState::Collapsed,
+            "line1\nline2",
+            None,
+        );
         let widget = CardWidget::new(&card);
         // title(1) + content(2) + padding(2) = 5, no footer
         assert_eq!(widget.calculate_height(40), 5);
@@ -253,7 +261,10 @@ mod tests {
 
     #[test]
     fn test_calculate_height_capped_at_20() {
-        let content = (0..30).map(|i| format!("line{}", i)).collect::<Vec<_>>().join("\n");
+        let content = (0..30)
+            .map(|i| format!("line{}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let card = make_card(CardKind::Summary, CardState::Collapsed, &content, None);
         let widget = CardWidget::new(&card);
         // title(1) + min(30, 20) + padding(2) = 23
@@ -420,6 +431,9 @@ mod tests {
         let row_text: String = (0..buffer.area().width)
             .map(|x| buffer.get(x, footer_row).symbol().to_string())
             .collect();
-        assert!(row_text.contains("Retry"), "Error card should show [Retry] footer");
+        assert!(
+            row_text.contains("Retry"),
+            "Error card should show [Retry] footer"
+        );
     }
 }

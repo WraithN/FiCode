@@ -1,8 +1,8 @@
 // MIT License
 // Copyright (c) 2025 fi-code contributors
 
-use cucumber::{given, when, then};
 use crate::bdd::AgentWorld;
+use cucumber::{given, then, when};
 
 // =============================================================================
 // 通用步骤定义（Background 和跨 Feature 共享）
@@ -37,9 +37,10 @@ async fn user_sent_complex_task(world: &mut AgentWorld, message: String) {
 
 #[given("Agent 已生成任务计划")]
 async fn task_plan_generated(world: &mut AgentWorld) {
-    let has_tool_use = world.tool_use_events().iter().any(|e| {
-        e.tool_name.as_deref() == Some("handle_task_plan")
-    });
+    let has_tool_use = world
+        .tool_use_events()
+        .iter()
+        .any(|e| e.tool_name.as_deref() == Some("handle_task_plan"));
     assert!(has_tool_use, "Task plan should have been generated");
 }
 

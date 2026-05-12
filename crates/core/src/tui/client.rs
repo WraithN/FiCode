@@ -129,15 +129,15 @@ impl TuiClient {
         };
         log_debug!("[Client] HTTP -> POST {} | method=get_status", url);
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&req)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&req).send().await?;
         let status = resp.status();
         let resp = resp.json::<JsonRpcResponse>().await?;
-        log_debug!("[Client] HTTP <- POST {} | status={} | result={:?}", url, status, resp.result.is_some());
+        log_debug!(
+            "[Client] HTTP <- POST {} | status={} | result={:?}",
+            url,
+            status,
+            resp.result.is_some()
+        );
 
         match resp.result {
             Some(result) => Ok(result["current_model"]
@@ -159,17 +159,21 @@ impl TuiClient {
             params: Some(json!({ "command": command })),
             id: Some(json!(1)),
         };
-        log_debug!("[Client] HTTP -> POST {} | method=execute | command={}", url, command);
+        log_debug!(
+            "[Client] HTTP -> POST {} | method=execute | command={}",
+            url,
+            command
+        );
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&req)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&req).send().await?;
         let status = resp.status();
         let resp = resp.json::<JsonRpcResponse>().await?;
-        log_debug!("[Client] HTTP <- POST {} | status={} | result={:?}", url, status, resp.result.is_some());
+        log_debug!(
+            "[Client] HTTP <- POST {} | status={} | result={:?}",
+            url,
+            status,
+            resp.result.is_some()
+        );
 
         match resp.result {
             Some(result) => Ok(result["message"].as_str().unwrap_or("OK").to_string()),
@@ -192,15 +196,19 @@ impl TuiClient {
             "session_id": session_id,
             "message": message
         });
-        log_info!("[Client] HTTP -> POST {} | session_id={:?} | message_len={}", url, session_id, message.len());
+        log_info!(
+            "[Client] HTTP -> POST {} | session_id={:?} | message_len={}",
+            url,
+            session_id,
+            message.len()
+        );
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&req_body)
-            .send()
-            .await?;
-        log_debug!("[Client] HTTP <- POST {} | status={}", url, response.status());
+        let response = self.client.post(&url).json(&req_body).send().await?;
+        log_debug!(
+            "[Client] HTTP <- POST {} | status={}",
+            url,
+            response.status()
+        );
 
         let mut stream = response.bytes_stream();
         let mut final_session_id = session_id.clone();
@@ -223,12 +231,21 @@ impl TuiClient {
                     let event_preview = match &event {
                         SseEvent::Message { content } => format!("Message(len={})", content.len()),
                         SseEvent::ToolUse { name, .. } => format!("ToolUse(name={})", name),
-                        SseEvent::ToolResult { tool_use_id, .. } => format!("ToolResult(id={})", tool_use_id),
-                        SseEvent::TaskProgress { plan_id, tasks } => format!("TaskProgress(plan={} tasks={})", plan_id, tasks.len()),
+                        SseEvent::ToolResult { tool_use_id, .. } => {
+                            format!("ToolResult(id={})", tool_use_id)
+                        }
+                        SseEvent::TaskProgress { plan_id, tasks } => {
+                            format!("TaskProgress(plan={} tasks={})", plan_id, tasks.len())
+                        }
                         SseEvent::Error { message } => format!("Error(msg={})", message),
                         SseEvent::Done { .. } => "Done".to_string(),
-                        SseEvent::Usage { prompt_tokens, completion_tokens } => format!("Usage(p={} c={})", prompt_tokens, completion_tokens),
-                        SseEvent::MessageDetails { blocks } => format!("MessageDetails(blocks={})", blocks.len()),
+                        SseEvent::Usage {
+                            prompt_tokens,
+                            completion_tokens,
+                        } => format!("Usage(p={} c={})", prompt_tokens, completion_tokens),
+                        SseEvent::MessageDetails { blocks } => {
+                            format!("MessageDetails(blocks={})", blocks.len())
+                        }
                     };
                     log_debug!("[Client] HTTP SSE event | {}", event_preview);
                     if let SseEvent::Done { session_id: sid } = &event {
@@ -237,7 +254,10 @@ impl TuiClient {
                     let is_done = matches!(event, SseEvent::Done { .. });
                     let _ = tx.send(AppEvent::SseEvent(event)).await;
                     if is_done {
-                        log_info!("[Client] HTTP SSE stream done | session_id={:?}", final_session_id);
+                        log_info!(
+                            "[Client] HTTP SSE stream done | session_id={:?}",
+                            final_session_id
+                        );
                         return Ok(final_session_id.unwrap_or_default());
                     }
                 }
@@ -253,14 +273,15 @@ impl TuiClient {
         let url = format!("{}/api/sessions", self.base_url);
         log_debug!("HTTP -> GET {}", url);
 
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await?;
+        let resp = self.client.get(&url).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<SessionListResult>>().await?;
-        log_debug!("HTTP <- GET {} | status={} | sessions={}", url, status, resp.data.as_ref().map(|d| d.sessions.len()).unwrap_or(0));
+        log_debug!(
+            "HTTP <- GET {} | status={} | sessions={}",
+            url,
+            status,
+            resp.data.as_ref().map(|d| d.sessions.len()).unwrap_or(0)
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -274,15 +295,15 @@ impl TuiClient {
         let body = serde_json::json!({"name": name});
         log_debug!("HTTP -> POST {} | name={}", url, name);
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&body).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<SessionInfo>>().await?;
-        log_debug!("HTTP <- POST {} | status={} | id={:?}", url, status, resp.data.as_ref().map(|d| &d.id));
+        log_debug!(
+            "HTTP <- POST {} | status={} | id={:?}",
+            url,
+            status,
+            resp.data.as_ref().map(|d| &d.id)
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -295,14 +316,15 @@ impl TuiClient {
         let url = format!("{}/api/sessions/{}/switch", self.base_url, id);
         log_debug!("HTTP -> POST {} | id={}", url, id);
 
-        let resp = self
-            .client
-            .post(&url)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<SessionInfo>>().await?;
-        log_debug!("HTTP <- POST {} | status={} | result={:?}", url, status, resp.data.as_ref().map(|d| &d.id));
+        log_debug!(
+            "HTTP <- POST {} | status={} | result={:?}",
+            url,
+            status,
+            resp.data.as_ref().map(|d| &d.id)
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -315,14 +337,15 @@ impl TuiClient {
         let url = format!("{}/api/files?path={}", self.base_url, path);
         log_debug!("HTTP -> GET {} | path={}", url, path);
 
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await?;
+        let resp = self.client.get(&url).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<FileTreeResult>>().await?;
-        log_debug!("HTTP <- GET {} | status={} | entries={}", url, status, resp.data.as_ref().map(|d| d.entries.len()).unwrap_or(0));
+        log_debug!(
+            "HTTP <- GET {} | status={} | entries={}",
+            url,
+            status,
+            resp.data.as_ref().map(|d| d.entries.len()).unwrap_or(0)
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -335,14 +358,15 @@ impl TuiClient {
         let url = format!("{}/api/commands", self.base_url);
         log_debug!("HTTP -> GET {}", url);
 
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await?;
+        let resp = self.client.get(&url).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<Vec<CommandMeta>>>().await?;
-        log_debug!("HTTP <- GET {} | status={} | count={}", url, status, resp.data.as_ref().map(|d| d.len()).unwrap_or(0));
+        log_debug!(
+            "HTTP <- GET {} | status={} | count={}",
+            url,
+            status,
+            resp.data.as_ref().map(|d| d.len()).unwrap_or(0)
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -362,17 +386,22 @@ impl TuiClient {
             "args": args,
             "session_id": session_id,
         });
-        log_debug!("HTTP -> POST {} | name={} | session_id={:?}", url, name, session_id);
+        log_debug!(
+            "HTTP -> POST {} | name={} | session_id={:?}",
+            url,
+            name,
+            session_id
+        );
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&body).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<CommandOutput>>().await?;
-        log_debug!("HTTP <- POST {} | status={} | result={:?}", url, status, resp.data.as_ref().map(|d| d.r#type.clone()));
+        log_debug!(
+            "HTTP <- POST {} | status={} | result={:?}",
+            url,
+            status,
+            resp.data.as_ref().map(|d| d.r#type.clone())
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -385,14 +414,17 @@ impl TuiClient {
         let url = format!("{}/api/themes", self.base_url);
         log_debug!("HTTP -> GET {}", url);
 
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await?;
+        let resp = self.client.get(&url).send().await?;
         let status = resp.status();
-        let resp = resp.json::<ApiResponse<Vec<crate::tui::theme::ThemePreset>>>().await?;
-        log_debug!("HTTP <- GET {} | status={} | count={}", url, status, resp.data.as_ref().map(|d| d.len()).unwrap_or(0));
+        let resp = resp
+            .json::<ApiResponse<Vec<crate::tui::theme::ThemePreset>>>()
+            .await?;
+        log_debug!(
+            "HTTP <- GET {} | status={} | count={}",
+            url,
+            status,
+            resp.data.as_ref().map(|d| d.len()).unwrap_or(0)
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -404,14 +436,15 @@ impl TuiClient {
         let url = format!("{}/api/logs?limit={}", self.base_url, limit);
         log_debug!("HTTP -> GET {} | limit={}", url, limit);
 
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await?;
+        let resp = self.client.get(&url).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<Vec<LogEntry>>>().await?;
-        log_debug!("HTTP <- GET {} | status={} | count={}", url, status, resp.data.as_ref().map(|d| d.len()).unwrap_or(0));
+        log_debug!(
+            "HTTP <- GET {} | status={} | count={}",
+            url,
+            status,
+            resp.data.as_ref().map(|d| d.len()).unwrap_or(0)
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -424,14 +457,15 @@ impl TuiClient {
         let url = format!("{}/api/config", self.base_url);
         log_debug!("[Client] HTTP -> GET {}", url);
 
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await?;
+        let resp = self.client.get(&url).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<serde_json::Value>>().await?;
-        log_debug!("[Client] HTTP <- GET {} | status={} | has_data={}", url, status, resp.data.is_some());
+        log_debug!(
+            "[Client] HTTP <- GET {} | status={} | has_data={}",
+            url,
+            status,
+            resp.data.is_some()
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -444,14 +478,15 @@ impl TuiClient {
         let url = format!("{}/api/models", self.base_url);
         log_debug!("HTTP -> GET {}", url);
 
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await?;
+        let resp = self.client.get(&url).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<serde_json::Value>>().await?;
-        log_debug!("HTTP <- GET {} | status={} | has_data={}", url, status, resp.data.is_some());
+        log_debug!(
+            "HTTP <- GET {} | status={} | has_data={}",
+            url,
+            status,
+            resp.data.is_some()
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -472,17 +507,22 @@ impl TuiClient {
             "model": model,
             "api_key": api_key.is_some(),
         });
-        log_info!("HTTP -> POST {} | provider={} | model={}", url, provider, model);
+        log_info!(
+            "HTTP -> POST {} | provider={} | model={}",
+            url,
+            provider,
+            model
+        );
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&body).send().await?;
         let status = resp.status();
         let resp = resp.json::<ApiResponse<serde_json::Value>>().await?;
-        log_info!("HTTP <- POST {} | status={} | success={}", url, status, resp.success);
+        log_info!(
+            "HTTP <- POST {} | status={} | success={}",
+            url,
+            status,
+            resp.success
+        );
 
         match resp.data {
             Some(data) => Ok(data),
@@ -494,7 +534,11 @@ impl TuiClient {
         let url = format!("{}/api/logs/stream", self.base_url);
         log_debug!("[Client] HTTP -> GET {} | subscribe_logs", url);
         let response = self.client.get(&url).send().await?;
-        log_debug!("[Client] HTTP <- GET {} | status={}", url, response.status());
+        log_debug!(
+            "[Client] HTTP <- GET {} | status={}",
+            url,
+            response.status()
+        );
 
         let mut stream = response.bytes_stream();
         let mut buf = String::new();

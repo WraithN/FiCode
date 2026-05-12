@@ -15,7 +15,7 @@ async fn main() {
         .map(|s| std::path::PathBuf::from(s))
         .unwrap_or_else(|_| std::env::current_dir().unwrap());
     let features_dir = manifest_dir.join("bdd/features");
-    
+
     AgentWorld::cucumber()
         .max_concurrent_scenarios(1)
         .run_and_exit(features_dir)

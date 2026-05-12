@@ -77,9 +77,9 @@ pub struct LogLine {
 /// 卡片交互动作。
 #[derive(Debug, Clone)]
 pub enum CardAction {
-    Expand(String),    // card_id
-    Collapse(String),  // card_id
-    Retry(String),     // card_id
+    Expand(String),   // card_id
+    Collapse(String), // card_id
+    Retry(String),    // card_id
 }
 
 #[derive(Debug, Clone)]
@@ -154,7 +154,9 @@ pub enum AppEvent {
         answer: QuestionAnswer,
     },
     CardAction(CardAction),
-    RetryTurn { turn_index: usize },
+    RetryTurn {
+        turn_index: usize,
+    },
     Quit,
 }
 

@@ -202,7 +202,11 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         &system_prompt
     );
 
-    log_info!("[Agent] run_one_turn start | turn={} | messages={}", state.turn_count, state.messages.len());
+    log_info!(
+        "[Agent] run_one_turn start | turn={} | messages={}",
+        state.turn_count,
+        state.messages.len()
+    );
 
     for (idx, msg) in state.messages.iter().enumerate() {
         let preview: String = msg
@@ -241,7 +245,11 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     } else {
         &state.messages[..]
     };
-    log_debug!("[Agent] context truncated | total={} | sent={}", state.messages.len(), messages_for_llm.len());
+    log_debug!(
+        "[Agent] context truncated | total={} | sent={}",
+        state.messages.len(),
+        messages_for_llm.len()
+    );
 
     client
         .stream_message(&system_prompt, messages_for_llm, &schema, &mut |chunk| {
@@ -254,9 +262,21 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
                 }
                 _ => {}
             }
-            process_chunk(chunk, &mut content_blocks, &mut finish_reason, &mut turn_usage)
+            process_chunk(
+                chunk,
+                &mut content_blocks,
+                &mut finish_reason,
+                &mut turn_usage,
+            )
         })
         .await?;
+
+    log_info!(
+        "[Agent] LLM stream complete | turn={} | blocks={} | turn_usage={:?}",
+        state.turn_count,
+        content_blocks.len(),
+        turn_usage
+    );
 
     // 从当前消息历史中继承 session_id，确保工具结果消息与对话属于同一会话
     let session_id = state
@@ -265,7 +285,10 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         .map(|m| m.session_id.clone())
         .unwrap_or_default();
 
-    log_debug!("[Agent] assistant message appended | blocks={}", content_blocks.len());
+    log_debug!(
+        "[Agent] assistant message appended | blocks={}",
+        content_blocks.len()
+    );
 
     // 将 Assistant 的完整回复追加到状态
     for (idx, block) in content_blocks.iter().enumerate() {
@@ -286,7 +309,10 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     // 判断停止原因：只有明确为 ToolUse 时才继续执行工具调用回合
     if finish_reason != Some(FinishReason::ToolUse) {
         state.transition_reason = None;
-        log_info!("[Agent] run_one_turn end | no tool use | finish_reason={:?}", finish_reason);
+        log_info!(
+            "[Agent] run_one_turn end | no tool use | finish_reason={:?}",
+            finish_reason
+        );
         return Ok(false);
     }
 
@@ -328,7 +354,12 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
             client
                 .stream_message(&system_prompt, &state.messages, &schema, &mut |chunk| {
-                    process_chunk(chunk, &mut content_blocks, &mut finish_reason, &mut turn_usage)
+                    process_chunk(
+                        chunk,
+                        &mut content_blocks,
+                        &mut finish_reason,
+                        &mut turn_usage,
+                    )
                 })
                 .await?;
 
@@ -342,7 +373,12 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
     // 发送 ToolUse 事件
     for block in &content_blocks {
-        if let Part::ToolUse { id, name, arguments } = block {
+        if let Part::ToolUse {
+            id,
+            name,
+            arguments,
+        } = block
+        {
             if let Some(ref mut cb) = on_tool_event {
                 let _ = cb(crate::server::transport::sse::SseEvent::ToolUse {
                     id: id.clone(),
@@ -361,7 +397,10 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         return Ok(false);
     }
 
-    log_info!("[Agent] pushing tool_results back to LLM | results={}", tool_results.len());
+    log_info!(
+        "[Agent] pushing tool_results back to LLM | results={}",
+        tool_results.len()
+    );
     for (idx, tr) in tool_results.iter().enumerate() {
         log_trace!("tool_result[{}] | {:?}", idx, tr);
     }
@@ -369,9 +408,17 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     // 客户端直出优化：如果所有工具都成功，且 Turn 1 已有前置文本说明，
     // 则跳过 Turn 2（不再请求 LLM 写总结），直接格式化输出工具结果。
     let all_success = tool_results.iter().all(|p| {
-        matches!(p, Part::ToolResult { is_error: false, .. })
+        matches!(
+            p,
+            Part::ToolResult {
+                is_error: false,
+                ..
+            }
+        )
     });
-    let has_preamble = content_blocks.iter().any(|p| matches!(p, Part::Text { .. }));
+    let has_preamble = content_blocks
+        .iter()
+        .any(|p| matches!(p, Part::Text { .. }));
 
     if all_success && has_preamble {
         let summary = format_tool_results(&content_blocks, &tool_results);
@@ -402,7 +449,10 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     state.turn_count += 1;
     state.transition_reason = Some("tool_result".to_string());
 
-    log_info!("[Agent] run_one_turn end | will continue next turn | next_turn={}", state.turn_count);
+    log_info!(
+        "[Agent] run_one_turn end | will continue next turn | next_turn={}",
+        state.turn_count
+    );
     Ok(true)
 }
 
@@ -453,7 +503,11 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Result<()> {
     const MAX_TURNS: usize = 25;
-    log_info!("[Agent] agent_loop start | messages={} | turn_count={}", state.messages.len(), state.turn_count);
+    log_info!(
+        "[Agent] agent_loop start | messages={} | turn_count={}",
+        state.messages.len(),
+        state.turn_count
+    );
     while run_one_turn(client, state, on_text, on_tool_event).await? {
         if state.turn_count > MAX_TURNS {
             log_error!("[Agent] agent_loop max turns exceeded | {}", MAX_TURNS);
@@ -463,6 +517,10 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
             ));
         }
     }
-    log_info!("[Agent] agent_loop end | total_turns={} | transition_reason={:?}", state.turn_count, state.transition_reason);
+    log_info!(
+        "[Agent] agent_loop end | total_turns={} | transition_reason={:?}",
+        state.turn_count,
+        state.transition_reason
+    );
     Ok(())
 }

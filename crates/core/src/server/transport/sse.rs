@@ -154,7 +154,11 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         let decoded: SseEvent = serde_json::from_str(&json).unwrap();
         match decoded {
-            SseEvent::ToolUse { id, name, arguments } => {
+            SseEvent::ToolUse {
+                id,
+                name,
+                arguments,
+            } => {
                 assert_eq!(id, "tool-1");
                 assert_eq!(name, "write");
                 assert_eq!(arguments["path"], "/tmp/test.txt");
@@ -270,7 +274,11 @@ mod tests {
         let json = serde_json::to_string(&block).unwrap();
         let decoded: DetailBlock = serde_json::from_str(&json).unwrap();
         match decoded {
-            DetailBlock::ToolUse { id, name, arguments } => {
+            DetailBlock::ToolUse {
+                id,
+                name,
+                arguments,
+            } => {
                 assert_eq!(id, "t1");
                 assert_eq!(name, "read");
                 assert_eq!(arguments, "{}");

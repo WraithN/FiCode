@@ -484,18 +484,19 @@ where
             match event_type.as_str() {
                 "message_start" => {
                     // message_start 携带输入 token 使用量
-                    let usage = json
-                        .get("message")
-                        .and_then(|m| m.get("usage"));
+                    let usage = json.get("message").and_then(|m| m.get("usage"));
                     if let Some(u) = usage {
-                        let input_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        let input_tokens =
+                            u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                         if input_tokens > 0 {
                             log_debug!("[Server] Anthropic SSE usage | input={}", input_tokens);
                             on_chunk(Chunk {
-                                content: ChunkContent::Usage(crate::provider::base_client::TokenUsage {
-                                    prompt_tokens: input_tokens,
-                                    completion_tokens: 0,
-                                }),
+                                content: ChunkContent::Usage(
+                                    crate::provider::base_client::TokenUsage {
+                                        prompt_tokens: input_tokens,
+                                        completion_tokens: 0,
+                                    },
+                                ),
                             });
                         }
                     }

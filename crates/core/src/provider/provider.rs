@@ -63,7 +63,12 @@ fn mask_api_key(key: &str) -> String {
     if key.len() <= 8 {
         "***".to_string()
     } else {
-        format!("{}...{} ({} chars)", &key[..4], &key[key.len()-4..], key.len())
+        format!(
+            "{}...{} ({} chars)",
+            &key[..4],
+            &key[key.len() - 4..],
+            key.len()
+        )
     }
 }
 
@@ -397,9 +402,7 @@ impl Provider {
         } else if model.model_type == ModelType::Mock {
             Ok(Box::new(super::MockAIClient::new()))
         } else {
-            Err(anyhow!(
-                "Unknown model type"
-            ))
+            Err(anyhow!("Unknown model type"))
         }
     }
 

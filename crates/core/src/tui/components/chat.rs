@@ -70,11 +70,11 @@ pub enum MessageRole {
 
 /// 聊天组件，负责显示对话历史、处理 SSE 流式消息、渲染生成动画。
 pub struct Chat {
-    turns: Vec<Turn>,         // 对话回合列表
-    messages: Vec<Message>,   // 保留的系统消息/错误消息（向后兼容）
-    scroll_offset: usize,     // 垂直滚动偏移（以行为单位）
-    is_generating: bool,      // 是否正在生成回复
-    spinner_frame: usize,     // 当前 spinner 动画帧索引
+    turns: Vec<Turn>,                             // 对话回合列表
+    messages: Vec<Message>,                       // 保留的系统消息/错误消息（向后兼容）
+    scroll_offset: usize,                         // 垂直滚动偏移（以行为单位）
+    is_generating: bool,                          // 是否正在生成回复
+    spinner_frame: usize,                         // 当前 spinner 动画帧索引
     card_hit_areas: RefCell<Vec<(String, Rect)>>, // 卡片点击区域（card_id -> rect）
 }
 
@@ -95,7 +95,11 @@ impl Chat {
 
     /// 添加一条用户发送的消息，创建新的 Turn。
     pub fn add_user_message(&mut self, content: &str) {
-        log_debug!("[Client] Chat add_user_message | turns={} | content_len={}", self.turns.len(), content.len());
+        log_debug!(
+            "[Client] Chat add_user_message | turns={} | content_len={}",
+            self.turns.len(),
+            content.len()
+        );
         self.turns.push(Turn {
             user_message: content.to_string(),
             cards: Vec::new(),
@@ -164,9 +168,9 @@ impl Chat {
                     card.content.push_str(content);
                 } else {
                     // 移除空的 Thinking 卡片
-                    last_turn
-                        .cards
-                        .retain(|c| !(matches!(c.kind, CardKind::Thinking) && c.content.is_empty()));
+                    last_turn.cards.retain(|c| {
+                        !(matches!(c.kind, CardKind::Thinking) && c.content.is_empty())
+                    });
 
                     last_turn.cards.push(Card {
                         id: format!("summary-{}", last_turn.cards.len()),
@@ -179,7 +183,11 @@ impl Chat {
                     });
                 }
             }
-            SseEvent::ToolUse { id, name, arguments } => {
+            SseEvent::ToolUse {
+                id,
+                name,
+                arguments,
+            } => {
                 log_info!("[Client] Chat SSE ToolUse | id={} | name={}", id, name);
                 let args_str = serde_json::to_string_pretty(arguments).unwrap_or_default();
                 last_turn.cards.push(Card {
@@ -198,7 +206,11 @@ impl Chat {
                 diff,
                 is_new_file: _,
             } => {
-                log_info!("[Client] Chat SSE ToolResult | tool_use_id={} | content_len={}", tool_use_id, content.len());
+                log_info!(
+                    "[Client] Chat SSE ToolResult | tool_use_id={} | content_len={}",
+                    tool_use_id,
+                    content.len()
+                );
                 if let Some(card) = last_turn.cards.iter_mut().find(|c| c.id == *tool_use_id) {
                     let name = match &card.kind {
                         CardKind::ToolUse { name } => name.clone(),
@@ -215,13 +227,16 @@ impl Chat {
                     };
 
                     let is_write_file = path.is_some();
-                    let (display_content, full_content, state) =
-                        if content.chars().count() > 200 {
-                            let truncated: String = content.chars().take(200).collect();
-                            (format!("{}...", truncated), Some(content.clone()), CardState::Collapsed)
-                        } else {
-                            (content.clone(), None, CardState::Completed)
-                        };
+                    let (display_content, full_content, state) = if content.chars().count() > 200 {
+                        let truncated: String = content.chars().take(200).collect();
+                        (
+                            format!("{}...", truncated),
+                            Some(content.clone()),
+                            CardState::Collapsed,
+                        )
+                    } else {
+                        (content.clone(), None, CardState::Completed)
+                    };
 
                     *card = Card {
                         id: tool_use_id.clone(),
@@ -239,7 +254,11 @@ impl Chat {
                 }
             }
             SseEvent::TaskProgress { plan_id, tasks } => {
-                log_debug!("[Client] Chat SSE TaskProgress | plan_id={} | tasks={}", plan_id, tasks.len());
+                log_debug!(
+                    "[Client] Chat SSE TaskProgress | plan_id={} | tasks={}",
+                    plan_id,
+                    tasks.len()
+                );
                 if let Some(card) = last_turn.cards.iter_mut().find(|c| {
                     matches!(c.kind, CardKind::TodoList { plan_id: ref pid, .. } if pid == plan_id)
                 }) {
@@ -303,7 +322,11 @@ impl Chat {
 
     /// 设置生成状态：开始生成时显示 spinner，结束时重置动画。
     pub fn set_generating(&mut self, generating: bool) {
-        log_debug!("[Client] Chat set_generating | {} -> {}", self.is_generating, generating);
+        log_debug!(
+            "[Client] Chat set_generating | {} -> {}",
+            self.is_generating,
+            generating
+        );
         self.is_generating = generating;
         if !generating {
             self.spinner_frame = 0;
@@ -428,9 +451,8 @@ impl Component for Chat {
         let render_y = |cy: u16| -> u16 { inner.y.saturating_add(cy.saturating_sub(scroll_y)) };
 
         // 辅助函数：判断元素是否可见
-        let is_visible = |cy: u16, h: u16| -> bool {
-            cy + h > scroll_y && cy < scroll_y + inner.height
-        };
+        let is_visible =
+            |cy: u16, h: u16| -> bool { cy + h > scroll_y && cy < scroll_y + inner.height };
 
         // 清除旧的点击区域（本帧会重新收集）
         self.card_hit_areas.borrow_mut().clear();
@@ -489,7 +511,9 @@ impl Component for Chat {
                         height: card_height.min(bottom.saturating_sub(y)),
                     };
                     widget.draw(frame, card_area, theme);
-                    self.card_hit_areas.borrow_mut().push((card.id.clone(), card_area));
+                    self.card_hit_areas
+                        .borrow_mut()
+                        .push((card.id.clone(), card_area));
                 }
                 current_y += card_height;
             }
@@ -575,9 +599,11 @@ impl Component for Chat {
                     for (card_id, rect) in self.card_hit_areas.borrow().iter() {
                         if rect_contains(*rect, mouse.column, mouse.row) {
                             if let Some(card) = self.find_card_by_id(card_id) {
-                                if let Some(action) =
-                                    CardWidget::new(card).handle_click(mouse.column, mouse.row, *rect)
-                                {
+                                if let Some(action) = CardWidget::new(card).handle_click(
+                                    mouse.column,
+                                    mouse.row,
+                                    *rect,
+                                ) {
                                     return Some(AppEvent::CardAction(action));
                                 }
                             }
@@ -673,7 +699,10 @@ mod tests {
             arguments: serde_json::json!({"cmd": "ls"}),
         });
         assert_eq!(chat.turns[0].cards.len(), 1);
-        assert!(matches!(chat.turns[0].cards[0].kind, CardKind::ToolUse { .. }));
+        assert!(matches!(
+            chat.turns[0].cards[0].kind,
+            CardKind::ToolUse { .. }
+        ));
     }
 
     #[test]
