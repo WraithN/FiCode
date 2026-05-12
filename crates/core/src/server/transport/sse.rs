@@ -72,6 +72,7 @@ pub enum SseEvent {
         content: String,
         diff: Option<String>,
         is_new_file: bool,
+        full_content: Option<String>,
     },
     #[serde(rename = "task_progress")]
     TaskProgress {

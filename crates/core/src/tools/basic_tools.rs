@@ -117,21 +117,26 @@ impl BasicTool {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Error: {}", e))?;
 
-        let result = if let Some(lim) = limit {
+        let full_content = lines.join("\n");
+
+        let preview = if let Some(lim) = limit {
             if lim < lines.len() {
                 let mut result: Vec<String> =
                     lines.iter().take(lim).map(|s| s.to_string()).collect();
                 result.push(format!("... ({} more)", lines.len() - lim));
                 result.join("\n")
             } else {
-                lines.join("\n")
+                full_content.clone()
             }
         } else {
-            lines.join("\n")
+            full_content.clone()
         };
 
-        // 限制返回内容最大 50000 字符，防止一次性返回超大文件撑爆上下文
-        Ok(result.chars().take(50000).collect())
+        let result_json = serde_json::json!({
+            "content": preview.chars().take(50000).collect::<String>(),
+            "full_content": full_content.chars().take(50000).collect::<String>(),
+        });
+        Ok(result_json.to_string())
     }
 
     // =========================================================================
@@ -264,6 +269,7 @@ impl BasicTool {
             "content": format!("Wrote {} bytes", content.len()),
             "diff": diff_text,
             "is_new_file": is_new_file,
+            "after_content": content,
         });
         Ok(result_json.to_string())
     }
@@ -314,6 +320,7 @@ impl BasicTool {
             "content": format!("Edited {}", path),
             "diff": diff_opt,
             "is_new_file": false,
+            "after_content": new_content,
         });
         Ok(result_json.to_string())
     }

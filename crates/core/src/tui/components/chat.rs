@@ -204,7 +204,8 @@ impl Chat {
                 tool_use_id,
                 content,
                 diff,
-                is_new_file: _,
+                is_new_file,
+                full_content,
             } => {
                 log_info!(
                     "[Client] Chat SSE ToolResult | tool_use_id={} | content_len={}",
@@ -212,45 +213,14 @@ impl Chat {
                     content.len()
                 );
                 if let Some(card) = last_turn.cards.iter_mut().find(|c| c.id == *tool_use_id) {
-                    let name = match &card.kind {
-                        CardKind::ToolUse { name } => name.clone(),
-                        _ => "Result".to_string(),
-                    };
-
-                    let path = if name == "write" || name == "edit" {
-                        serde_json::from_str::<serde_json::Value>(&card.content)
-                            .ok()
-                            .and_then(|v| v.get("path").or_else(|| v.get("file_path")).cloned())
-                            .and_then(|v| v.as_str().map(|s| s.to_string()))
-                    } else {
-                        None
-                    };
-
-                    let is_write_file = path.is_some();
-                    let (display_content, full_content, state) = if content.chars().count() > 200 {
-                        let truncated: String = content.chars().take(200).collect();
-                        (
-                            format!("{}...", truncated),
-                            Some(content.clone()),
-                            CardState::Collapsed,
-                        )
-                    } else {
-                        (content.clone(), None, CardState::Completed)
-                    };
-
-                    *card = Card {
-                        id: tool_use_id.clone(),
-                        kind: if let Some(p) = path {
-                            CardKind::WriteFile { path: p }
-                        } else {
-                            CardKind::ToolResult
-                        },
-                        title: format!("{} Result", name),
-                        content: display_content,
+                    Self::update_tool_result_card(
+                        card,
+                        tool_use_id,
+                        content,
+                        diff,
+                        is_new_file,
                         full_content,
-                        right_content: diff.clone(),
-                        state,
-                    };
+                    );
                 }
             }
             SseEvent::TaskProgress { plan_id, tasks } => {
@@ -400,6 +370,94 @@ impl Chat {
             self.scroll_offset -= 1;
         }
         Some(AppEvent::ScrollUp)
+    }
+
+    /// 更新工具结果卡片的内容和状态。
+    fn update_tool_result_card(
+        card: &mut Card,
+        tool_use_id: &str,
+        content: &str,
+        diff: &Option<String>,
+        is_new_file: &bool,
+        full_content: &Option<String>,
+    ) {
+        let name = match &card.kind {
+            CardKind::ToolUse { name } => name.clone(),
+            _ => "Result".to_string(),
+        };
+
+        let path = if name == "write" || name == "edit" || name == "read" {
+            serde_json::from_str::<serde_json::Value>(&card.content)
+                .ok()
+                .and_then(|v| v.get("path").or_else(|| v.get("file_path")).cloned())
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+        } else {
+            None
+        };
+
+        let mut card_kind = CardKind::ToolResult;
+        let mut card_title = format!("{} Result", name);
+        let mut display_content = content.to_string();
+        let mut card_full_content: Option<String> = None;
+        let mut right_content: Option<String> = None;
+        let mut card_state = CardState::Completed;
+
+        match name.as_str() {
+            "read" => {
+                let preview_lines: Vec<&str> = content.lines().collect();
+                if preview_lines.len() > 10 {
+                    let mut p = preview_lines
+                        .iter()
+                        .take(10)
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>();
+                    p.push(format!("... ({} more lines)", preview_lines.len() - 10));
+                    display_content = p.join("\n");
+                    card_state = CardState::Collapsed;
+                }
+                card_title = format!("read: {}", path.as_deref().unwrap_or("file"));
+                card_full_content = full_content.clone().or(Some(content.to_string()));
+            }
+            "write" => {
+                display_content = if *is_new_file {
+                    "(new file)".to_string()
+                } else {
+                    diff.clone().unwrap_or_default()
+                };
+                card_kind = CardKind::WriteFile {
+                    path: path.clone().unwrap_or_default(),
+                };
+                card_title = format!("write: {}", path.as_deref().unwrap_or("file"));
+                right_content = full_content.clone();
+            }
+            "edit" => {
+                display_content = diff.clone().unwrap_or_default();
+                card_kind = CardKind::WriteFile {
+                    path: path.clone().unwrap_or_default(),
+                };
+                card_title = format!("edit: {}", path.as_deref().unwrap_or("file"));
+                right_content = full_content.clone();
+            }
+            _ => {
+                if content.chars().count() > 200 {
+                    let truncated: String = content.chars().take(200).collect();
+                    display_content = format!("{}...", truncated);
+                    card_full_content = Some(content.to_string());
+                    card_state = CardState::Collapsed;
+                }
+                right_content = diff.clone();
+            }
+        }
+
+        *card = Card {
+            id: tool_use_id.to_string(),
+            kind: card_kind,
+            title: card_title,
+            content: display_content,
+            full_content: card_full_content,
+            right_content,
+            state: card_state,
+        };
     }
 
     /// 计算给定宽度下所有内容的总高度。
@@ -724,6 +782,7 @@ mod tests {
             content: "file.txt".to_string(),
             diff: None,
             is_new_file: false,
+            full_content: None,
         });
         assert_eq!(chat.turns[0].cards.len(), 1);
         assert!(matches!(chat.turns[0].cards[0].kind, CardKind::ToolResult));

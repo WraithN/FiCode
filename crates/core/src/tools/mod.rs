@@ -972,19 +972,27 @@ pub async fn execute_tool_calls(
                 let (content, is_error) = execute_single_tool_call(&id, &name, &arguments).await;
 
                 // Parse JSON content to extract diff if present
-                let (display_content, diff, is_new_file) =
+                let (display_content, diff, is_new_file, full_content) =
                     if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content) {
                         if json_val.get("diff").is_some() {
                             (
                                 json_val["content"].as_str().unwrap_or(&content).to_string(),
                                 json_val["diff"].as_str().map(|s| s.to_string()),
                                 json_val["is_new_file"].as_bool().unwrap_or(false),
+                                json_val["after_content"].as_str().map(|s| s.to_string()),
+                            )
+                        } else if json_val.get("full_content").is_some() {
+                            (
+                                json_val["content"].as_str().unwrap_or(&content).to_string(),
+                                None,
+                                false,
+                                json_val["full_content"].as_str().map(|s| s.to_string()),
                             )
                         } else {
-                            (content.clone(), None, false)
+                            (content.clone(), None, false, None)
                         }
                     } else {
-                        (content.clone(), None, false)
+                        (content.clone(), None, false, None)
                     };
 
                 if let Ok(mut guard) = cb.lock() {
@@ -994,6 +1002,7 @@ pub async fn execute_tool_calls(
                             content: display_content,
                             diff,
                             is_new_file,
+                            full_content,
                         });
                     }
                 }
