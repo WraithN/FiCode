@@ -24,7 +24,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 
@@ -165,6 +165,25 @@ impl Component for LogWindow {
 
         let paragraph = Paragraph::new(text_lines).block(block);
         frame.render_widget(paragraph, area);
+
+        // 渲染 scrollbar（内容超出时）
+        let total_lines = self.lines.len();
+        if total_lines > visible_height && visible_height > 0 {
+            let content_len = self.lines.len().saturating_sub(1);
+            let max_start = content_len.saturating_sub(visible_height);
+            let position = max_start.saturating_sub(self.scroll_offset);
+
+            let mut scrollbar_state = ScrollbarState::default()
+                .content_length(content_len)
+                .position(position)
+                .viewport_content_length(visible_height);
+
+            let scrollbar = Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .style(Style::default().fg(theme.border));
+
+            frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+        }
     }
 
     fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<crate::tui::event::AppEvent> {
@@ -191,6 +210,17 @@ impl Component for LogWindow {
                 KeyCode::PageDown => {
                     self.scroll_down(10);
                     return None;
+                }
+                _ => {}
+            }
+        } else if let Event::Mouse(mouse) = event {
+            use crossterm::event::MouseEventKind;
+            match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    self.scroll_up(3);
+                }
+                MouseEventKind::ScrollDown => {
+                    self.scroll_down(3);
                 }
                 _ => {}
             }
