@@ -172,6 +172,7 @@ pub enum FocusArea {
     Input,       // 底部输入框
     LeftDrawer,  // 左侧文件抽屉
     RightDrawer, // 右侧会话历史抽屉
+    LogWindow,   // 日志浮窗
 }
 
 /// 新建会话时可选择的模板类型。

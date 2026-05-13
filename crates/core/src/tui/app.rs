@@ -463,10 +463,10 @@ impl TuiApp {
             }
         }
 
-        // 3. LogWindow（不切换焦点，但消费事件）
+        // 3. LogWindow
         if let Some(log) = areas.log_window {
             if contains(&log, column, row) {
-                return None;
+                return Some(FocusArea::LogWindow);
             }
         }
 
@@ -508,7 +508,7 @@ impl TuiApp {
     /// - 左侧抽屉打开时：LeftDrawer ↔ Main ↔ Input
     /// - 右侧抽屉打开时：Main ↔ Input ↔ RightDrawer
     fn cycle_focus(&mut self, forward: bool) {
-        let areas = match self.layout.panel {
+        let mut areas = match self.layout.panel {
             PanelState::LeftClosed => {
                 vec![FocusArea::Main, FocusArea::Input, FocusArea::RightDrawer]
             }
@@ -521,6 +521,12 @@ impl TuiApp {
                 ]
             }
         };
+
+        // LogWindow 可见时插入焦点循环（放在 Input 之后）
+        if self.log_window.is_visible() {
+            let input_idx = areas.iter().position(|a| a == &FocusArea::Input).unwrap_or(1);
+            areas.insert(input_idx + 1, FocusArea::LogWindow);
+        }
 
         let current_idx = areas.iter().position(|a| a == &self.focus).unwrap_or(0);
         let next_idx = if forward {
@@ -748,19 +754,23 @@ impl TuiApp {
             Event::Mouse(mouse) => {
                 use crossterm::event::MouseEventKind;
 
-                // 鼠标左键按下时，检测点击位置并切换焦点
-                if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
-                    if let Some(new_focus) = self.hit_test(mouse.column, mouse.row) {
-                        if new_focus != self.focus {
-                            log_debug!(
-                                "[Client] Focus switched by mouse click | {:?} -> {:?}",
-                                self.focus,
-                                new_focus
-                            );
-                            self.focus = new_focus;
-                            self.dirty = true;
+                // 鼠标左键按下或 hover 时，检测位置并切换焦点
+                match mouse.kind {
+                    MouseEventKind::Down(crossterm::event::MouseButton::Left)
+                    | MouseEventKind::Moved => {
+                        if let Some(new_focus) = self.hit_test(mouse.column, mouse.row) {
+                            if new_focus != self.focus {
+                                log_debug!(
+                                    "[Client] Focus switched by mouse | {:?} -> {:?}",
+                                    self.focus,
+                                    new_focus
+                                );
+                                self.focus = new_focus;
+                                self.dirty = true;
+                            }
                         }
                     }
+                    _ => {}
                 }
 
                 // 继续将事件分发给（可能已切换的）焦点组件
@@ -791,6 +801,7 @@ impl TuiApp {
             FocusArea::RightDrawer => self.right_drawer.handle_event(&event, true),
             FocusArea::Main => self.chat.handle_event(&event, true),
             FocusArea::Input => self.input.handle_event(&event, true),
+            FocusArea::LogWindow => self.log_window.handle_event(&event, true),
         };
 
         if let Some(app_event) = app_event {
@@ -1532,6 +1543,14 @@ mod tests {
             status_bar: StatusBar::new(),
             log_window: LogWindow::new(),
             focus: FocusArea::Input,
+            component_areas: ComponentAreas {
+                left_drawer: None,
+                main: ratatui::layout::Rect::default(),
+                input: ratatui::layout::Rect::default(),
+                right_drawer: ratatui::layout::Rect::default(),
+                log_window: None,
+                overlay: None,
+            },
             is_generating: false,
             should_quit: false,
             exit_confirm_pending: false,
