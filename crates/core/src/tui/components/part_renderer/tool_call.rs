@@ -31,6 +31,26 @@ use super::*;
 ///
 /// 返回 (title, body)：title 用于卡片标题，body 用于卡片内容。
 fn format_tool_use(name: &str, arguments: &serde_json::Value) -> (String, String) {
+    // 如果 arguments 包含 _raw（JSON 解析失败时的回退），尝试从中提取字段
+    let arguments = if let Some(raw) = arguments.get("_raw").and_then(|v| v.as_str()) {
+        // 尝试解析原始字符串中的已知字段
+        let mut extracted = serde_json::Map::new();
+        for key in ["path", "content", "command", "pattern", "url", "message"] {
+            if let Some(pos) = raw.find(&format!("\"{}\"", key)) {
+                let start = raw[pos + key.len() + 3..].find('"').map(|i| pos + key.len() + 3 + i + 1);
+                if let Some(start) = start {
+                    if let Some(end) = raw[start..].find('"') {
+                        let value = &raw[start..start + end];
+                        extracted.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+                    }
+                }
+            }
+        }
+        serde_json::Value::Object(extracted)
+    } else {
+        arguments.clone()
+    };
+
     // 辅助函数：从 arguments 中提取字段
     let get = |key: &str| -> String {
         arguments

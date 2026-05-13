@@ -327,20 +327,26 @@ impl AgentRunner {
                 }
             }
             ChunkContent::ToolUse(ref tool) => {
-                if let Part::ToolUse {
-                    id,
-                    name,
-                    arguments,
-                } = tool
-                {
+                if let Part::ToolUse { id, name, arguments } = tool {
                     log_debug!(
                         "LLM tool_use | id={} | name={} | args={}",
                         id,
                         name,
                         arguments
                     );
+                    // 按 id 去重：已有同 id 的 ToolUse 则更新，避免重复 push
+                    if let Some(existing) = content_blocks.iter_mut().find_map(|p| {
+                        if let Part::ToolUse { id: eid, .. } = p {
+                            if eid == id { Some(p) } else { None }
+                        } else {
+                            None
+                        }
+                    }) {
+                        *existing = tool.clone();
+                    } else {
+                        content_blocks.push(tool.clone());
+                    }
                 }
-                content_blocks.push(tool.clone());
             }
             ChunkContent::Usage(usage) => {
                 token_usage.prompt_tokens += usage.prompt_tokens;
