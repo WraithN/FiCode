@@ -69,9 +69,6 @@ impl PartRenderer for WaveMarkerRenderer {
                 format_tokens(delta_tokens.prompt_tokens),
                 format_tokens(delta_tokens.completion_tokens)
             );
-            let latency_s = 0.0; // WaveMarker 中没有 latency_ms 字段
-            let lat_str = format!(" · LAT:{:.1}s", latency_s);
-
             let line = Line::from(vec![
                 Span::styled(
                     step_text,
@@ -81,7 +78,6 @@ impl PartRenderer for WaveMarkerRenderer {
                 ),
                 Span::styled(git_str, Style::default().fg(theme.success)),
                 Span::styled(tokens_str, theme.style_muted()),
-                Span::styled(lat_str, theme.style_muted()),
             ]);
             let paragraph = Paragraph::new(line);
             frame.render_widget(paragraph, area);

@@ -552,6 +552,25 @@ impl BasicTool {
         git_args.extend(args.iter());
         Self::run_git_command(&git_args)
     }
+
+    pub fn git_write_tree() -> Result<String, String> {
+        use std::process::Command;
+        let output = Command::new("git")
+            .args(["write-tree"])
+            .current_dir(std::env::current_dir().map_err(|e| e.to_string())?)
+            .output()
+            .map_err(|e| format!("Failed to run git write-tree: {}", e))?;
+
+        if output.status.success() {
+            let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok(hash)
+        } else {
+            Err(format!(
+                "git write-tree failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        }
+    }
 }
 
 // =============================================================================
@@ -649,7 +668,7 @@ mod tests {
         ensure_workspace();
         let result = BasicTool::run_git_command(&["status"]);
         // 只检查命令执行没有错误，输出内容是变化的
-        assert!(!result.is_empty() || true); // 始终通过
+        assert!(!result.is_empty());
     }
 
     #[test]
@@ -664,5 +683,17 @@ mod tests {
         ensure_workspace();
         let result = BasicTool::run_git_log(Some(5));
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_git_write_tree() {
+        ensure_workspace();
+        let result = BasicTool::git_write_tree();
+        // 在 git 仓库中应该成功，否则可能失败
+        if std::path::Path::new(".git").exists() {
+            assert!(result.is_ok(), "git write-tree should succeed in a git repo");
+            let hash = result.unwrap();
+            assert!(!hash.is_empty(), "tree hash should not be empty");
+        }
     }
 }

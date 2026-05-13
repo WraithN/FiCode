@@ -23,9 +23,9 @@ use std::cell::RefCell;
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
-    layout::{Alignment, Rect},
+    layout::Rect,
     style::{Modifier, Style},
-    text::{Line, Span, Text},
+    text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
@@ -36,16 +36,16 @@ use crate::log_info;
 use crate::log_warn;
 use crate::server::transport::sse::SseEvent;
 use crate::session::message::Part;
-use crate::tui::components::card_widget::{Card, CardKind, CardState, CardWidget};
+use crate::tui::components::part_renderer::PartRendererRegistry;
 use crate::tui::components::Component;
-use crate::tui::event::{AppEvent, CardAction};
+use crate::tui::event::AppEvent;
 use crate::tui::theme::Theme;
 
-/// 对话回合：包含用户消息和 AI 回复的卡片列表。
+/// 对话回合：包含用户消息和 AI 回复的 Part 列表。
 #[derive(Debug, Clone)]
 pub struct Turn {
     pub user_message: String,
-    pub cards: Vec<Card>,
+    pub parts: Vec<Part>,
     pub is_complete: bool,
 }
 
@@ -67,12 +67,13 @@ pub enum MessageRole {
 
 /// 聊天组件，负责显示对话历史、处理 SSE 流式消息、渲染生成动画。
 pub struct Chat {
-    turns: Vec<Turn>,                             // 对话回合列表
+    pub turns: Vec<Turn>,                             // 对话回合列表
     messages: Vec<Message>,                       // 保留的系统消息/错误消息（向后兼容）
-    scroll_offset: usize,                         // 垂直滚动偏移（以行为单位）
-    is_generating: bool,                          // 是否正在生成回复
+    pub scroll_offset: usize,                         // 垂直滚动偏移（以行为单位）
+    pub is_generating: bool,                          // 是否正在生成回复
     spinner_frame: usize,                         // 当前 spinner 动画帧索引
-    card_hit_areas: RefCell<Vec<(String, Rect)>>, // 卡片点击区域（card_id -> rect）
+    pub card_hit_areas: RefCell<Vec<(String, Rect)>>, // 卡片点击区域（card_id -> rect）
+    pub renderer_registry: PartRendererRegistry,  // Part 渲染器注册表
 }
 
 /// 终端 spinner 动画帧（Braille 点阵字符），每 tick 轮播一帧。
@@ -87,6 +88,7 @@ impl Chat {
             is_generating: false,
             spinner_frame: 0,
             card_hit_areas: RefCell::new(Vec::new()),
+            renderer_registry: PartRendererRegistry::new(),
         }
     }
 
@@ -99,7 +101,7 @@ impl Chat {
         );
         self.turns.push(Turn {
             user_message: content.to_string(),
-            cards: Vec::new(),
+            parts: Vec::new(),
             is_complete: false,
         });
     }
@@ -127,24 +129,19 @@ impl Chat {
         }
     }
 
-    /// 创建 Thinking 占位卡片（在收到第一个 token 前显示）。
+    /// 创建 Thinking 占位 Part（在收到第一个 token 前显示）。
     pub fn create_thinking_card(&mut self) {
         let turn_idx = self.turns.len().saturating_sub(1);
         log_debug!("[Client] Chat create_thinking_card | turn_idx={}", turn_idx);
         if let Some(last_turn) = self.turns.last_mut() {
-            last_turn.cards.push(Card {
-                id: format!("thinking-{}", turn_idx),
-                kind: CardKind::Thinking,
-                title: "Thinking".to_string(),
-                content: String::new(),
-                full_content: None,
-                right_content: None,
-                state: CardState::Animating,
+            last_turn.parts.push(Part::Reasoning {
+                thinking: String::new(),
+                signature: None,
             });
         }
     }
 
-    /// 处理 SSE 事件：将流式内容追加到当前 Turn 的卡片中。
+    /// 处理 SSE 事件：将流式内容追加到当前 Turn 的 Part 列表中。
     pub fn handle_sse_event(&mut self, event: &SseEvent) {
         let Some(last_turn) = self.turns.last_mut() else {
             log_warn!("[Client] Chat handle_sse_event: no turns available");
@@ -154,48 +151,23 @@ impl Chat {
         match event {
             SseEvent::Message { content } => {
                 log_debug!("[Client] Chat SSE Message | content_len={}", content.len());
-                // 查找或创建 Summary 卡片
-                if let Some(card) = last_turn
-                    .cards
-                    .iter_mut()
-                    .find(|c| matches!(c.kind, CardKind::Summary))
-                {
-                    card.content.push_str(content);
+                // 追加到最后的 Text Part，或创建新的 Text Part
+                if let Some(Part::Text { text }) = last_turn.parts.last_mut() {
+                    text.push_str(content);
                 } else {
-                    // 移除空的 Thinking 卡片
-                    last_turn.cards.retain(|c| {
-                        !(matches!(c.kind, CardKind::Thinking) && c.content.is_empty())
+                    // 移除空的 Reasoning（Thinking）占位 Part
+                    last_turn.parts.retain(|p| {
+                        !(matches!(p, Part::Reasoning { thinking, .. } if thinking.is_empty()))
                     });
-
-                    last_turn.cards.push(Card {
-                        id: format!("summary-{}", last_turn.cards.len()),
-                        kind: CardKind::Summary,
-                        title: "AI".to_string(),
-                        content: content.clone(),
-                        full_content: None,
-                        right_content: None,
-                        state: CardState::Completed,
+                    last_turn.parts.push(Part::Text {
+                        text: content.clone(),
                     });
                 }
             }
             SseEvent::Part { part } => {
                 match part {
-                    Part::ToolUse {
-                        id,
-                        name,
-                        arguments,
-                    } => {
+                    Part::ToolUse { id, name, .. } => {
                         log_info!("[Client] Chat SSE ToolUse | id={} | name={}", id, name);
-                        let args_str = serde_json::to_string_pretty(arguments).unwrap_or_default();
-                        last_turn.cards.push(Card {
-                            id: id.clone(),
-                            kind: CardKind::ToolUse { name: name.clone() },
-                            title: name.clone(),
-                            content: args_str,
-                            full_content: None,
-                            right_content: None,
-                            state: CardState::Completed,
-                        });
                     }
                     Part::ToolResult {
                         tool_call_id,
@@ -206,12 +178,10 @@ impl Chat {
                             tool_call_id,
                             content.len()
                         );
-                        if let Some(card) = last_turn.cards.iter_mut().find(|c| c.id == *tool_call_id) {
-                            Self::update_tool_result_card(card, tool_call_id, content);
-                        }
                     }
                     _ => {}
                 }
+                last_turn.parts.push(part.clone());
             }
             SseEvent::TaskProgress { plan_id, tasks } => {
                 log_debug!(
@@ -219,53 +189,25 @@ impl Chat {
                     plan_id,
                     tasks.len()
                 );
-                if let Some(card) = last_turn.cards.iter_mut().find(|c| {
-                    matches!(c.kind, CardKind::TodoList { plan_id: ref pid, .. } if pid == plan_id)
-                }) {
-                    if let CardKind::TodoList {
-                        ref mut tasks,
-                        ..
-                    } = card.kind
-                    {
-                        *tasks = tasks.clone();
-                    }
-                } else {
-                    let task_count = tasks.len();
-                    let mut content = String::new();
-                    for task in tasks {
-                        let icon = match task.status {
-                            crate::tools::task::TaskStatus::Pending => "⏳",
-                            crate::tools::task::TaskStatus::InProgress => "🔵",
-                            crate::tools::task::TaskStatus::Completed => "✅",
-                            crate::tools::task::TaskStatus::Failed => "❌",
-                        };
-                        content.push_str(&format!("{} {}\n", icon, task.name));
-                    }
-
-                    last_turn.cards.push(Card {
-                        id: plan_id.clone(),
-                        kind: CardKind::TodoList {
-                            plan_id: plan_id.clone(),
-                            tasks: tasks.clone(),
-                        },
-                        title: format!("Task Plan ({} tasks)", task_count),
-                        content,
-                        full_content: None,
-                        right_content: None,
-                        state: CardState::Completed,
-                    });
+                let task_count = tasks.len();
+                let mut content = String::new();
+                for task in tasks {
+                    let icon = match task.status {
+                        crate::tools::task::TaskStatus::Pending => "⏳",
+                        crate::tools::task::TaskStatus::InProgress => "🔵",
+                        crate::tools::task::TaskStatus::Completed => "✅",
+                        crate::tools::task::TaskStatus::Failed => "❌",
+                    };
+                    content.push_str(&format!("{} {}\n", icon, task.name));
                 }
+                last_turn.parts.push(Part::Text {
+                    text: format!("Task Plan ({} tasks)\n{}", task_count, content),
+                });
             }
             SseEvent::Error { message } => {
                 log_error!("[Client] Chat SSE Error | {}", message);
-                last_turn.cards.push(Card {
-                    id: format!("error-{}", last_turn.cards.len()),
-                    kind: CardKind::Error,
-                    title: "Error".to_string(),
-                    content: message.clone(),
-                    full_content: None,
-                    right_content: None,
-                    state: CardState::Completed,
+                last_turn.parts.push(Part::Text {
+                    text: message.clone(),
                 });
             }
             _ => {}
@@ -289,61 +231,12 @@ impl Chat {
         }
     }
 
-    /// 处理卡片动作（展开/折叠/重试）。
-    pub fn handle_card_action(&mut self, action: &CardAction) {
-        match action {
-            CardAction::Expand(card_id) => {
-                if let Some(card) = self.find_card_by_id_mut(card_id) {
-                    if let Some(ref full) = card.full_content {
-                        card.content = full.clone();
-                        card.state = CardState::Expanded;
-                    }
-                }
-            }
-            CardAction::Collapse(card_id) => {
-                if let Some(card) = self.find_card_by_id_mut(card_id) {
-                    let truncated: String = card.content.chars().take(200).collect();
-                    card.content = format!("{}...", truncated);
-                    card.state = CardState::Collapsed;
-                }
-            }
-            CardAction::Retry(_card_id) => {
-                // Retry 逻辑由 App 层处理（通过 RetryTurn 事件）
-            }
-        }
-    }
-
-    /// 根据卡片 ID 查找其所在 Turn 的索引。
-    pub fn find_turn_index_by_card_id(&self, card_id: &str) -> Option<usize> {
-        self.turns
-            .iter()
-            .enumerate()
-            .find(|(_, t)| t.cards.iter().any(|c| c.id == card_id))
-            .map(|(i, _)| i)
-    }
-
-    /// 准备重试指定 Turn：标记为完成并移除错误卡片，返回用户消息。
+    /// 准备重试指定 Turn：标记为完成并移除错误 Part，返回用户消息。
     pub fn retry_turn(&mut self, turn_index: usize) -> Option<String> {
         let turn = self.turns.get_mut(turn_index)?;
         turn.is_complete = true;
-        turn.cards.retain(|c| !matches!(c.kind, CardKind::Error));
+        turn.parts.retain(|p| !matches!(p, Part::ToolError { .. }));
         Some(turn.user_message.clone())
-    }
-
-    /// 查找指定 ID 的卡片（不可变）。
-    fn find_card_by_id(&self, card_id: &str) -> Option<&Card> {
-        self.turns
-            .iter()
-            .flat_map(|t| t.cards.iter())
-            .find(|c| c.id == card_id)
-    }
-
-    /// 查找指定 ID 的卡片（可变）。
-    fn find_card_by_id_mut(&mut self, card_id: &str) -> Option<&mut Card> {
-        self.turns
-            .iter_mut()
-            .flat_map(|t| t.cards.iter_mut())
-            .find(|c| c.id == card_id)
     }
 
     /// 向上滚动一页。
@@ -354,88 +247,6 @@ impl Chat {
         Some(AppEvent::ScrollUp)
     }
 
-    /// 更新工具结果卡片的内容和状态。
-    fn update_tool_result_card(
-        card: &mut Card,
-        tool_use_id: &str,
-        content: &str,
-    ) {
-        log_info!(
-            "[Chat] update_tool_result_card | id={} | name={:?} | content_len={}",
-            tool_use_id,
-            card.kind,
-            content.len(),
-        );
-        let name = match &card.kind {
-            CardKind::ToolUse { name } => name.clone(),
-            _ => "Result".to_string(),
-        };
-
-        let path = if name == "write" || name == "edit" || name == "read" {
-            serde_json::from_str::<serde_json::Value>(&card.content)
-                .ok()
-                .and_then(|v| v.get("path").or_else(|| v.get("file_path")).cloned())
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-        } else {
-            None
-        };
-
-        let mut card_kind = CardKind::ToolResult;
-        let mut card_title = format!("{} Result", name);
-        let mut display_content = content.to_string();
-        let mut card_full_content: Option<String> = None;
-        let mut right_content: Option<String> = None;
-        let mut card_state = CardState::Completed;
-
-        match name.as_str() {
-            "read" => {
-                let preview_lines: Vec<&str> = content.lines().collect();
-                if preview_lines.len() > 10 {
-                    let mut p = preview_lines
-                        .iter()
-                        .take(10)
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>();
-                    p.push(format!("... ({} more lines)", preview_lines.len() - 10));
-                    display_content = p.join("\n");
-                    card_state = CardState::Collapsed;
-                }
-                card_title = format!("read: {}", path.as_deref().unwrap_or("file"));
-                card_full_content = Some(content.to_string());
-            }
-            "write" => {
-                card_kind = CardKind::WriteFile {
-                    path: path.clone().unwrap_or_default(),
-                };
-                card_title = format!("write: {}", path.as_deref().unwrap_or("file"));
-            }
-            "edit" => {
-                card_kind = CardKind::WriteFile {
-                    path: path.clone().unwrap_or_default(),
-                };
-                card_title = format!("edit: {}", path.as_deref().unwrap_or("file"));
-            }
-            _ => {
-                if content.chars().count() > 200 {
-                    let truncated: String = content.chars().take(200).collect();
-                    display_content = format!("{}...", truncated);
-                    card_full_content = Some(content.to_string());
-                    card_state = CardState::Collapsed;
-                }
-            }
-        }
-
-        *card = Card {
-            id: tool_use_id.to_string(),
-            kind: card_kind,
-            title: card_title,
-            content: display_content,
-            full_content: card_full_content,
-            right_content,
-            state: card_state,
-        };
-    }
-
     /// 计算给定宽度下所有内容的总高度。
     fn total_height(&self, width: u16) -> u16 {
         let mut height = 0u16;
@@ -444,8 +255,11 @@ impl Chat {
             let content_para = Paragraph::new(turn.user_message.clone()).wrap(Wrap { trim: true });
             height += content_para.line_count(width).max(1) as u16;
             height += 1; // 空行
-            for card in &turn.cards {
-                height += CardWidget::new(card).calculate_height(width);
+            for part in &turn.parts {
+                if let Some(renderer) = self.renderer_registry.get(part) {
+                    height += renderer.height(part, width);
+                    height += 1; // Part 间距
+                }
             }
         }
         for msg in &self.messages {
@@ -488,9 +302,6 @@ impl Component for Chat {
         let is_visible =
             |cy: u16, h: u16| -> bool { cy + h > scroll_y && cy < scroll_y + inner.height };
 
-        // 清除旧的点击区域（本帧会重新收集）
-        self.card_hit_areas.borrow_mut().clear();
-
         for turn in &self.turns {
             // 用户消息前缀
             let prefix_height = 1u16;
@@ -532,24 +343,22 @@ impl Component for Chat {
             // 空行
             current_y += 1;
 
-            // 卡片
-            for card in &turn.cards {
-                let widget = CardWidget::new(card);
-                let card_height = widget.calculate_height(inner.width);
-                if is_visible(current_y, card_height) {
-                    let y = render_y(current_y);
-                    let card_area = Rect {
-                        x: inner.x,
-                        y,
-                        width: inner.width,
-                        height: card_height.min(bottom.saturating_sub(y)),
-                    };
-                    widget.draw(frame, card_area, theme);
-                    self.card_hit_areas
-                        .borrow_mut()
-                        .push((card.id.clone(), card_area));
+            // AI Parts
+            for part in &turn.parts {
+                if let Some(renderer) = self.renderer_registry.get(part) {
+                    let part_height = renderer.height(part, inner.width);
+                    if is_visible(current_y, part_height) {
+                        let y = render_y(current_y);
+                        let part_area = Rect {
+                            x: inner.x,
+                            y,
+                            width: inner.width,
+                            height: part_height.min(bottom.saturating_sub(y)),
+                        };
+                        renderer.draw(frame, part_area, part, theme);
+                    }
+                    current_y += part_height + 1; // +1 for spacing
                 }
-                current_y += card_height;
             }
         }
 
@@ -624,33 +433,13 @@ impl Component for Chat {
             }
         }
 
-        // 存储点击区域供 handle_event 使用
-        // 注意：由于 self 不可变，这里无法直接修改 self.card_hit_areas
-        // 我们通过 UnsafeCell 或其他方式绕过的成本太高。
-        // 替代方案：让 Chat 内部使用 RefCell<Vec<...>> 存储点击区域。
     }
 
     fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<AppEvent> {
         match event {
             Event::Mouse(mouse) => {
-                use crossterm::event::{MouseButton, MouseEventKind};
+                use crossterm::event::MouseEventKind;
                 match mouse.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        for (card_id, rect) in self.card_hit_areas.borrow().iter() {
-                            if rect_contains(*rect, mouse.column, mouse.row) {
-                                if let Some(card) = self.find_card_by_id(card_id) {
-                                    if let Some(action) = CardWidget::new(card).handle_click(
-                                        mouse.column,
-                                        mouse.row,
-                                        *rect,
-                                    ) {
-                                        return Some(AppEvent::CardAction(action));
-                                    }
-                                }
-                            }
-                        }
-                        None
-                    }
                     MouseEventKind::ScrollUp => {
                         self.scroll_offset = self.scroll_offset.saturating_sub(3);
                         Some(AppEvent::ScrollUp)
@@ -674,17 +463,38 @@ impl Component for Chat {
                         self.scroll_offset += 1;
                         Some(AppEvent::ScrollDown)
                     }
+                    (KeyModifiers::NONE, KeyCode::Char('g')) => {
+                        self.turns.iter().rev().find_map(|turn| {
+                            turn.parts.iter().find_map(|part| match part {
+                                Part::WaveMarker {
+                                    git_snapshot: Some(hash),
+                                    ..
+                                } => Some(AppEvent::BrowseGitSnapshot(hash.clone())),
+                                _ => None,
+                            })
+                        })
+                    }
+                    (KeyModifiers::NONE, KeyCode::Char('r')) => {
+                        self.turns.iter().rev().find_map(|turn| {
+                            turn.parts.iter().find_map(|part| match part {
+                                Part::WaveMarker {
+                                    git_snapshot: Some(snapshot),
+                                    step,
+                                    ..
+                                } => Some(AppEvent::RollbackToWave {
+                                    snapshot: snapshot.clone(),
+                                    step: *step,
+                                }),
+                                _ => None,
+                            })
+                        })
+                    }
                     _ => None,
                 }
             }
             _ => None,
         }
     }
-}
-
-/// 判断点 (x, y) 是否在矩形 rect 内。
-fn rect_contains(rect: Rect, x: u16, y: u16) -> bool {
-    x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
 }
 
 #[cfg(test)]
@@ -700,15 +510,17 @@ mod tests {
     }
 
     #[test]
-    fn test_sse_message_creates_summary_card() {
+    fn test_sse_message_creates_text_part() {
         let mut chat = Chat::new();
         chat.add_user_message("hello");
         chat.handle_sse_event(&SseEvent::Message {
             content: "world".to_string(),
         });
-        assert_eq!(chat.turns[0].cards.len(), 1);
-        assert!(matches!(chat.turns[0].cards[0].kind, CardKind::Summary));
-        assert_eq!(chat.turns[0].cards[0].content, "world");
+        assert_eq!(chat.turns[0].parts.len(), 1);
+        assert!(matches!(chat.turns[0].parts[0], Part::Text { .. }));
+        if let Part::Text { text } = &chat.turns[0].parts[0] {
+            assert_eq!(text, "world");
+        }
     }
 
     #[test]
@@ -740,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_use_creates_tool_card() {
+    fn test_tool_use_creates_tool_part() {
         let mut chat = Chat::new();
         chat.add_user_message("run tool");
         chat.handle_sse_event(&SseEvent::Part {
@@ -750,15 +562,12 @@ mod tests {
                 arguments: serde_json::json!({"cmd": "ls"}),
             },
         });
-        assert_eq!(chat.turns[0].cards.len(), 1);
-        assert!(matches!(
-            chat.turns[0].cards[0].kind,
-            CardKind::ToolUse { .. }
-        ));
+        assert_eq!(chat.turns[0].parts.len(), 1);
+        assert!(matches!(chat.turns[0].parts[0], Part::ToolUse { .. }));
     }
 
     #[test]
-    fn test_tool_result_updates_card() {
+    fn test_tool_result_creates_tool_result_part() {
         let mut chat = Chat::new();
         chat.add_user_message("run tool");
         chat.handle_sse_event(&SseEvent::Part {
@@ -774,30 +583,22 @@ mod tests {
                 content: "file.txt".to_string(),
             },
         });
-        assert_eq!(chat.turns[0].cards.len(), 1);
-        assert!(matches!(chat.turns[0].cards[0].kind, CardKind::ToolResult));
+        assert_eq!(chat.turns[0].parts.len(), 2);
+        assert!(matches!(chat.turns[0].parts[1], Part::ToolResult { .. }));
     }
 
     #[test]
-    fn test_card_expand_collapse() {
+    fn test_thinking_placeholder_removed_on_message() {
         let mut chat = Chat::new();
         chat.add_user_message("hello");
-        chat.turns[0].cards.push(Card {
-            id: "c1".to_string(),
-            kind: CardKind::ToolResult,
-            title: "Result".to_string(),
-            content: "short".to_string(),
-            full_content: Some("this is the full content".to_string()),
-            right_content: None,
-            state: CardState::Collapsed,
+        chat.create_thinking_card();
+        assert_eq!(chat.turns[0].parts.len(), 1);
+        assert!(matches!(chat.turns[0].parts[0], Part::Reasoning { .. }));
+
+        chat.handle_sse_event(&SseEvent::Message {
+            content: "world".to_string(),
         });
-
-        chat.handle_card_action(&CardAction::Expand("c1".to_string()));
-        assert_eq!(chat.turns[0].cards[0].content, "this is the full content");
-        assert_eq!(chat.turns[0].cards[0].state, CardState::Expanded);
-
-        chat.handle_card_action(&CardAction::Collapse("c1".to_string()));
-        assert!(chat.turns[0].cards[0].content.ends_with("..."));
-        assert_eq!(chat.turns[0].cards[0].state, CardState::Collapsed);
+        assert_eq!(chat.turns[0].parts.len(), 1);
+        assert!(matches!(chat.turns[0].parts[0], Part::Text { .. }));
     }
 }

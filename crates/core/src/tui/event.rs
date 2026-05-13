@@ -157,6 +157,11 @@ pub enum AppEvent {
     RetryTurn {
         turn_index: usize,
     },
+    BrowseGitSnapshot(String),
+    RollbackToWave {
+        snapshot: String,
+        step: u32,
+    },
     Quit,
 }
 

@@ -159,23 +159,31 @@ impl AgentWorld {
                             plan_id: None,
                             task_count: None,
                         },
-                        Ev::ToolUse {
-                            name, arguments, ..
-                        } => SseEvent {
-                            event_type: "ToolUse".to_string(),
-                            content: None,
-                            tool_name: Some(name.clone()),
-                            tool_args: Some(arguments.clone()),
-                            plan_id: None,
-                            task_count: None,
-                        },
-                        Ev::ToolResult { tool_use_id, .. } => SseEvent {
-                            event_type: "ToolResult".to_string(),
-                            content: Some(tool_use_id.clone()),
-                            tool_name: None,
-                            tool_args: None,
-                            plan_id: None,
-                            task_count: None,
+                        Ev::Part { part } => match part {
+                            fi_code_core::session::message::Part::ToolUse { name, arguments, .. } => SseEvent {
+                                event_type: "ToolUse".to_string(),
+                                content: None,
+                                tool_name: Some(name.clone()),
+                                tool_args: Some(arguments.clone()),
+                                plan_id: None,
+                                task_count: None,
+                            },
+                            fi_code_core::session::message::Part::ToolResult { tool_call_id, .. } => SseEvent {
+                                event_type: "ToolResult".to_string(),
+                                content: Some(tool_call_id.clone()),
+                                tool_name: None,
+                                tool_args: None,
+                                plan_id: None,
+                                task_count: None,
+                            },
+                            _ => SseEvent {
+                                event_type: "Other".to_string(),
+                                content: None,
+                                tool_name: None,
+                                tool_args: None,
+                                plan_id: None,
+                                task_count: None,
+                            },
                         },
                         Ev::TaskProgress { plan_id, tasks } => SseEvent {
                             event_type: "TaskProgress".to_string(),

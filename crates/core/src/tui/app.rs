@@ -562,6 +562,10 @@ impl TuiApp {
         ) {
             return;
         }
+        // Don't steal g/r keys that are handled by Chat for WaveMarker interaction
+        if matches!(key.code, KeyCode::Char('g') | KeyCode::Char('r')) {
+            return;
+        }
         self.focus = FocusArea::Input;
     }
 
@@ -821,17 +825,8 @@ impl TuiApp {
                 self.is_generating = false;
                 self.generation_start = None;
             }
-            AppEvent::CardAction(ref action) => {
-                self.chat.handle_card_action(action);
-                if let CardAction::Retry(ref card_id) = action {
-                    if let Some(turn_idx) = self.chat.find_turn_index_by_card_id(card_id) {
-                        if let Some(user_msg) = self.chat.retry_turn(turn_idx) {
-                            self.is_generating = true;
-                            self.generation_start = Some(std::time::Instant::now());
-                            self.start_chat_stream(user_msg).await;
-                        }
-                    }
-                }
+            AppEvent::CardAction(ref _action) => {
+                // Part-based rendering does not support card actions yet
             }
             AppEvent::RetryTurn { turn_index } => {
                 if let Some(user_msg) = self.chat.retry_turn(turn_index) {
@@ -1095,6 +1090,19 @@ impl TuiApp {
             }
             AppEvent::SetFileTree(ref files) => {
                 self.left_drawer.set_files(files.clone());
+            }
+            AppEvent::BrowseGitSnapshot(ref hash) => {
+                log_info!("[Client] BrowseGitSnapshot | hash={}", hash);
+            }
+            AppEvent::RollbackToWave {
+                ref snapshot,
+                step,
+            } => {
+                log_info!(
+                    "[Client] RollbackToWave | snapshot={} | step={}",
+                    snapshot,
+                    step
+                );
             }
             _ => {}
         }

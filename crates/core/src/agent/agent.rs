@@ -44,7 +44,7 @@ use crate::log_trace;
 use crate::provider::base_client::{AIClient, ChunkContent, FinishReason, TokenUsage};
 use crate::provider::execute_tool_calls;
 use crate::provider::Chunk;
-use crate::session::message::{Message, Part, Role};
+use crate::session::message::{Message, Part, Role, TokenUsage as MsgTokenUsage};
 use crate::skills::get_registry;
 use crate::tools::tool_schema;
 
@@ -174,6 +174,31 @@ async fn collect_mcp_schema_texts(content_blocks: &[Part]) -> Vec<String> {
     schema_texts
 }
 
+fn update_wave_marker(
+    messages: &mut [Message],
+    idx: usize,
+    total: Option<u32>,
+    current_usage: &TokenUsage,
+    baseline: &TokenUsage,
+) {
+    if let Some(Part::WaveMarker {
+        delta_tokens,
+        total: t,
+        ..
+    }) = messages[idx].parts.first_mut()
+    {
+        *delta_tokens = MsgTokenUsage {
+            prompt_tokens: current_usage
+                .prompt_tokens
+                .saturating_sub(baseline.prompt_tokens),
+            completion_tokens: current_usage
+                .completion_tokens
+                .saturating_sub(baseline.completion_tokens),
+        };
+        *t = total;
+    }
+}
+
 pub async fn run_one_turn<C: AIClient + ?Sized>(
     client: &C,
     state: &mut LoopState,
@@ -183,6 +208,29 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     let mut content_blocks = Vec::new();
     let mut finish_reason = None;
     let mut turn_usage = TokenUsage::default();
+
+    // 从当前消息历史中继承 session_id，确保工具结果消息与对话属于同一会话
+    let session_id = state
+        .messages
+        .last()
+        .map(|m| m.session_id.clone())
+        .unwrap_or_default();
+
+    // === WaveMarker setup ===
+    let snapshot = crate::tools::basic_tools::BasicTool::git_write_tree().ok();
+    let token_baseline = state.token_usage.clone();
+    let wave_marker = Part::WaveMarker {
+        step: state.turn_count as u32 + 1,
+        total: None,
+        git_snapshot: snapshot,
+        timestamp: crate::session::message::current_timestamp_ms(),
+        delta_tokens: MsgTokenUsage::default(),
+    };
+    if let Some(ref mut cb) = on_tool_event {
+        let _ = cb(crate::server::transport::sse::SseEvent::Part {
+            part: wave_marker.clone(),
+        });
+    }
 
     let registry = get_registry();
     let schema = tool_schema().await;
@@ -278,28 +326,24 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         turn_usage
     );
 
-    // 从当前消息历史中继承 session_id，确保工具结果消息与对话属于同一会话
-    let session_id = state
-        .messages
-        .last()
-        .map(|m| m.session_id.clone())
-        .unwrap_or_default();
-
     log_debug!(
         "[Agent] assistant message appended | blocks={}",
         content_blocks.len()
     );
 
-    // 将 Assistant 的完整回复追加到状态
+    // 将 Assistant 的完整回复追加到状态（包含 WaveMarker）
     for (idx, block) in content_blocks.iter().enumerate() {
         let preview = format!("{:?}", block).chars().take(200).collect::<String>();
         log_debug!("assistant block[{}] | {}", idx, preview);
         log_trace!("assistant block[{}] | {:?}", idx, block);
     }
+    let mut assistant_parts = vec![wave_marker];
+    assistant_parts.extend(content_blocks.clone());
+    let assistant_idx = state.messages.len();
     state.messages.push(Message::new(
         session_id.clone(),
         Role::Assistant,
-        content_blocks.clone(),
+        assistant_parts,
     ));
 
     // 累加本轮 Token 使用量到全局状态
@@ -308,6 +352,13 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
     // 判断停止原因：只有明确为 ToolUse 时才继续执行工具调用回合
     if finish_reason != Some(FinishReason::ToolUse) {
+        update_wave_marker(
+            &mut state.messages,
+            assistant_idx,
+            Some(state.turn_count as u32 + 1),
+            &state.token_usage,
+            &token_baseline,
+        );
         state.transition_reason = None;
         log_info!(
             "[Agent] run_one_turn end | no tool use | finish_reason={:?}",
@@ -394,6 +445,13 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     // 执行所有工具调用，并收集结果
     let tool_results = execute_tool_calls(&content_blocks, on_tool_event).await;
     if tool_results.is_empty() {
+        update_wave_marker(
+            &mut state.messages,
+            assistant_idx,
+            Some(state.turn_count as u32 + 1),
+            &state.token_usage,
+            &token_baseline,
+        );
         state.transition_reason = None;
         log_info!("[Agent] run_one_turn end | tool_use finish but no results");
         return Ok(false);
@@ -417,6 +475,13 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         .any(|p| matches!(p, Part::Text { .. }));
 
     if all_success && has_preamble {
+        update_wave_marker(
+            &mut state.messages,
+            assistant_idx,
+            Some(state.turn_count as u32 + 1),
+            &state.token_usage,
+            &token_baseline,
+        );
         let summary = format_tool_results(&content_blocks, &tool_results);
         log_info!("[Agent] direct output | summary_len={}", summary.len());
 
@@ -444,6 +509,14 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
     state.turn_count += 1;
     state.transition_reason = Some("tool_result".to_string());
+
+    update_wave_marker(
+        &mut state.messages,
+        assistant_idx,
+        None,
+        &state.token_usage,
+        &token_baseline,
+    );
 
     log_info!(
         "[Agent] run_one_turn end | will continue next turn | next_turn={}",
