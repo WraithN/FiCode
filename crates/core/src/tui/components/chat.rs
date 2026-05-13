@@ -381,6 +381,13 @@ impl Chat {
         is_new_file: &bool,
         full_content: &Option<String>,
     ) {
+        log_info!(
+            "[Chat] update_tool_result_card | id={} | name={:?} | content_len={} | full_content_len={}",
+            tool_use_id,
+            card.kind,
+            content.len(),
+            full_content.as_ref().map(|s| s.len()).unwrap_or(0)
+        );
         let name = match &card.kind {
             CardKind::ToolUse { name } => name.clone(),
             _ => "Result".to_string(),

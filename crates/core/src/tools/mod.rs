@@ -997,6 +997,12 @@ pub async fn execute_tool_calls(
 
                 if let Ok(mut guard) = cb.lock() {
                     if let Some(ref mut callback) = *guard {
+                        log_info!(
+                            "[Tools] sending ToolResult SSE | id={} | display_len={} | full_content_len={}",
+                            id,
+                            display_content.len(),
+                            full_content.as_ref().map(|s| s.len()).unwrap_or(0)
+                        );
                         let _ = callback(SseEvent::ToolResult {
                             tool_use_id: id.clone(),
                             content: display_content,

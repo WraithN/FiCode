@@ -213,6 +213,7 @@ impl TuiClient {
         let mut stream = response.bytes_stream();
         let mut final_session_id = session_id.clone();
         let mut buffer = String::new();
+        let mut event_data: Vec<String> = Vec::new();
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
@@ -222,45 +223,69 @@ impl TuiClient {
                 let line = buffer.drain(..=pos).collect::<String>();
                 let line = line.trim_end();
 
-                if !line.starts_with("data: ") {
-                    continue;
-                }
+                if line.starts_with("data: ") {
+                    event_data.push(line[6..].to_string());
+                } else if line.is_empty() && !event_data.is_empty() {
+                    // SSE 事件结束（空行），合并所有 data: 行
+                    let json_str = event_data.join("\n");
+                    event_data.clear();
 
-                let json_str = &line[6..];
-                if let Ok(event) = serde_json::from_str::<SseEvent>(json_str) {
-                    let event_preview = match &event {
-                        SseEvent::Message { content } => format!("Message(len={})", content.len()),
-                        SseEvent::ToolUse { name, .. } => format!("ToolUse(name={})", name),
-                        SseEvent::ToolResult { tool_use_id, .. } => {
-                            format!("ToolResult(id={})", tool_use_id)
+                    if let Ok(event) = serde_json::from_str::<SseEvent>(&json_str) {
+                        let event_preview = match &event {
+                            SseEvent::Message { content } => {
+                                format!("Message(len={})", content.len())
+                            }
+                            SseEvent::ToolUse { name, .. } => {
+                                format!("ToolUse(name={})", name)
+                            }
+                            SseEvent::ToolResult {
+                                tool_use_id,
+                                full_content,
+                                ..
+                            } => {
+                                format!(
+                                    "ToolResult(id={} full_content_len={})",
+                                    tool_use_id,
+                                    full_content.as_ref().map(|s| s.len()).unwrap_or(0)
+                                )
+                            }
+                            SseEvent::TaskProgress { plan_id, tasks } => {
+                                format!("TaskProgress(plan={} tasks={})", plan_id, tasks.len())
+                            }
+                            SseEvent::Error { message } => {
+                                format!("Error(msg={})", message)
+                            }
+                            SseEvent::Done { .. } => "Done".to_string(),
+                            SseEvent::Usage {
+                                prompt_tokens,
+                                completion_tokens,
+                            } => format!("Usage(p={} c={})", prompt_tokens, completion_tokens),
+                            SseEvent::MessageDetails { blocks } => {
+                                format!("MessageDetails(blocks={})", blocks.len())
+                            }
+                        };
+                        log_debug!("[Client] HTTP SSE event | {}", event_preview);
+                        if let SseEvent::Done { session_id: sid } = &event {
+                            final_session_id = Some(sid.clone());
                         }
-                        SseEvent::TaskProgress { plan_id, tasks } => {
-                            format!("TaskProgress(plan={} tasks={})", plan_id, tasks.len())
+                        let is_done = matches!(event, SseEvent::Done { .. });
+                        let _ = tx.send(AppEvent::SseEvent(event)).await;
+                        if is_done {
+                            log_info!(
+                                "[Client] HTTP SSE stream done | session_id={:?}",
+                                final_session_id
+                            );
+                            return Ok(final_session_id.unwrap_or_default());
                         }
-                        SseEvent::Error { message } => format!("Error(msg={})", message),
-                        SseEvent::Done { .. } => "Done".to_string(),
-                        SseEvent::Usage {
-                            prompt_tokens,
-                            completion_tokens,
-                        } => format!("Usage(p={} c={})", prompt_tokens, completion_tokens),
-                        SseEvent::MessageDetails { blocks } => {
-                            format!("MessageDetails(blocks={})", blocks.len())
-                        }
-                    };
-                    log_debug!("[Client] HTTP SSE event | {}", event_preview);
-                    if let SseEvent::Done { session_id: sid } = &event {
-                        final_session_id = Some(sid.clone());
-                    }
-                    let is_done = matches!(event, SseEvent::Done { .. });
-                    let _ = tx.send(AppEvent::SseEvent(event)).await;
-                    if is_done {
-                        log_info!(
-                            "[Client] HTTP SSE stream done | session_id={:?}",
-                            final_session_id
+                    } else {
+                        log_warn!(
+                            "[Client] HTTP SSE invalid JSON | len={} | prefix={:?}",
+                            json_str.len(),
+                            &json_str[..json_str.len().min(200)]
                         );
-                        return Ok(final_session_id.unwrap_or_default());
                     }
                 }
+                // 其他行（如注释、空行）忽略
             }
         }
 
