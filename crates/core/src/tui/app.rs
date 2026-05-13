@@ -798,12 +798,17 @@ impl TuiApp {
                     part: crate::session::message::Part::Usage {
                         input_tokens,
                         output_tokens,
+                        latency_ms,
                         ..
                     },
                 } = &sse_event
                 {
                     self.status_bar
                         .set_tokens(*input_tokens as usize, *output_tokens as usize);
+                    self.status_bar
+                        .set_ctx_tokens(*input_tokens as usize, 128_000);
+                    self.status_bar
+                        .set_latency(*latency_ms);
                 }
             }
             AppEvent::ChatComplete => {

@@ -22,7 +22,7 @@
 use crossterm::event::Event;
 use ratatui::{
     layout::Rect,
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -43,7 +43,7 @@ enum ProgressState {
     Paused,
 }
 
-/// 底部状态栏组件，显示品牌、进度条、耗时、Token 统计和当前模型。
+/// 底部状态栏组件，显示品牌、CTX 进度条、Token 统计、Latency 和当前模型。
 ///
 /// 该组件不可聚焦，仅作为信息展示。
 pub struct StatusBar {
@@ -53,11 +53,18 @@ pub struct StatusBar {
     model_name: String, // 当前模型名
     token_in: usize,    // 输入 Token 计数
     token_out: usize,   // 输出 Token 计数
-    elapsed_secs: u64,  // 当前耗时（秒）
+    elapsed_secs: u64,  // 当前耗时（秒），保留用于向后兼容
+    ctx_current: usize, // 当前上下文 Token 数
+    ctx_limit: usize,   // 上下文窗口上限
+    latency_ms: u32,    // 上次请求延迟（毫秒）
 }
 
-/// 进度条总格数。
+/// 旧进度条总格数（保留用于向后兼容）。
 const PROGRESS_BAR_WIDTH: usize = 20;
+/// CTX 进度条总格数。
+const CTX_BAR_WIDTH: usize = 10;
+/// 默认上下文窗口上限。
+const DEFAULT_CTX_LIMIT: usize = 128_000;
 
 impl StatusBar {
     pub fn new() -> Self {
@@ -69,6 +76,9 @@ impl StatusBar {
             token_in: 0,
             token_out: 0,
             elapsed_secs: 0,
+            ctx_current: 0,
+            ctx_limit: DEFAULT_CTX_LIMIT,
+            latency_ms: 0,
         }
     }
 
@@ -115,6 +125,17 @@ impl StatusBar {
         self.elapsed_secs = secs;
     }
 
+    /// 更新上下文 Token 数与上限。
+    pub fn set_ctx_tokens(&mut self, current: usize, limit: usize) {
+        self.ctx_current = current;
+        self.ctx_limit = limit;
+    }
+
+    /// 更新上次请求延迟。
+    pub fn set_latency(&mut self, latency_ms: u32) {
+        self.latency_ms = latency_ms;
+    }
+
     /// 每帧 tick，更新进度条动画。
     pub fn on_tick(&mut self) {
         if self.progress_state == ProgressState::Running {
@@ -139,14 +160,49 @@ impl StatusBar {
         }
     }
 
-    /// 渲染进度条字符串。
+    /// 渲染旧版 20 格进度条字符串（保留用于向后兼容）。
     fn render_progress_bar(&self) -> String {
         let filled = self.current_filled();
         let empty = PROGRESS_BAR_WIDTH - filled;
         format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
     }
 
-    /// 格式化耗时显示。
+    /// 渲染 CTX 进度条字符串（10 格）。
+    /// Running 状态下使用动画填充，否则按实际上下文占用率计算。
+    fn render_ctx_bar(&self) -> String {
+        let filled = match self.progress_state {
+            ProgressState::Running => self.current_filled().min(CTX_BAR_WIDTH),
+            _ => {
+                if self.ctx_limit == 0 {
+                    0
+                } else {
+                    let ratio = self.ctx_current as f64 / self.ctx_limit as f64;
+                    ((ratio * CTX_BAR_WIDTH as f64).ceil() as usize).min(CTX_BAR_WIDTH)
+                }
+            }
+        };
+        let empty = CTX_BAR_WIDTH - filled;
+        format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
+    }
+
+    /// 根据上下文占用率返回进度条颜色。
+    fn ctx_bar_style(&self, theme: &Theme) -> Style {
+        let ratio = if self.ctx_limit > 0 {
+            self.ctx_current as f64 / self.ctx_limit as f64
+        } else {
+            0.0
+        };
+        let color = if ratio > 0.8 {
+            theme.error
+        } else if ratio > 0.5 {
+            theme.warning
+        } else {
+            theme.success
+        };
+        Style::default().fg(color)
+    }
+
+    /// 格式化耗时显示（保留用于向后兼容）。
     fn format_elapsed(&self) -> String {
         if self.elapsed_secs == 0 {
             String::new()
@@ -161,48 +217,158 @@ impl StatusBar {
         }
     }
 
+    /// 格式化延迟显示。
+    fn format_latency(&self) -> String {
+        if self.latency_ms == 0 {
+            String::new()
+        } else {
+            let secs = self.latency_ms as f64 / 1000.0;
+            format!("{:.1}s", secs)
+        }
+    }
+
+    /// 根据延迟返回样式。
+    fn latency_style(&self, theme: &Theme) -> Style {
+        let secs = self.latency_ms as f64 / 1000.0;
+        let color = if secs > 30.0 {
+            theme.error
+        } else if secs > 10.0 {
+            theme.warning
+        } else {
+            theme.text_primary
+        };
+        Style::default().fg(color)
+    }
+
+    /// 格式化 Token 数为紧凑字符串。
+    fn format_tokens(n: usize) -> String {
+        if n >= 1_000_000 {
+            format!("{}M", n / 1_000_000)
+        } else if n >= 1_000 {
+            format!("{}k", n / 1_000)
+        } else {
+            format!("{}", n)
+        }
+    }
+
+    /// 返回当前本地时间 HH:MM。
+    fn current_time() -> String {
+        chrono::Local::now().format("%H:%M").to_string()
+    }
+
+    /// 返回模型短名（用于紧凑模式）。
+    fn short_model_name(&self) -> String {
+        if self.model_name.len() <= 8 {
+            self.model_name.clone()
+        } else if let Some(idx) = self.model_name.rfind('-') {
+            let suffix = &self.model_name[idx + 1..];
+            if suffix.len() <= 8 {
+                suffix.to_string()
+            } else {
+                self.model_name.chars().take(8).collect()
+            }
+        } else {
+            self.model_name.chars().take(8).collect()
+        }
+    }
+
     /// 构建状态栏完整显示行。
-    fn build_line(&self, theme: &Theme) -> Line<'static> {
+    fn build_line(&self, theme: &Theme, width: u16) -> Line<'static> {
         let mut spans = vec![];
 
-        // 品牌标识：FiCode（品牌色）
-        spans.push(Span::styled("FiCode", theme.style_brand()));
-        spans.push(Span::raw("  "));
-
-        // 进度条
-        let progress_bar = self.render_progress_bar();
-        let progress_style = match self.progress_state {
-            ProgressState::Idle => Style::default().fg(theme.success), // 完成：绿色
-            ProgressState::Running => Style::default().fg(theme.warning), // 进行中：黄色
-            ProgressState::Paused => Style::default().fg(theme.success), // 完成：绿色
-        };
-        spans.push(Span::styled(progress_bar, progress_style));
-
-        // 分隔符 + 耗时
-        let elapsed = self.format_elapsed();
-        if !elapsed.is_empty() {
-            spans.push(Span::styled(" ｜ ", theme.style_muted()));
-            spans.push(Span::styled(
-                format!("耗时：{}", elapsed),
-                theme.style_primary(),
-            ));
-        }
-
-        // 分隔符 + Token 统计
-        if self.token_in > 0 || self.token_out > 0 {
-            spans.push(Span::styled(" ｜ ", theme.style_muted()));
-            spans.push(Span::styled(
-                format!("IN:{} OUT:{}", self.token_in, self.token_out),
-                theme.style_primary(),
-            ));
-        }
-
-        // 分隔符 + 模型名
-        spans.push(Span::styled(" ｜ ", theme.style_muted()));
+        // 品牌标识：FiCode（品牌色 + 粗体）
         spans.push(Span::styled(
-            format!("Model:{}", self.model_name),
-            theme.style_primary(),
+            "FiCode",
+            theme.style_brand().add_modifier(Modifier::BOLD),
         ));
+
+        let ctx_bar = self.render_ctx_bar();
+        let ctx_style = self.ctx_bar_style(theme);
+
+        if width >= 100 {
+            // ===== 标准模式 =====
+            spans.push(Span::styled(" │ ", theme.style_muted()));
+            spans.push(Span::styled("CTX:", theme.style_primary()));
+            spans.push(Span::styled(ctx_bar, ctx_style));
+
+            // 空间充裕时显示具体数值
+            let ctx_text = format!(" {}/{}", Self::format_tokens(self.ctx_current), Self::format_tokens(self.ctx_limit));
+            spans.push(Span::styled(ctx_text, theme.style_muted()));
+
+            if self.token_in > 0 || self.token_out > 0 {
+                spans.push(Span::styled(" │ ", theme.style_muted()));
+                let tok_text = format!(
+                    "TOK:↑{}↓{}",
+                    Self::format_tokens(self.token_in),
+                    Self::format_tokens(self.token_out)
+                );
+                spans.push(Span::styled(tok_text, theme.style_primary()));
+            }
+
+            if self.latency_ms > 0 {
+                spans.push(Span::styled(" │ ", theme.style_muted()));
+                spans.push(Span::styled(
+                    format!("LAT:{}", self.format_latency()),
+                    self.latency_style(theme),
+                ));
+            }
+
+            spans.push(Span::styled(" │ ", theme.style_muted()));
+            spans.push(Span::styled(
+                format!("MDL:{}", self.model_name),
+                Style::default().fg(theme.success),
+            ));
+
+            spans.push(Span::styled(" │ ", theme.style_muted()));
+            spans.push(Span::styled(Self::current_time(), theme.style_muted()));
+        } else if width >= 80 {
+            // ===== 紧凑模式 =====
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(ctx_bar, ctx_style));
+
+            if self.token_out > 0 {
+                spans.push(Span::styled(" │ ", theme.style_muted()));
+                spans.push(Span::styled(
+                    format!("TOK:↓{}", Self::format_tokens(self.token_out)),
+                    theme.style_primary(),
+                ));
+            }
+
+            if self.latency_ms > 0 {
+                spans.push(Span::styled(" │ ", theme.style_muted()));
+                spans.push(Span::styled(
+                    format!("LAT:{}", self.format_latency()),
+                    self.latency_style(theme),
+                ));
+            }
+
+            spans.push(Span::styled(" │ ", theme.style_muted()));
+            spans.push(Span::styled(
+                self.short_model_name(),
+                Style::default().fg(theme.success),
+            ));
+
+            spans.push(Span::styled(" │ ", theme.style_muted()));
+            spans.push(Span::styled(Self::current_time(), theme.style_muted()));
+        } else {
+            // ===== 极限模式 =====
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(ctx_bar, ctx_style));
+
+            if self.latency_ms > 0 {
+                spans.push(Span::styled(" │ ", theme.style_muted()));
+                spans.push(Span::styled(
+                    format!("LAT:{}", self.format_latency()),
+                    self.latency_style(theme),
+                ));
+            }
+
+            spans.push(Span::styled(" │ ", theme.style_muted()));
+            spans.push(Span::styled(
+                self.short_model_name(),
+                Style::default().fg(theme.success),
+            ));
+        }
 
         Line::from(spans)
     }
@@ -210,7 +376,7 @@ impl StatusBar {
 
 impl Component for StatusBar {
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme, _is_focused: bool) {
-        let line = self.build_line(theme);
+        let line = self.build_line(theme, area.width);
         let paragraph = Paragraph::new(line).style(theme.status_bar_style());
         frame.render_widget(paragraph, area);
     }
@@ -241,6 +407,9 @@ mod tests {
         assert_eq!(bar.progress_state, ProgressState::Idle);
         assert_eq!(bar.progress_tick, 0);
         assert_eq!(bar.model_name, "unknown");
+        assert_eq!(bar.ctx_limit, DEFAULT_CTX_LIMIT);
+        assert_eq!(bar.ctx_current, 0);
+        assert_eq!(bar.latency_ms, 0);
     }
 
     #[test]
@@ -266,61 +435,69 @@ mod tests {
     }
 
     #[test]
-    fn test_progress_bar_idle() {
+    fn test_ctx_bar_idle() {
         let bar = StatusBar::new();
-        let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[░░░░░░░░░░░░░░░░░░░░]");
+        let pb = bar.render_ctx_bar();
+        assert_eq!(pb, "[░░░░░░░░░░]");
     }
 
     #[test]
-    fn test_progress_bar_running() {
+    fn test_ctx_bar_with_usage() {
+        let mut bar = StatusBar::new();
+        bar.set_ctx_tokens(64_000, 128_000); // 50%
+        let pb = bar.render_ctx_bar();
+        assert_eq!(pb, "[█████░░░░░]");
+    }
+
+    #[test]
+    fn test_ctx_bar_running() {
         let mut bar = StatusBar::new();
         bar.set_generating(true);
-        bar.on_tick(); // tick = 1, filled = 10
-        let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[██████████░░░░░░░░░░]");
+        bar.on_tick(); // tick = 1, filled = 10 (capped to 10)
+        let pb = bar.render_ctx_bar();
+        assert_eq!(pb, "[██████████]");
 
         // 前进到 tick = 5, filled = 9
         for _ in 0..4 {
             bar.on_tick();
         }
-        let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[█████████░░░░░░░░░░░]");
+        let pb = bar.render_ctx_bar();
+        assert_eq!(pb, "[█████████░]");
     }
 
     #[test]
-    fn test_progress_bar_capped_at_width() {
+    fn test_ctx_bar_capped_at_width() {
         let mut bar = StatusBar::new();
         bar.set_generating(true);
         // tick=40 时 filled = 5
         for _ in 0..40 {
             bar.on_tick();
         }
-        let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[█████░░░░░░░░░░░░░░░]");
+        let pb = bar.render_ctx_bar();
+        assert_eq!(pb, "[█████░░░░░]");
 
-        // tick=42 时 filled = 14
+        // tick=42 时 filled = 14 (capped to 10)
         bar.on_tick();
         bar.on_tick();
-        let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[██████████████░░░░░░]");
+        let pb = bar.render_ctx_bar();
+        assert_eq!(pb, "[██████████]");
     }
 
     #[test]
-    fn test_progress_bar_paused() {
+    fn test_ctx_bar_paused() {
         let mut bar = StatusBar::new();
         bar.set_generating(true);
         for _ in 0..5 {
             bar.on_tick();
         }
-        // tick=5, filled=9
-        bar.set_generating(false); // 暂停，定格在 9 格
+        // tick=5, filled=9 (capped to 9 in 10-width bar)
+        bar.set_generating(false); // 暂停，定格
 
-        // 即使继续 tick，也不应前进
+        // 即使继续 tick，也不应前进（因为已暂停，且空闲时按 ctx 占用率计算）
         bar.on_tick();
         bar.on_tick();
-        let pb = bar.render_progress_bar();
-        assert_eq!(pb, "[█████████░░░░░░░░░░░]");
+        let pb = bar.render_ctx_bar();
+        assert_eq!(pb, "[░░░░░░░░░░]"); // 空闲时按 ctx 计算，初始为 0
     }
 
     #[test]
@@ -336,14 +513,133 @@ mod tests {
     }
 
     #[test]
-    fn test_build_line_includes_model() {
+    fn test_format_latency() {
         let mut bar = StatusBar::new();
-        bar.set_model("kimi-code".to_string());
+        assert_eq!(bar.format_latency(), "");
+
+        bar.set_latency(2400);
+        assert_eq!(bar.format_latency(), "2.4s");
+
+        bar.set_latency(30000);
+        assert_eq!(bar.format_latency(), "30.0s");
+    }
+
+    #[test]
+    fn test_format_tokens() {
+        assert_eq!(StatusBar::format_tokens(500), "500");
+        assert_eq!(StatusBar::format_tokens(24000), "24k");
+        assert_eq!(StatusBar::format_tokens(1800000), "1M");
+    }
+
+    #[test]
+    fn test_short_model_name() {
+        let mut bar = StatusBar::new();
+        bar.set_model("kimi-k2.5".to_string());
+        assert_eq!(bar.short_model_name(), "k2.5");
+
+        bar.set_model("gpt-4o".to_string());
+        assert_eq!(bar.short_model_name(), "gpt-4o");
+
+        bar.set_model("claude-3-7-sonnet-20250219".to_string());
+        assert_eq!(bar.short_model_name(), "20250219");
+    }
+
+    #[test]
+    fn test_build_line_standard_mode() {
+        let mut bar = StatusBar::new();
+        bar.set_model("kimi-k2.5".to_string());
+        bar.set_tokens(24000, 18000);
+        bar.set_ctx_tokens(64000, 128000);
+        bar.set_latency(2400);
+
         let theme = Theme::deep_ocean();
-        let line = bar.build_line(&theme);
+        let line = bar.build_line(&theme, 120);
         let text = line.to_string();
-        assert!(text.contains("FiCode"));
-        assert!(text.contains("Model:kimi-code"));
+
+        assert!(text.contains("FiCode"), "should show brand");
+        assert!(text.contains("CTX:"), "should show CTX label in standard mode");
+        assert!(text.contains("64k/128k"), "should show ctx ratio when space permits");
+        assert!(text.contains("TOK:"), "should show TOK");
+        assert!(text.contains("↑24k"), "should show input tokens");
+        assert!(text.contains("↓18k"), "should show output tokens");
+        assert!(text.contains("LAT:2.4s"), "should show latency");
+        assert!(text.contains("MDL:kimi-k2.5"), "should show full model name");
+    }
+
+    #[test]
+    fn test_build_line_compact_mode() {
+        let mut bar = StatusBar::new();
+        bar.set_model("kimi-k2.5".to_string());
+        bar.set_tokens(24000, 18000);
+        bar.set_ctx_tokens(64000, 128000);
+        bar.set_latency(2400);
+
+        let theme = Theme::deep_ocean();
+        let line = bar.build_line(&theme, 90);
+        let text = line.to_string();
+
+        assert!(text.contains("FiCode"), "should show brand");
+        assert!(!text.contains("CTX:"), "should NOT show CTX label in compact mode");
+        assert!(text.contains("TOK:↓18k"), "should show only output tokens in compact mode");
+        assert!(!text.contains("↑24k"), "should NOT show input tokens in compact mode");
+        assert!(text.contains("LAT:2.4s"), "should show latency");
+        assert!(text.contains("k2.5"), "should show short model name");
+        assert!(!text.contains("MDL:"), "should NOT show MDL label in compact mode");
+    }
+
+    #[test]
+    fn test_build_line_extreme_mode() {
+        let mut bar = StatusBar::new();
+        bar.set_model("kimi-k2.5".to_string());
+        bar.set_tokens(24000, 18000);
+        bar.set_ctx_tokens(64000, 128000);
+        bar.set_latency(2400);
+
+        let theme = Theme::deep_ocean();
+        let line = bar.build_line(&theme, 60);
+        let text = line.to_string();
+
+        assert!(text.contains("FiCode"), "should show brand");
+        assert!(text.contains("LAT:2.4s"), "should show latency");
+        assert!(text.contains("k2.5"), "should show short model name");
+        assert!(!text.contains("TOK:"), "should NOT show TOK in extreme mode");
+        assert!(!text.contains("10:"), "should NOT show clock in extreme mode");
+    }
+
+    #[test]
+    fn test_ctx_bar_color_transitions() {
+        let theme = Theme::deep_ocean();
+
+        let mut bar = StatusBar::new();
+        bar.set_ctx_tokens(10_000, 128_000); // < 50%
+        let style = bar.ctx_bar_style(&theme);
+        assert_eq!(style.fg, Some(theme.success));
+
+        bar.set_ctx_tokens(70_000, 128_000); // 50-80%
+        let style = bar.ctx_bar_style(&theme);
+        assert_eq!(style.fg, Some(theme.warning));
+
+        bar.set_ctx_tokens(110_000, 128_000); // > 80%
+        let style = bar.ctx_bar_style(&theme);
+        assert_eq!(style.fg, Some(theme.error));
+    }
+
+    #[test]
+    fn test_latency_color_transitions() {
+        let theme = Theme::deep_ocean();
+
+        let mut bar = StatusBar::new();
+        bar.set_latency(5000); // < 10s
+        let style = bar.latency_style(&theme);
+        assert_eq!(style.fg, Some(theme.text_primary));
+
+        bar.set_latency(15000); // 10-30s
+        let style = bar.latency_style(&theme);
+        assert_eq!(style.fg, Some(theme.warning));
+
+        bar.set_latency(35000); // > 30s
+        let style = bar.latency_style(&theme);
+        assert_eq!(style.fg, Some(theme.error));
     }
 
     // =============================================================================
@@ -375,10 +671,6 @@ mod tests {
             row_text.contains("FiCode"),
             "Status bar should show FiCode brand"
         );
-        assert!(
-            row_text.contains("Model:unknown"),
-            "Status bar should show default model"
-        );
     }
 
     #[test]
@@ -393,7 +685,8 @@ mod tests {
         bar.set_generating(true);
         bar.set_model("gpt-4".to_string());
         bar.set_tokens(100, 200);
-        bar.set_elapsed(65);
+        bar.set_ctx_tokens(1000, 128000);
+        bar.set_latency(2400);
 
         terminal
             .draw(|f| {
@@ -406,9 +699,9 @@ mod tests {
             .map(|x| buffer.get(x, 0).symbol().to_string())
             .collect();
         assert!(row_text.contains("FiCode"));
-        assert!(row_text.contains("Model:gpt-4"));
-        assert!(row_text.contains("IN:100 OUT:200"));
-        assert!(row_text.contains("1m5s"));
+        assert!(row_text.contains("gpt-4"));
+        assert!(row_text.contains("TOK:↓200") || row_text.contains("TOK:"));
+        assert!(row_text.contains("LAT:2.4s"));
         // 运行状态下进度条不应全是空格
         assert!(row_text.contains('█'));
     }
