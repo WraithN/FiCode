@@ -60,6 +60,10 @@ pub struct Input {
     submenu_selected: usize,
     submenu_loaded: bool,
     submenu_context: Option<String>, // 用于 ModelList 存储当前 provider key
+    // 输入历史记录（循环缓存，最大 100 条）
+    history: Vec<String>,
+    history_index: Option<usize>, // None 表示当前在编辑新内容
+    history_draft: Option<String>, // 浏览历史时暂存当前草稿
 }
 
 impl Input {
@@ -79,6 +83,9 @@ impl Input {
             submenu_selected: 0,
             submenu_loaded: false,
             submenu_context: None,
+            history: Vec::new(),
+            history_index: None,
+            history_draft: None,
         }
     }
 
@@ -445,10 +452,49 @@ impl Component for Input {
                     (KeyModifiers::NONE, KeyCode::Enter) => {
                         if !self.content.trim().is_empty() {
                             let msg = self.content.clone();
+                            // 保存到历史记录
+                            if self.history.is_empty() || self.history.last().unwrap() != &msg {
+                                if self.history.len() >= 100 {
+                                    self.history.remove(0);
+                                }
+                                self.history.push(msg.clone());
+                            }
                             self.content.clear();
                             self.cursor_position = 0;
                             self.dropdown_visible = false;
+                            self.history_index = None;
+                            self.history_draft = None;
                             return Some(AppEvent::SubmitMessage(msg));
+                        }
+                    }
+                    (KeyModifiers::NONE, KeyCode::Up) => {
+                        if !self.history.is_empty() {
+                            // 首次按 Up，保存当前草稿
+                            if self.history_index.is_none() {
+                                self.history_draft = Some(self.content.clone());
+                                self.history_index = Some(self.history.len() - 1);
+                            } else if let Some(idx) = self.history_index {
+                                self.history_index = Some(idx.saturating_sub(1));
+                            }
+                            if let Some(idx) = self.history_index {
+                                self.content = self.history[idx].clone();
+                                self.cursor_position = self.content.len();
+                            }
+                        }
+                    }
+                    (KeyModifiers::NONE, KeyCode::Down) => {
+                        if self.history_index.is_some() {
+                            if let Some(idx) = self.history_index {
+                                if idx + 1 >= self.history.len() {
+                                    // 回到草稿
+                                    self.content = self.history_draft.take().unwrap_or_default();
+                                    self.history_index = None;
+                                } else {
+                                    self.history_index = Some(idx + 1);
+                                    self.content = self.history[idx + 1].clone();
+                                }
+                                self.cursor_position = self.content.len();
+                            }
                         }
                     }
                     (KeyModifiers::NONE, KeyCode::Char(c)) => {
