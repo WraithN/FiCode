@@ -1003,12 +1003,11 @@ pub async fn execute_tool_calls(
                             display_content.len(),
                             full_content.as_ref().map(|s| s.len()).unwrap_or(0)
                         );
-                        let _ = callback(SseEvent::ToolResult {
-                            tool_use_id: id.clone(),
-                            content: display_content,
-                            diff,
-                            is_new_file,
-                            full_content,
+                        let _ = callback(SseEvent::Part {
+                            part: Part::ToolResult {
+                                tool_call_id: id.clone(),
+                                content: display_content,
+                            },
                         });
                     }
                 }

@@ -235,19 +235,8 @@ impl TuiClient {
                             SseEvent::Message { content } => {
                                 format!("Message(len={})", content.len())
                             }
-                            SseEvent::ToolUse { name, .. } => {
-                                format!("ToolUse(name={})", name)
-                            }
-                            SseEvent::ToolResult {
-                                tool_use_id,
-                                full_content,
-                                ..
-                            } => {
-                                format!(
-                                    "ToolResult(id={} full_content_len={})",
-                                    tool_use_id,
-                                    full_content.as_ref().map(|s| s.len()).unwrap_or(0)
-                                )
+                            SseEvent::Part { part } => {
+                                format!("Part({:?})", part)
                             }
                             SseEvent::TaskProgress { plan_id, tasks } => {
                                 format!("TaskProgress(plan={} tasks={})", plan_id, tasks.len())
@@ -256,13 +245,6 @@ impl TuiClient {
                                 format!("Error(msg={})", message)
                             }
                             SseEvent::Done { .. } => "Done".to_string(),
-                            SseEvent::Usage {
-                                prompt_tokens,
-                                completion_tokens,
-                            } => format!("Usage(p={} c={})", prompt_tokens, completion_tokens),
-                            SseEvent::MessageDetails { blocks } => {
-                                format!("MessageDetails(blocks={})", blocks.len())
-                            }
                         };
                         log_debug!("[Client] HTTP SSE event | {}", event_preview);
                         if let SseEvent::Done { session_id: sid } = &event {

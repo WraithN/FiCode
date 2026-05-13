@@ -145,64 +145,6 @@ pub async fn handle_chat_endpoint(
     axum::response::Sse::new(stream).into_response()
 }
 
-/// 发送 Assistant 消息的结构化详情（思考过程、工具调用等）。
-/// 文本内容已通过实时流式发送，此处不再重复发送文本。
-async fn send_last_assistant_details(messages: &[Message], sse_sender: &SseSender) {
-    let Some(last_msg) = messages.last() else {
-        return;
-    };
-    if last_msg.role != Role::Assistant {
-        return;
-    }
-
-    // 发送结构化详情（思考过程、工具调用等）
-    let blocks: Vec<crate::server::transport::sse::DetailBlock> = last_msg
-        .parts
-        .iter()
-        .filter_map(|p| match p {
-            Part::Reasoning { thinking, .. } => {
-                Some(crate::server::transport::sse::DetailBlock::Reasoning {
-                    thinking: thinking.clone(),
-                })
-            }
-            Part::ToolUse {
-                id,
-                name,
-                arguments,
-            } => {
-                let args_str = serde_json::to_string_pretty(arguments).unwrap_or_default();
-                Some(crate::server::transport::sse::DetailBlock::ToolUse {
-                    id: id.clone(),
-                    name: name.clone(),
-                    arguments: args_str,
-                })
-            }
-            Part::ToolResult {
-                tool_call_id,
-                content,
-            } => Some(crate::server::transport::sse::DetailBlock::ToolResult {
-                tool_use_id: tool_call_id.clone(),
-                content: content.clone(),
-                is_error: false,
-            }),
-            Part::ToolError {
-                tool_call_id,
-                content,
-                ..
-            } => Some(crate::server::transport::sse::DetailBlock::ToolResult {
-                tool_use_id: tool_call_id.clone(),
-                content: content.clone(),
-                is_error: true,
-            }),
-            _ => None,
-        })
-        .collect();
-
-    if !blocks.is_empty() {
-        let _ = sse_sender.send(SseEvent::MessageDetails { blocks }).await;
-    }
-}
-
 /// 后台运行 Agent 对话
 async fn run_agent_chat(
     state: AppState,
@@ -295,8 +237,6 @@ async fn run_agent_chat(
             .await;
     } else {
         log_info!("[Server] agent_loop completed successfully");
-        // 发送结构化详情（文本已通过实时流式发送，此处不再重复）
-        send_last_assistant_details(&loop_state.messages, &sse_sender).await;
     }
 
     log_info!(
@@ -307,9 +247,13 @@ async fn run_agent_chat(
 
     // 发送 Token 使用量
     let _ = sse_sender
-        .send(SseEvent::Usage {
-            prompt_tokens: loop_state.token_usage.prompt_tokens,
-            completion_tokens: loop_state.token_usage.completion_tokens,
+        .send(SseEvent::Part {
+            part: Part::Usage {
+                input_tokens: loop_state.token_usage.prompt_tokens,
+                output_tokens: loop_state.token_usage.completion_tokens,
+                latency_ms: 0,
+                cost: None,
+            },
         })
         .await;
 

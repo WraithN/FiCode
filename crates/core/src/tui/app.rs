@@ -773,38 +773,14 @@ impl TuiApp {
                     SseEvent::Message { content } => {
                         log_trace!("[Client] SSE Message | len={}", content.len());
                     }
-                    SseEvent::ToolUse { name, .. } => {
-                        log_debug!("[Client] SSE ToolUse | name={}", name);
-                    }
-                    SseEvent::ToolResult {
-                        tool_use_id,
-                        is_new_file,
-                        ..
-                    } => {
-                        log_debug!(
-                            "[Client] SSE ToolResult | id={} | is_new_file={}",
-                            tool_use_id,
-                            is_new_file
-                        );
+                    SseEvent::Part { part } => {
+                        log_debug!("[Client] SSE Part | {:?}", part);
                     }
                     SseEvent::TaskProgress { plan_id, tasks } => {
                         log_debug!(
                             "[Client] SSE TaskProgress | plan={} | tasks={}",
                             plan_id,
                             tasks.len()
-                        );
-                    }
-                    SseEvent::MessageDetails { blocks } => {
-                        log_debug!("[Client] SSE MessageDetails | blocks={}", blocks.len());
-                    }
-                    SseEvent::Usage {
-                        prompt_tokens,
-                        completion_tokens,
-                    } => {
-                        log_debug!(
-                            "[Client] SSE Usage | prompt={} | completion={}",
-                            prompt_tokens,
-                            completion_tokens
                         );
                     }
                     SseEvent::Error { message } => {
@@ -818,13 +794,16 @@ impl TuiApp {
                 if let SseEvent::Done { session_id } = &sse_event {
                     self.input.set_session_id(Some(session_id.clone()));
                 }
-                if let SseEvent::Usage {
-                    prompt_tokens,
-                    completion_tokens,
+                if let SseEvent::Part {
+                    part: crate::session::message::Part::Usage {
+                        input_tokens,
+                        output_tokens,
+                        ..
+                    },
                 } = &sse_event
                 {
                     self.status_bar
-                        .set_tokens(*prompt_tokens as usize, *completion_tokens as usize);
+                        .set_tokens(*input_tokens as usize, *output_tokens as usize);
                 }
             }
             AppEvent::ChatComplete => {

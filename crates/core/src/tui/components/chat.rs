@@ -35,6 +35,7 @@ use crate::log_error;
 use crate::log_info;
 use crate::log_warn;
 use crate::server::transport::sse::SseEvent;
+use crate::session::message::Part;
 use crate::tui::components::card_widget::{Card, CardKind, CardState, CardWidget};
 use crate::tui::components::Component;
 use crate::tui::event::{AppEvent, CardAction};
@@ -53,10 +54,6 @@ pub struct Turn {
 pub struct Message {
     pub role: MessageRole,
     pub content: String,
-    /// 结构化详情（思考过程、工具调用等）
-    pub details: Option<Vec<crate::server::transport::sse::DetailBlock>>,
-    /// 详情是否展开
-    pub details_expanded: bool,
 }
 
 /// 消息发送者角色。
@@ -112,8 +109,6 @@ impl Chat {
         self.messages.push(Message {
             role: MessageRole::System,
             content: content.to_string(),
-            details: None,
-            details_expanded: false,
         });
     }
 
@@ -183,44 +178,39 @@ impl Chat {
                     });
                 }
             }
-            SseEvent::ToolUse {
-                id,
-                name,
-                arguments,
-            } => {
-                log_info!("[Client] Chat SSE ToolUse | id={} | name={}", id, name);
-                let args_str = serde_json::to_string_pretty(arguments).unwrap_or_default();
-                last_turn.cards.push(Card {
-                    id: id.clone(),
-                    kind: CardKind::ToolUse { name: name.clone() },
-                    title: name.clone(),
-                    content: args_str,
-                    full_content: None,
-                    right_content: None,
-                    state: CardState::Completed,
-                });
-            }
-            SseEvent::ToolResult {
-                tool_use_id,
-                content,
-                diff,
-                is_new_file,
-                full_content,
-            } => {
-                log_info!(
-                    "[Client] Chat SSE ToolResult | tool_use_id={} | content_len={}",
-                    tool_use_id,
-                    content.len()
-                );
-                if let Some(card) = last_turn.cards.iter_mut().find(|c| c.id == *tool_use_id) {
-                    Self::update_tool_result_card(
-                        card,
-                        tool_use_id,
+            SseEvent::Part { part } => {
+                match part {
+                    Part::ToolUse {
+                        id,
+                        name,
+                        arguments,
+                    } => {
+                        log_info!("[Client] Chat SSE ToolUse | id={} | name={}", id, name);
+                        let args_str = serde_json::to_string_pretty(arguments).unwrap_or_default();
+                        last_turn.cards.push(Card {
+                            id: id.clone(),
+                            kind: CardKind::ToolUse { name: name.clone() },
+                            title: name.clone(),
+                            content: args_str,
+                            full_content: None,
+                            right_content: None,
+                            state: CardState::Completed,
+                        });
+                    }
+                    Part::ToolResult {
+                        tool_call_id,
                         content,
-                        diff,
-                        is_new_file,
-                        full_content,
-                    );
+                    } => {
+                        log_info!(
+                            "[Client] Chat SSE ToolResult | tool_use_id={} | content_len={}",
+                            tool_call_id,
+                            content.len()
+                        );
+                        if let Some(card) = last_turn.cards.iter_mut().find(|c| c.id == *tool_call_id) {
+                            Self::update_tool_result_card(card, tool_call_id, content);
+                        }
+                    }
+                    _ => {}
                 }
             }
             SseEvent::TaskProgress { plan_id, tasks } => {
@@ -277,14 +267,6 @@ impl Chat {
                     right_content: None,
                     state: CardState::Completed,
                 });
-            }
-            SseEvent::MessageDetails { blocks } => {
-                // 将 MessageDetails 同步到旧 messages 列表的最后一条 Assistant 消息（兼容旧逻辑）
-                if let Some(last) = self.messages.last_mut() {
-                    if last.role == MessageRole::Assistant {
-                        last.details = Some(blocks.clone());
-                    }
-                }
             }
             _ => {}
         }
@@ -377,16 +359,12 @@ impl Chat {
         card: &mut Card,
         tool_use_id: &str,
         content: &str,
-        diff: &Option<String>,
-        is_new_file: &bool,
-        full_content: &Option<String>,
     ) {
         log_info!(
-            "[Chat] update_tool_result_card | id={} | name={:?} | content_len={} | full_content_len={}",
+            "[Chat] update_tool_result_card | id={} | name={:?} | content_len={}",
             tool_use_id,
             card.kind,
             content.len(),
-            full_content.as_ref().map(|s| s.len()).unwrap_or(0)
         );
         let name = match &card.kind {
             CardKind::ToolUse { name } => name.clone(),
@@ -423,27 +401,19 @@ impl Chat {
                     card_state = CardState::Collapsed;
                 }
                 card_title = format!("read: {}", path.as_deref().unwrap_or("file"));
-                card_full_content = full_content.clone().or(Some(content.to_string()));
+                card_full_content = Some(content.to_string());
             }
             "write" => {
-                display_content = if *is_new_file {
-                    "(new file)".to_string()
-                } else {
-                    diff.clone().unwrap_or_default()
-                };
                 card_kind = CardKind::WriteFile {
                     path: path.clone().unwrap_or_default(),
                 };
                 card_title = format!("write: {}", path.as_deref().unwrap_or("file"));
-                right_content = full_content.clone();
             }
             "edit" => {
-                display_content = diff.clone().unwrap_or_default();
                 card_kind = CardKind::WriteFile {
                     path: path.clone().unwrap_or_default(),
                 };
                 card_title = format!("edit: {}", path.as_deref().unwrap_or("file"));
-                right_content = full_content.clone();
             }
             _ => {
                 if content.chars().count() > 200 {
@@ -452,7 +422,6 @@ impl Chat {
                     card_full_content = Some(content.to_string());
                     card_state = CardState::Collapsed;
                 }
-                right_content = diff.clone();
             }
         }
 
@@ -774,10 +743,12 @@ mod tests {
     fn test_tool_use_creates_tool_card() {
         let mut chat = Chat::new();
         chat.add_user_message("run tool");
-        chat.handle_sse_event(&SseEvent::ToolUse {
-            id: "tool_1".to_string(),
-            name: "bash".to_string(),
-            arguments: serde_json::json!({"cmd": "ls"}),
+        chat.handle_sse_event(&SseEvent::Part {
+            part: Part::ToolUse {
+                id: "tool_1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::json!({"cmd": "ls"}),
+            },
         });
         assert_eq!(chat.turns[0].cards.len(), 1);
         assert!(matches!(
@@ -790,17 +761,18 @@ mod tests {
     fn test_tool_result_updates_card() {
         let mut chat = Chat::new();
         chat.add_user_message("run tool");
-        chat.handle_sse_event(&SseEvent::ToolUse {
-            id: "tool_1".to_string(),
-            name: "bash".to_string(),
-            arguments: serde_json::json!({"cmd": "ls"}),
+        chat.handle_sse_event(&SseEvent::Part {
+            part: Part::ToolUse {
+                id: "tool_1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::json!({"cmd": "ls"}),
+            },
         });
-        chat.handle_sse_event(&SseEvent::ToolResult {
-            tool_use_id: "tool_1".to_string(),
-            content: "file.txt".to_string(),
-            diff: None,
-            is_new_file: false,
-            full_content: None,
+        chat.handle_sse_event(&SseEvent::Part {
+            part: Part::ToolResult {
+                tool_call_id: "tool_1".to_string(),
+                content: "file.txt".to_string(),
+            },
         });
         assert_eq!(chat.turns[0].cards.len(), 1);
         assert!(matches!(chat.turns[0].cards[0].kind, CardKind::ToolResult));

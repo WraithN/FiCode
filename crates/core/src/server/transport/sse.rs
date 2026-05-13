@@ -24,28 +24,6 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-/// 消息详情块，用于展示模型的思考过程和工具调用
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum DetailBlock {
-    Text {
-        text: String,
-    },
-    Reasoning {
-        thinking: String,
-    },
-    ToolUse {
-        id: String,
-        name: String,
-        arguments: String,
-    },
-    ToolResult {
-        tool_use_id: String,
-        content: String,
-        is_error: bool,
-    },
-}
-
 /// 任务进度项
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskProgressItem {
@@ -60,34 +38,19 @@ pub struct TaskProgressItem {
 pub enum SseEvent {
     #[serde(rename = "message")]
     Message { content: String },
-    #[serde(rename = "tool_use")]
-    ToolUse {
-        id: String,
-        name: String,
-        arguments: Value,
-    },
-    #[serde(rename = "tool_result")]
-    ToolResult {
-        tool_use_id: String,
-        content: String,
-        diff: Option<String>,
-        is_new_file: bool,
-        full_content: Option<String>,
-    },
+
+    #[serde(rename = "part")]
+    Part { part: crate::session::message::Part },
+
     #[serde(rename = "task_progress")]
     TaskProgress {
         plan_id: String,
         tasks: Vec<TaskProgressItem>,
     },
-    #[serde(rename = "details")]
-    MessageDetails { blocks: Vec<DetailBlock> },
-    #[serde(rename = "usage")]
-    Usage {
-        prompt_tokens: u32,
-        completion_tokens: u32,
-    },
+
     #[serde(rename = "error")]
     Error { message: String },
+
     #[serde(rename = "done")]
     Done { session_id: String },
 }
@@ -146,29 +109,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sse_event_tool_use_serde() {
-        let event = SseEvent::ToolUse {
-            id: "tool-1".to_string(),
-            name: "write".to_string(),
-            arguments: serde_json::json!({"path": "/tmp/test.txt"}),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        let decoded: SseEvent = serde_json::from_str(&json).unwrap();
-        match decoded {
-            SseEvent::ToolUse {
-                id,
-                name,
-                arguments,
-            } => {
-                assert_eq!(id, "tool-1");
-                assert_eq!(name, "write");
-                assert_eq!(arguments["path"], "/tmp/test.txt");
-            }
-            _ => panic!("expected ToolUse variant"),
-        }
-    }
-
-    #[test]
     fn test_sse_event_error_serde() {
         let event = SseEvent::Error {
             message: "something went wrong".to_string(),
@@ -191,26 +131,6 @@ mod tests {
         match decoded {
             SseEvent::Done { session_id } => assert_eq!(session_id, "sess-123"),
             _ => panic!("expected Done variant"),
-        }
-    }
-
-    #[test]
-    fn test_sse_event_usage_serde() {
-        let event = SseEvent::Usage {
-            prompt_tokens: 100,
-            completion_tokens: 50,
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        let decoded: SseEvent = serde_json::from_str(&json).unwrap();
-        match decoded {
-            SseEvent::Usage {
-                prompt_tokens,
-                completion_tokens,
-            } => {
-                assert_eq!(prompt_tokens, 100);
-                assert_eq!(completion_tokens, 50);
-            }
-            _ => panic!("expected Usage variant"),
         }
     }
 
@@ -265,26 +185,4 @@ mod tests {
         assert!(received.is_some());
     }
 
-    #[test]
-    fn test_detail_block_serde() {
-        let block = DetailBlock::ToolUse {
-            id: "t1".to_string(),
-            name: "read".to_string(),
-            arguments: "{}".to_string(),
-        };
-        let json = serde_json::to_string(&block).unwrap();
-        let decoded: DetailBlock = serde_json::from_str(&json).unwrap();
-        match decoded {
-            DetailBlock::ToolUse {
-                id,
-                name,
-                arguments,
-            } => {
-                assert_eq!(id, "t1");
-                assert_eq!(name, "read");
-                assert_eq!(arguments, "{}");
-            }
-            _ => panic!("expected ToolUse"),
-        }
-    }
 }

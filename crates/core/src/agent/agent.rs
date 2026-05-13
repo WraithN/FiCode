@@ -380,10 +380,12 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         } = block
         {
             if let Some(ref mut cb) = on_tool_event {
-                let _ = cb(crate::server::transport::sse::SseEvent::ToolUse {
-                    id: id.clone(),
-                    name: name.clone(),
-                    arguments: arguments.clone(),
+                let _ = cb(crate::server::transport::sse::SseEvent::Part {
+                    part: crate::session::message::Part::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        arguments: arguments.clone(),
+                    },
                 });
             }
         }
