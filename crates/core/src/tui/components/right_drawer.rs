@@ -24,7 +24,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 
@@ -50,6 +50,7 @@ pub struct RightDrawer {
     selected_index: usize,
     filter: String,      // 预留：会话名称过滤
     filter_active: bool, // 预留：是否处于过滤模式
+    scroll_offset: usize, // 垂直滚动偏移
 }
 
 impl RightDrawer {
@@ -59,7 +60,17 @@ impl RightDrawer {
             selected_index: 0,
             filter: String::new(),
             filter_active: false,
+            scroll_offset: 0,
         }
+    }
+
+    pub fn scroll_up(&mut self, delta: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(delta);
+    }
+
+    pub fn scroll_down(&mut self, delta: usize) {
+        let max = self.sessions.len().saturating_sub(1);
+        self.scroll_offset = (self.scroll_offset + delta).min(max);
     }
 
     /// 设置会话列表并重置选中位置。
@@ -88,40 +99,74 @@ impl Component for RightDrawer {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        // 上下两个区块：Tasks（上）和 Changes（下）
-        let half_height = inner.height / 2;
-        let top_area = Rect::new(inner.x, inner.y, inner.width, half_height);
-        let bottom_area = Rect::new(
-            inner.x,
-            inner.y + half_height,
-            inner.width,
-            inner.height - half_height,
-        );
+        let viewport_height = inner.height as usize;
 
-        // 上半区：Tasks
-        let tasks_lines = vec![
-            Line::styled(
-                "📋 Tasks",
-                theme.style_primary().add_modifier(Modifier::BOLD),
-            ),
+        let mut all_lines = vec![
+            Line::styled("📋 Tasks", theme.style_primary().add_modifier(Modifier::BOLD)),
             Line::styled("  No active tasks", theme.style_muted()),
-        ];
-        frame.render_widget(Paragraph::new(tasks_lines), top_area);
-
-        // 下半区：Changes
-        let changes_lines = vec![
-            Line::styled(
-                "📁 Changes",
-                theme.style_primary().add_modifier(Modifier::BOLD),
-            ),
+            Line::styled("", theme.style_primary()),
+            Line::styled("📁 Changes", theme.style_primary().add_modifier(Modifier::BOLD)),
             Line::styled("  No changes yet", theme.style_muted()),
         ];
-        frame.render_widget(Paragraph::new(changes_lines), bottom_area);
+
+        for (i, session) in self.sessions.iter().enumerate() {
+            if i == 0 {
+                all_lines.push(Line::styled("", theme.style_primary()));
+                all_lines.push(Line::styled("📝 Sessions", theme.style_primary().add_modifier(Modifier::BOLD)));
+            }
+            let marker = if session.is_current { "● " } else { "○ " };
+            let style = if i == self.selected_index {
+                theme.style_selection()
+            } else {
+                theme.style_primary()
+            };
+            all_lines.push(Line::styled(
+                format!("  {}{} ({})", marker, session.name, session.message_count),
+                style,
+            ));
+        }
+
+        let visible_lines: Vec<Line> = all_lines
+            .into_iter()
+            .skip(self.scroll_offset)
+            .take(viewport_height)
+            .collect();
+
+        frame.render_widget(Paragraph::new(visible_lines), inner);
+
+        let total_lines = self.sessions.len() + 5;
+        if total_lines > viewport_height {
+            let mut scrollbar_state = ScrollbarState::default()
+                .content_length(total_lines.saturating_sub(1))
+                .position(self.scroll_offset)
+                .viewport_content_length(viewport_height);
+
+            let scrollbar = Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .style(Style::default().fg(theme.border));
+
+            frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+        }
     }
 
     /// 右侧常驻栏当前为占位展示，不处理导航事件。
-    fn handle_event(&mut self, _event: &Event, _focus: bool) -> Option<AppEvent> {
-        None
+    fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<AppEvent> {
+        if let Event::Mouse(mouse) = event {
+            use crossterm::event::MouseEventKind;
+            match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    self.scroll_up(3);
+                    None
+                }
+                MouseEventKind::ScrollDown => {
+                    self.scroll_down(3);
+                    None
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
     }
 }
 
