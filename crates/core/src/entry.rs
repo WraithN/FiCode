@@ -39,40 +39,6 @@ use crate::utils::cli::{Args, Commands};
 use crate::utils::workspace::set_workspace;
 use crate::{log_debug, log_info};
 
-pub async fn run_tui_mode(port: Option<u16>) -> Result<()> {
-    let config = Arc::new(RwLock::new(Config::load()?));
-    let provider = Arc::new(RwLock::new(Provider::new(Arc::clone(&config))?));
-
-    let log_broadcaster = Arc::new(crate::utils::log_store::LogBroadcaster::new(1000));
-    crate::utils::log::set_global_log_broadcaster(Arc::clone(&log_broadcaster));
-
-    // 启动 Server（后台任务）
-    let server = crate::server::Server::new(Arc::clone(&provider), Arc::clone(&config), port)
-        .with_log_broadcaster(log_broadcaster);
-    let server_handle = tokio::spawn(async move {
-        server.run().await;
-    });
-
-    // 等待 Server 启动
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    // 测试模式下不启动 TUI，直接返回，便于 E2E 测试验证后端服务
-    if std::env::var("FI_CODE_TEST_MODE").is_ok() {
-        // 保持 Server 运行一段时间，让测试可以连接验证
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        server_handle.abort();
-        return Ok(());
-    }
-
-    // 启动 TUI
-    let result = crate::tui::run_tui().await;
-
-    // TUI 退出后关闭 Server
-    server_handle.abort();
-
-    result
-}
-
 pub async fn run() -> Result<()> {
     let args = Args::parse();
 
@@ -92,7 +58,7 @@ pub async fn run() -> Result<()> {
                 // 继续原有 CLI 逻辑（什么都不做，继续往下执行）
             } else {
                 // 默认启动 TUI 模式
-                return run_tui_mode(None).await;
+                return crate::tui::run_tui_mode(None).await;
             }
         }
     }

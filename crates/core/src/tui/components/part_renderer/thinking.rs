@@ -44,7 +44,7 @@ impl PartRenderer for ThinkingRenderer {
         }
     }
 
-    fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme) {
+    fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme, skip_lines: u16) {
         if let Part::Reasoning { thinking, .. } = part {
             let block = Block::default()
                 .borders(Borders::ALL)
@@ -56,7 +56,8 @@ impl PartRenderer for ThinkingRenderer {
             let paragraph = Paragraph::new(thinking.as_str())
                 .wrap(Wrap { trim: true })
                 .style(theme.style_primary())
-                .block(block);
+                .block(block)
+                .scroll((skip_lines, 0));
             frame.render_widget(paragraph, area);
         }
     }

@@ -28,8 +28,51 @@ pub mod layout;
 pub mod theme;
 
 use app::TuiApp;
+use std::sync::{Arc, RwLock};
 
-/// 启动 TUI 界面。
+/// 启动 TUI 模式（包含嵌入式 Server + TUI 界面）。
+///
+/// 该函数负责：
+/// 1. 加载配置并初始化 Provider。
+/// 2. 启动日志广播器。
+/// 3. 在后台启动 HTTP Server。
+/// 4. 等待 Server 就绪后启动 TUI 界面。
+/// 5. TUI 退出后自动关闭 Server。
+pub async fn run_tui_mode(port: Option<u16>) -> anyhow::Result<()> {
+    let config = Arc::new(RwLock::new(crate::config::Config::load()?));
+    let provider = Arc::new(RwLock::new(crate::provider::Provider::new(Arc::clone(&config))?));
+
+    let log_broadcaster = Arc::new(crate::utils::log_store::LogBroadcaster::new(1000));
+    crate::utils::log::set_global_log_broadcaster(Arc::clone(&log_broadcaster));
+
+    // 启动 Server（后台任务）
+    let server = crate::server::Server::new(Arc::clone(&provider), Arc::clone(&config), port)
+        .with_log_broadcaster(log_broadcaster);
+    let server_handle = tokio::spawn(async move {
+        server.run().await;
+    });
+
+    // 等待 Server 启动
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // 测试模式下不启动 TUI，直接返回，便于 E2E 测试验证后端服务
+    if std::env::var("FI_CODE_TEST_MODE").is_ok() {
+        // 保持 Server 运行一段时间，让测试可以连接验证
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        server_handle.abort();
+        return Ok(());
+    }
+
+    // 启动 TUI
+    let result = run_tui().await;
+
+    // TUI 退出后关闭 Server
+    server_handle.abort();
+
+    result
+}
+
+/// 启动纯 TUI 界面。
 ///
 /// 该函数负责：
 /// 1. 初始化 ratatui 终端后端（自动启用备用屏幕、隐藏光标、捕获键盘事件）。

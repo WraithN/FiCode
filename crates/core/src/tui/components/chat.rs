@@ -19,7 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
@@ -74,6 +74,7 @@ pub struct Chat {
     spinner_frame: usize,                         // 当前 spinner 动画帧索引
     pub card_hit_areas: RefCell<Vec<(String, Rect)>>, // 卡片点击区域（card_id -> rect）
     pub renderer_registry: PartRendererRegistry,  // Part 渲染器注册表
+    last_inner_size: Cell<Option<Rect>>,          // 最近一次 draw 的 inner 区域尺寸（用于滚动 clamp）
 }
 
 /// 终端 spinner 动画帧（Braille 点阵字符），每 tick 轮播一帧。
@@ -89,6 +90,7 @@ impl Chat {
             spinner_frame: 0,
             card_hit_areas: RefCell::new(Vec::new()),
             renderer_registry: PartRendererRegistry::new(),
+            last_inner_size: Cell::new(None),
         }
     }
 
@@ -120,6 +122,16 @@ impl Chat {
         self.messages.clear();
         self.scroll_offset = 0;
         self.card_hit_areas.borrow_mut().clear();
+        self.last_inner_size.set(None);
+    }
+
+    /// 计算当前可见区域下的最大滚动偏移量。
+    fn max_scroll_offset(&self) -> usize {
+        let Some(inner) = self.last_inner_size.get() else {
+            return 0;
+        };
+        let total = self.total_height(inner.width);
+        total.saturating_sub(inner.height) as usize
     }
 
     /// 定时 tick：若正在生成回复，则推进 spinner 动画帧。
@@ -166,8 +178,20 @@ impl Chat {
             }
             SseEvent::Part { part } => {
                 match part {
-                    Part::ToolUse { id, name, .. } => {
-                        log_info!("[Client] Chat SSE ToolUse | id={} | name={}", id, name);
+                    Part::ToolUse { id, .. } => {
+                        log_info!("[Client] Chat SSE ToolUse | id={}", id);
+                        // 按 id 查找已有的 ToolUse 并更新，避免重复 push
+                        if let Some(existing) = last_turn.parts.iter_mut().find_map(|p| {
+                            if let Part::ToolUse { id: existing_id, .. } = p {
+                                if existing_id == id { Some(p) } else { None }
+                            } else {
+                                None
+                            }
+                        }) {
+                            *existing = part.clone();
+                        } else {
+                            last_turn.parts.push(part.clone());
+                        }
                     }
                     Part::ToolResult {
                         tool_call_id,
@@ -178,10 +202,12 @@ impl Chat {
                             tool_call_id,
                             content.len()
                         );
+                        last_turn.parts.push(part.clone());
                     }
-                    _ => {}
+                    _ => {
+                        last_turn.parts.push(part.clone());
+                    }
                 }
-                last_turn.parts.push(part.clone());
             }
             SseEvent::TaskProgress { plan_id, tasks } => {
                 log_debug!(
@@ -289,54 +315,59 @@ impl Component for Chat {
             .style(theme.style_primary());
 
         let inner = block.inner(area);
+        self.last_inner_size.set(Some(inner));
         frame.render_widget(block, area);
 
         let scroll_y = self.scroll_offset as u16;
         let mut current_y = 0u16; // 虚拟 Y 坐标（相对于内容顶部）
-        let bottom = inner.y + inner.height;
 
-        // 辅助函数：计算实际渲染 Y 坐标
-        let render_y = |cy: u16| -> u16 { inner.y.saturating_add(cy.saturating_sub(scroll_y)) };
+        // 辅助函数：计算元素与视口的交集区域，返回渲染 Rect 和顶部跳过的行数。
+        // skip_lines 用于 Paragraph::scroll，保证被视口裁剪掉的上半部分内容不会重新渲染在顶部。
+        let clip_rect = |cy: u16, h: u16| -> Option<(Rect, u16)> {
+            let view_top = scroll_y;
+            let view_bottom = scroll_y.saturating_add(inner.height);
+            let elem_top = cy;
+            let elem_bottom = cy.saturating_add(h);
 
-        // 辅助函数：判断元素是否可见
-        let is_visible =
-            |cy: u16, h: u16| -> bool { cy + h > scroll_y && cy < scroll_y + inner.height };
+            // 无交集
+            if elem_bottom <= view_top || elem_top >= view_bottom {
+                return None;
+            }
+
+            let clipped_top = elem_top.max(view_top);
+            let clipped_bottom = elem_bottom.min(view_bottom);
+            let render_y = inner.y.saturating_add(clipped_top.saturating_sub(view_top));
+            let render_h = clipped_bottom.saturating_sub(clipped_top);
+            let skip_lines = clipped_top.saturating_sub(elem_top);
+
+            Some((
+                Rect {
+                    x: inner.x,
+                    y: render_y,
+                    width: inner.width,
+                    height: render_h,
+                },
+                skip_lines,
+            ))
+        };
 
         for turn in &self.turns {
             // 用户消息前缀
             let prefix_height = 1u16;
-            if is_visible(current_y, prefix_height) {
-                let y = render_y(current_y);
+            if let Some((rect, _)) = clip_rect(current_y, prefix_height) {
                 let para = Paragraph::new(Line::from(vec![
                     Span::styled("● ", theme.style_user()),
                     Span::styled("You", theme.style_user().add_modifier(Modifier::BOLD)),
                 ]));
-                frame.render_widget(
-                    para,
-                    Rect {
-                        x: inner.x,
-                        y,
-                        width: inner.width,
-                        height: prefix_height.min(bottom.saturating_sub(y)),
-                    },
-                );
+                frame.render_widget(para, rect);
             }
             current_y += prefix_height;
 
             // 用户消息内容
             let content_para = Paragraph::new(turn.user_message.clone()).wrap(Wrap { trim: true });
             let content_height = content_para.line_count(inner.width).max(1) as u16;
-            if is_visible(current_y, content_height) {
-                let y = render_y(current_y);
-                frame.render_widget(
-                    content_para,
-                    Rect {
-                        x: inner.x,
-                        y,
-                        width: inner.width,
-                        height: content_height.min(bottom.saturating_sub(y)),
-                    },
-                );
+            if let Some((rect, skip_lines)) = clip_rect(current_y, content_height) {
+                frame.render_widget(content_para.scroll((skip_lines, 0)), rect);
             }
             current_y += content_height;
 
@@ -347,15 +378,8 @@ impl Component for Chat {
             for part in &turn.parts {
                 if let Some(renderer) = self.renderer_registry.get(part) {
                     let part_height = renderer.height(part, inner.width);
-                    if is_visible(current_y, part_height) {
-                        let y = render_y(current_y);
-                        let part_area = Rect {
-                            x: inner.x,
-                            y,
-                            width: inner.width,
-                            height: part_height.min(bottom.saturating_sub(y)),
-                        };
-                        renderer.draw(frame, part_area, part, theme);
+                    if let Some((rect, skip_lines)) = clip_rect(current_y, part_height) {
+                        renderer.draw(frame, rect, part, theme, skip_lines);
                     }
                     current_y += part_height + 1; // +1 for spacing
                 }
@@ -375,33 +399,18 @@ impl Component for Chat {
             };
 
             let prefix_height = 1u16;
-            if is_visible(current_y, prefix_height) {
-                let y = render_y(current_y);
+            if let Some((rect, _)) = clip_rect(current_y, prefix_height) {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(prefix, style)])),
-                    Rect {
-                        x: inner.x,
-                        y,
-                        width: inner.width,
-                        height: prefix_height.min(bottom.saturating_sub(y)),
-                    },
+                    rect,
                 );
             }
             current_y += prefix_height;
 
             let content_para = Paragraph::new(msg.content.clone()).wrap(Wrap { trim: true });
             let content_height = content_para.line_count(inner.width).max(1) as u16;
-            if is_visible(current_y, content_height) {
-                let y = render_y(current_y);
-                frame.render_widget(
-                    content_para,
-                    Rect {
-                        x: inner.x,
-                        y,
-                        width: inner.width,
-                        height: content_height.min(bottom.saturating_sub(y)),
-                    },
-                );
+            if let Some((rect, skip_lines)) = clip_rect(current_y, content_height) {
+                frame.render_widget(content_para.scroll((skip_lines, 0)), rect);
             }
             current_y += content_height;
             current_y += 1; // 空行
@@ -411,8 +420,7 @@ impl Component for Chat {
         if self.is_generating {
             let spinner = SPINNER_FRAMES[self.spinner_frame];
             let spinner_height = 1u16;
-            if is_visible(current_y, spinner_height) {
-                let y = render_y(current_y);
+            if let Some((rect, _)) = clip_rect(current_y, spinner_height) {
                 let spinner_line = Line::from(vec![
                     Span::styled("◆ ", theme.style_brand()),
                     Span::styled(
@@ -421,15 +429,7 @@ impl Component for Chat {
                     ),
                     Span::styled(spinner, theme.style_brand()),
                 ]);
-                frame.render_widget(
-                    Paragraph::new(spinner_line),
-                    Rect {
-                        x: inner.x,
-                        y,
-                        width: inner.width,
-                        height: spinner_height.min(bottom.saturating_sub(y)),
-                    },
-                );
+                frame.render_widget(Paragraph::new(spinner_line), rect);
             }
         }
 
@@ -445,7 +445,8 @@ impl Component for Chat {
                         Some(AppEvent::ScrollUp)
                     }
                     MouseEventKind::ScrollDown => {
-                        self.scroll_offset += 3;
+                        let max_offset = self.max_scroll_offset();
+                        self.scroll_offset = (self.scroll_offset + 3).min(max_offset);
                         Some(AppEvent::ScrollDown)
                     }
                     _ => None,
@@ -460,7 +461,8 @@ impl Component for Chat {
                     | (KeyModifiers::NONE, KeyCode::PageUp) => self.handle_page_up(),
                     (KeyModifiers::CONTROL, KeyCode::Down)
                     | (KeyModifiers::NONE, KeyCode::PageDown) => {
-                        self.scroll_offset += 1;
+                        let max_offset = self.max_scroll_offset();
+                        self.scroll_offset = (self.scroll_offset + 1).min(max_offset);
                         Some(AppEvent::ScrollDown)
                     }
                     (KeyModifiers::NONE, KeyCode::Char('g')) => {

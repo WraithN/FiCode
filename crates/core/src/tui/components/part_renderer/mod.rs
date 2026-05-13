@@ -30,7 +30,9 @@ pub trait PartRenderer {
     /// 计算该 Part 在给定宽度下需要占用的行高。
     fn height(&self, part: &Part, width: u16) -> u16;
     /// 在指定区域绘制该 Part。
-    fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme);
+    /// `skip_lines` 表示该 Part 顶部被视口裁剪掉的行数，多行 Paragraph 需要通过
+    /// `.scroll((skip_lines, 0))` 跳过这些行，保证渲染内容和滚动位置一致。
+    fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme, skip_lines: u16);
     /// 可选的事件处理，返回 true 表示事件已被消费。
     fn handle_event(&mut self, _part: &mut Part, _event: &Event) -> bool {
         false

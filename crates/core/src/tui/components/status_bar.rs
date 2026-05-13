@@ -288,7 +288,7 @@ impl StatusBar {
         if width >= 100 {
             // ===== 标准模式 =====
             spans.push(Span::styled(" │ ", theme.style_muted()));
-            spans.push(Span::styled("CTX:", theme.style_primary()));
+            spans.push(Span::styled("CTX: ", theme.style_primary()));
             spans.push(Span::styled(ctx_bar, ctx_style));
 
             // 空间充裕时显示具体数值
@@ -298,7 +298,7 @@ impl StatusBar {
             if self.token_in > 0 || self.token_out > 0 {
                 spans.push(Span::styled(" │ ", theme.style_muted()));
                 let tok_text = format!(
-                    "TOK:↑{}↓{}",
+                    "TOK: ↑{} ↓{}",
                     Self::format_tokens(self.token_in),
                     Self::format_tokens(self.token_out)
                 );
@@ -308,14 +308,14 @@ impl StatusBar {
             if self.latency_ms > 0 {
                 spans.push(Span::styled(" │ ", theme.style_muted()));
                 spans.push(Span::styled(
-                    format!("LAT:{}", self.format_latency()),
+                    format!("LAT: {}", self.format_latency()),
                     self.latency_style(theme),
                 ));
             }
 
             spans.push(Span::styled(" │ ", theme.style_muted()));
             spans.push(Span::styled(
-                format!("MDL:{}", self.model_name),
+                format!("MDL: {}", self.model_name),
                 Style::default().fg(theme.success),
             ));
 

@@ -27,13 +27,118 @@ use ratatui::{
 
 use super::*;
 
+/// 将 ToolUse 格式化为人类可读的摘要。
+///
+/// 返回 (title, body)：title 用于卡片标题，body 用于卡片内容。
+fn format_tool_use(name: &str, arguments: &serde_json::Value) -> (String, String) {
+    // 辅助函数：从 arguments 中提取字段
+    let get = |key: &str| -> String {
+        arguments
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+
+    match name {
+        "write" | "edit" => {
+            let path = get("path");
+            let content = get("content");
+            let body = if content.is_empty() {
+                format!("path: {}", path)
+            } else {
+                format!("path: {}\n[{} bytes]", path, content.len())
+            };
+            (format!("📝 {}", name), body)
+        }
+        "read" | "read_file" => {
+            let path = get("path");
+            (format!("📖 {}", name), format!("path: {}", path))
+        }
+        "bash" => {
+            let cmd = get("command");
+            ("⚡ bash".to_string(), format!("$ {}", cmd))
+        }
+        "grep" => {
+            let pattern = get("pattern");
+            let path = get("path");
+            ("🔍 grep".to_string(), format!("pattern: {}\npath: {}", pattern, path))
+        }
+        "web_fetch" => {
+            let url = get("url");
+            ("🌐 web_fetch".to_string(), format!("url: {}", url))
+        }
+        "git_status" => ("📋 git status".to_string(), String::new()),
+        "git_diff" => {
+            let path = get("path");
+            let body = if path.is_empty() {
+                String::new()
+            } else {
+                format!("path: {}", path)
+            };
+            ("📋 git diff".to_string(), body)
+        }
+        "git_add" => {
+            let path = get("path");
+            ("➕ git add".to_string(), format!("path: {}", path))
+        }
+        "git_commit" => {
+            let message = get("message");
+            ("💾 git commit".to_string(), format!("message: {}", message))
+        }
+        "git_log" => ("📜 git log".to_string(), String::new()),
+        "git_worktree" => ("🌿 git worktree".to_string(), String::new()),
+        "glob" => {
+            let pattern = get("pattern");
+            let dir = get("dir");
+            let body = if dir.is_empty() {
+                format!("pattern: {}", pattern)
+            } else {
+                format!("pattern: {}\ndir: {}", pattern, dir)
+            };
+            ("📁 glob".to_string(), body)
+        }
+        "create_task_plan" | "handle_task_plan" => {
+            let title = format!("📋 {}", name);
+            (title, String::new())
+        }
+        "ask_for_question" => {
+            let question = get("question");
+            ("❓ ask".to_string(), format!("question: {}", question))
+        }
+        "use_skill" => {
+            let skill_name = get("name");
+            ("🎯 use_skill".to_string(), format!("skill: {}", skill_name))
+        }
+        _ => {
+            // 未知工具：展示参数摘要（排除过长的 content 字段）
+            let summary = if let Some(obj) = arguments.as_object() {
+                let mut parts = Vec::new();
+                for (k, v) in obj.iter() {
+                    if k == "content" {
+                        if let Some(s) = v.as_str() {
+                            parts.push(format!("{}: [{} bytes]", k, s.len()));
+                        }
+                    } else {
+                        parts.push(format!("{}: {}", k, v));
+                    }
+                }
+                parts.join("\n")
+            } else {
+                arguments.to_string()
+            };
+            (format!("🔧 {}", name), summary)
+        }
+    }
+}
+
 pub struct ToolCallRenderer;
 
 impl PartRenderer for ToolCallRenderer {
     fn height(&self, part: &Part, width: u16) -> u16 {
-        if let Part::ToolUse { arguments, .. } = part {
-            let content = serde_json::to_string_pretty(arguments).unwrap_or_default();
-            let lines: Vec<&str> = content.lines().collect();
+        if let Part::ToolUse { name, arguments, .. } = part {
+            let (_, body) = format_tool_use(name, arguments);
+            let lines: Vec<&str> = body.lines().collect();
             let mut h = 0u16;
             for line in lines {
                 let w = line.chars().count() as u16;
@@ -45,10 +150,9 @@ impl PartRenderer for ToolCallRenderer {
         }
     }
 
-    fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme) {
+    fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme, skip_lines: u16) {
         if let Part::ToolUse { name, arguments, .. } = part {
-            let title = format!("🔧 {}", name);
-            let content = serde_json::to_string_pretty(arguments).unwrap_or_default();
+            let (title, body) = format_tool_use(name, arguments);
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border))
@@ -56,10 +160,11 @@ impl PartRenderer for ToolCallRenderer {
                     Line::from(title)
                         .style(theme.style_primary().add_modifier(Modifier::BOLD)),
                 );
-            let paragraph = Paragraph::new(content)
+            let paragraph = Paragraph::new(body)
                 .wrap(Wrap { trim: true })
                 .style(theme.style_primary())
-                .block(block);
+                .block(block)
+                .scroll((skip_lines, 0));
             frame.render_widget(paragraph, area);
         }
     }

@@ -240,6 +240,10 @@ pub async fn send_with_retry(
             return Ok(resp);
         }
         if !is_retryable_status(status) || attempt >= config.max_retries {
+            log_warn!(
+                "[Server] send_with_retry returning non-success status | status={}",
+                status
+            );
             return Ok(resp);
         }
         let text = resp.text().await.unwrap_or_default();

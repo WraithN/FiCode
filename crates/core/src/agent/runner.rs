@@ -172,9 +172,26 @@ impl AgentRunner {
                 &self.tools_schema,
                 &mut |chunk| {
                     match &chunk.content {
-                        ChunkContent::Text(text) | ChunkContent::Think(text) => {
+                        ChunkContent::Text(text) => {
                             if let Some(ref mut cb) = on_text {
                                 cb(text);
+                            }
+                        }
+                        ChunkContent::Think(text) => {
+                            if let Some(ref mut cb) = on_tool_event {
+                                let _ = cb(crate::server::transport::sse::SseEvent::Part {
+                                    part: Part::Reasoning {
+                                        thinking: text.clone(),
+                                        signature: None,
+                                    },
+                                });
+                            }
+                        }
+                        ChunkContent::ToolUse(tool) => {
+                            if let Some(ref mut cb) = on_tool_event {
+                                let _ = cb(crate::server::transport::sse::SseEvent::Part {
+                                    part: tool.clone(),
+                                });
                             }
                         }
                         _ => {}
@@ -214,21 +231,6 @@ impl AgentRunner {
                 &token_baseline,
             );
             return Ok((false, finish_reason, turn_usage));
-        }
-
-        // 发送 ToolUse 事件
-        for block in &content_blocks {
-            if let Part::ToolUse { id, name, arguments } = block {
-                if let Some(ref mut cb) = on_tool_event {
-                    let _ = cb(crate::server::transport::sse::SseEvent::Part {
-                        part: Part::ToolUse {
-                            id: id.clone(),
-                            name: name.clone(),
-                            arguments: arguments.clone(),
-                        },
-                    });
-                }
-            }
         }
 
         // 执行所有工具调用并收集结果

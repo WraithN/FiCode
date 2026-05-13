@@ -45,7 +45,7 @@ impl PartRenderer for UsageRenderer {
         1
     }
 
-    fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme) {
+    fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme, _skip_lines: u16) {
         if let Part::Usage {
             input_tokens,
             output_tokens,

@@ -166,6 +166,16 @@ impl AIClient for OpenAiClient {
             return Err(anyhow::anyhow!("OpenAI API error ({}): {}", status, text));
         }
 
+        let content_type = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown");
+        log_debug!(
+            "[Server] OpenAI response | status={} | content-type={}",
+            status,
+            content_type
+        );
         let byte_stream = resp.bytes_stream();
         parse_openai_sse(byte_stream, on_chunk).await
     }
@@ -223,6 +233,30 @@ fn update_openai_tool_call_delta(
     entry.2.push_str(&args);
 }
 
+/// 实时 flush 当前累积的 tool_call 状态（部分参数）。
+fn flush_partial_tool_call(
+    tool: &serde_json::Value,
+    index_to_tool: &std::collections::HashMap<usize, (Option<String>, Option<String>, String)>,
+    on_chunk: &mut dyn FnMut(Chunk),
+) {
+    let index = tool.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    if let Some((Some(id), Some(name), args)) = index_to_tool.get(&index) {
+        if !id.is_empty() && !name.is_empty() {
+            // 尝试解析为 JSON，失败时包装为包含原始字符串的对象
+            let arguments = serde_json::from_str(args).unwrap_or_else(|_| {
+                json!({ "_raw": args })
+            });
+            on_chunk(Chunk {
+                content: ChunkContent::ToolUse(Part::ToolUse {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments,
+                }),
+            });
+        }
+    }
+}
+
 fn flush_openai_tool_calls(
     index_to_tool: &mut std::collections::HashMap<usize, (Option<String>, Option<String>, String)>,
     on_chunk: &mut dyn FnMut(Chunk),
@@ -233,13 +267,15 @@ fn flush_openai_tool_calls(
         let Some((Some(id), Some(name), args)) = index_to_tool.remove(&idx) else {
             continue;
         };
-        let arguments = serde_json::from_str(&args).unwrap_or(json!({}));
         log_debug!(
             "[Server] OpenAI assembled tool_call | id={} | name={} | args={}",
             id,
             name,
-            arguments
+            args
         );
+        let arguments = serde_json::from_str(&args).unwrap_or_else(|_| {
+            json!({ "_raw": args })
+        });
         on_chunk(Chunk {
             content: ChunkContent::ToolUse(Part::ToolUse {
                 id,
@@ -255,6 +291,20 @@ fn handle_openai_delta(
     index_to_tool: &mut std::collections::HashMap<usize, (Option<String>, Option<String>, String)>,
     on_chunk: &mut dyn FnMut(Chunk),
 ) {
+    // 处理 reasoning_content（模型思考过程）
+    if let Some(thinking) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
+        if !thinking.is_empty() {
+            log_trace!(
+                "OpenAI SSE reasoning_delta | len={} | preview={}",
+                thinking.len(),
+                thinking.chars().take(80).collect::<String>()
+            );
+            on_chunk(Chunk {
+                content: ChunkContent::Think(thinking.to_string()),
+            });
+        }
+    }
+
     if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
         if !text.is_empty() {
             log_trace!(
@@ -270,6 +320,8 @@ fn handle_openai_delta(
     if let Some(tools) = delta.get("tool_calls").and_then(|v| v.as_array()) {
         for tool in tools {
             update_openai_tool_call_delta(tool, index_to_tool);
+            // 实时 flush 当前累积的 tool_call 状态
+            flush_partial_tool_call(tool, index_to_tool, on_chunk);
         }
     }
 }
@@ -315,13 +367,26 @@ where
     > = std::collections::HashMap::new();
 
     tokio::pin!(byte_stream);
-    while let Some(chunk) = byte_stream.next().await {
-        let chunk = chunk?;
+    while let Some(chunk_result) = byte_stream.next().await {
+        let chunk = chunk_result.with_context(|| {
+            "SSE stream interrupted while reading chunk. \
+             This usually means the server closed the connection unexpectedly, \
+             or the response body could not be decoded. \
+             Check network stability and API availability."
+        })?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
         while let Some(pos) = buffer.find('\n') {
             let line = buffer.drain(..=pos).collect::<String>();
             let line = line.trim_end();
+
+            if line.starts_with("event:") {
+                let event_type = line[6..].trim();
+                if event_type == "error" {
+                    log_error!("[Server] OpenAI SSE received event:error");
+                }
+                continue;
+            }
 
             if !line.starts_with("data:") {
                 continue;
