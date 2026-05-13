@@ -658,22 +658,33 @@ impl Component for Chat {
         match event {
             Event::Mouse(mouse) => {
                 use crossterm::event::{MouseButton, MouseEventKind};
-                if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                    for (card_id, rect) in self.card_hit_areas.borrow().iter() {
-                        if rect_contains(*rect, mouse.column, mouse.row) {
-                            if let Some(card) = self.find_card_by_id(card_id) {
-                                if let Some(action) = CardWidget::new(card).handle_click(
-                                    mouse.column,
-                                    mouse.row,
-                                    *rect,
-                                ) {
-                                    return Some(AppEvent::CardAction(action));
+                match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        for (card_id, rect) in self.card_hit_areas.borrow().iter() {
+                            if rect_contains(*rect, mouse.column, mouse.row) {
+                                if let Some(card) = self.find_card_by_id(card_id) {
+                                    if let Some(action) = CardWidget::new(card).handle_click(
+                                        mouse.column,
+                                        mouse.row,
+                                        *rect,
+                                    ) {
+                                        return Some(AppEvent::CardAction(action));
+                                    }
                                 }
                             }
                         }
+                        None
                     }
+                    MouseEventKind::ScrollUp => {
+                        self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                        Some(AppEvent::ScrollUp)
+                    }
+                    MouseEventKind::ScrollDown => {
+                        self.scroll_offset += 3;
+                        Some(AppEvent::ScrollDown)
+                    }
+                    _ => None,
                 }
-                None
             }
             Event::Key(key) => {
                 if key.kind != KeyEventKind::Press {
