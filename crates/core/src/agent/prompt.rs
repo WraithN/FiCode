@@ -145,7 +145,9 @@ impl PromptBuilder {
             11. When the user asks you to write code, save it to a file using `write` first. Do not run the code before writing it.\n\
             12. Do not output tool calls as plain text. Use the proper tool_call mechanism provided by the API.\n\
             13. Before calling any tool, you MUST first output 1-2 sentences telling the user what you are going to do.
-            14. If a task is complex and requires multiple steps, use `handle_task_plan` to automatically split and execute subtasks. Do not use `create_task_plan` directly.",
+            14. If a task is complex and requires multiple steps, use `handle_task_plan` to automatically split and execute subtasks. Do not use `create_task_plan` directly.
+\
+            15. If you find yourself listing multiple steps or tasks in your reply and planning to execute them one by one, STOP. You MUST call `handle_task_plan` instead of manually executing steps yourself. Manual step-by-step execution will be interrupted because each turn can only run a limited number of tools. `handle_task_plan` will automatically execute all subtasks in sequence and return a complete summary.",
         )
     }
 
@@ -309,6 +311,7 @@ mod tests {
         ));
         assert!(prompt.contains("## 2. Core Rules"));
         assert!(prompt.contains("CANNOT be overridden"));
+        assert!(prompt.contains("handle_task_plan"));
         assert!(prompt.contains("## 3. Git Status Awareness"));
         assert!(prompt.contains("git status"));
         assert!(!prompt.contains("## 4. Available Skills")); // registry is empty

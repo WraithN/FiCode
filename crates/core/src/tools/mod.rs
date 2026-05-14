@@ -646,7 +646,7 @@ static REGISTRY: LazyLock<ToolsRegistry> = LazyLock::new(|| {
     registry
         .register(
             "handle_task_plan",
-            "将复杂任务拆分为多个子任务并自动执行。仅在任务确实复杂、需要多步骤完成时调用。工具会返回所有子任务的执行结果汇总。参数示例：{\"tasks\":[{\"name\":\"分析代码\",\"description\":\"分析现有错误处理模式\"}]}",
+            "将任务拆分为多个子任务并自动串行执行。当你需要执行多个步骤（如先查找文件、再分析内容、再修改代码）时，必须使用此工具一次性完成所有步骤。禁止自己手动逐个执行，因为每轮对话只能执行有限个工具，手动执行会导致任务中断。工具会返回所有子任务的执行结果汇总。参数示例：{\"tasks\":[{\"name\":\"分析代码\",\"description\":\"分析现有错误处理模式\"}]}",
             r#"{"type":"object","properties":{"tasks":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"}},"required":["name","description"]}}},"required":["tasks"]}"#,
             Box::new(HandleTaskPlanHandler),
         )
