@@ -77,3 +77,34 @@ async fn file_contains_modified_code(world: &mut AgentWorld) {
         content
     );
 }
+
+#[then("用户应该收到包含参数错误的提示")]
+async fn user_receives_param_error_hint(world: &mut AgentWorld) {
+    let tool_results = world.all_tool_result_text();
+    assert!(
+        tool_results.contains("Missing path parameter")
+            || tool_results.contains("参数 JSON 解析失败"),
+        "Expected param error hint in tool results, got: {}",
+        tool_results
+    );
+}
+
+#[then("用户应该收到包含 JSON 解析失败的提示")]
+async fn user_receives_json_parse_error_hint(world: &mut AgentWorld) {
+    let tool_results = world.all_tool_result_text();
+    assert!(
+        tool_results.contains("参数 JSON 解析失败或不完整"),
+        "Expected JSON parse error hint in tool results, got: {}",
+        tool_results
+    );
+}
+
+#[then("提示信息应该建议重新调用工具")]
+async fn hint_suggests_recall_tool(world: &mut AgentWorld) {
+    let tool_results = world.all_tool_result_text();
+    assert!(
+        tool_results.contains("重新调用此工具"),
+        "Expected hint to suggest recalling tool, got: {}",
+        tool_results
+    );
+}

@@ -168,9 +168,17 @@ impl AgentWorld {
                                 plan_id: None,
                                 task_count: None,
                             },
-                            fi_code_core::session::message::Part::ToolResult { tool_call_id, .. } => SseEvent {
+                            fi_code_core::session::message::Part::ToolResult { content, .. } => SseEvent {
                                 event_type: "ToolResult".to_string(),
-                                content: Some(tool_call_id.clone()),
+                                content: Some(content.clone()),
+                                tool_name: None,
+                                tool_args: None,
+                                plan_id: None,
+                                task_count: None,
+                            },
+                            fi_code_core::session::message::Part::ToolError { content, .. } => SseEvent {
+                                event_type: "ToolError".to_string(),
+                                content: Some(content.clone()),
                                 tool_name: None,
                                 tool_args: None,
                                 plan_id: None,
@@ -244,6 +252,24 @@ impl AgentWorld {
             .iter()
             .filter(|e| e.event_type == "ToolUse")
             .collect()
+    }
+
+    /// 获取所有 ToolError 事件
+    pub fn tool_error_events(&self) -> Vec<&SseEvent> {
+        self.events
+            .iter()
+            .filter(|e| e.event_type == "ToolError")
+            .collect()
+    }
+
+    /// 获取所有 ToolResult/ToolError 事件的内容拼接
+    pub fn all_tool_result_text(&self) -> String {
+        self.events
+            .iter()
+            .filter(|e| e.event_type == "ToolResult" || e.event_type == "ToolError")
+            .filter_map(|e| e.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// 清理资源

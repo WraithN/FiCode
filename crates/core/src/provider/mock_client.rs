@@ -69,6 +69,8 @@ enum MessageType {
     SkillTask,
     InitTask,
     ComplexTask,
+    BadParamTask,
+    RawParamTask,
     Subtask,
 }
 
@@ -82,6 +84,10 @@ fn classify_message(text: &str) -> MessageType {
         || text.contains("注定失败")
     {
         MessageType::ComplexTask
+    } else if text.contains("原始参数") || text.contains("raw param") {
+        MessageType::RawParamTask
+    } else if text.contains("参数错误") || text.contains("bad param") {
+        MessageType::BadParamTask
     } else if text.contains("写") && (text.contains("代码") || text.contains("文件")) {
         MessageType::CodeTask
     } else if text.contains("读取") || text.contains("read") {
@@ -265,6 +271,34 @@ impl AIClient for MockAIClient {
                     serde_json::json!({
                         "path": "AGENTS.md",
                         "content": "# Project Agents\n\nThis project uses fi-code agent.\n"
+                    }),
+                );
+                send_finish(on_chunk, FinishReason::ToolUse);
+            }
+
+            // 模拟 LLM 生成不完整参数的场景：write 工具缺少必需的 path 参数
+            MessageType::BadParamTask => {
+                send_text(on_chunk, "我来尝试写入文件。");
+                send_tool_use(
+                    on_chunk,
+                    "write_1",
+                    "write",
+                    serde_json::json!({
+                        "content": "this is a test"
+                    }),
+                );
+                send_finish(on_chunk, FinishReason::ToolUse);
+            }
+
+            // 模拟 LLM 生成不完整 JSON 参数的场景：arguments 包含 _raw
+            MessageType::RawParamTask => {
+                send_text(on_chunk, "我来尝试写入文件。");
+                send_tool_use(
+                    on_chunk,
+                    "write_1",
+                    "write",
+                    serde_json::json!({
+                        "_raw": "{\"content\": \"test\""
                     }),
                 );
                 send_finish(on_chunk, FinishReason::ToolUse);

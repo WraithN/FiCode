@@ -26,3 +26,15 @@ Feature: Agent 工具调用
     When 用户发送消息 "在 main.rs 中添加一行打印代码"
     Then Agent 应该调用 edit 工具
     And 文件内容应该包含修改后的代码
+
+  Scenario: 工具参数缺失时返回清晰的错误信息
+    When 用户发送消息 "测试参数错误"
+    Then Agent 应该调用 write 工具
+    And 用户应该收到包含参数错误的提示
+    And 提示信息应该建议重新调用工具
+
+  Scenario: 工具参数 JSON 不完整时返回清晰的错误信息
+    When 用户发送消息 "测试原始参数错误"
+    Then Agent 应该调用 write 工具
+    And 用户应该收到包含 JSON 解析失败的提示
+    And 提示信息应该建议重新调用工具

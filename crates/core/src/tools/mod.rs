@@ -910,6 +910,34 @@ async fn execute_single_tool_call(
     name: &str,
     arguments: &serde_json::Value,
 ) -> (String, bool) {
+    // =============================================================================
+    // 前置检查：参数 JSON 完整性校验
+    // =============================================================================
+    // 如果 arguments 包含 `_raw` 字段，说明上游 SSE 解析时 JSON 不完整
+    //（如 tool_calls 的增量参数还没收齐）。此时直接返回格式错误，
+    // 而不是让工具 Handler 拿到空参数后报错，这样 LLM 能更清楚地知道
+    // 需要重新生成完整参数。
+    if let Some(raw) = arguments.get("_raw").and_then(|v| v.as_str()) {
+        let error_msg = if raw.is_empty() {
+            format!(
+                "Error: 工具 '{}' 被调用但未收到任何参数。请重新调用此工具并提供完整参数。",
+                name
+            )
+        } else {
+            format!(
+                "Error: 工具 '{}' 的参数 JSON 解析失败或不完整。收到的原始参数片段: {}\n\
+                 请重新调用此工具，并确保提供完整且格式正确的 JSON 参数。",
+                name, raw
+            )
+        };
+        log_debug!(
+            "execute_tool_call param_incomplete | name={} | raw={}",
+            name,
+            raw
+        );
+        return (error_msg, true);
+    }
+
     let input: HashMap<String, serde_json::Value> = match arguments {
         serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         _ => HashMap::new(),
@@ -932,7 +960,17 @@ async fn execute_single_tool_call(
         Err(e) => {
             log_trace!("execute_tool_call raw error | name={} | err={}", name, e);
             log_debug!("execute_tool_call error | name={} | err={}", name, e);
-            (format!("Error: {}", e), true)
+            // 对缺少必需参数的错误进行增强，提示 LLM 重新检查参数要求
+            let enhanced_error = if e.starts_with("Missing") {
+                format!(
+                    "Error: {}\n\
+                     请检查工具 '{}' 的参数要求，确保提供了所有必需参数，然后重新调用此工具。",
+                    e, name
+                )
+            } else {
+                format!("Error: {}", e)
+            };
+            (enhanced_error, true)
         }
     }
 }
@@ -1015,8 +1053,8 @@ pub async fn execute_tool_calls(
                 if is_error {
                     Part::ToolError {
                         tool_call_id: id,
-                        content,
-                        error_message: "Tool execution failed".to_string(),
+                        content: content.clone(),
+                        error_message: content,
                     }
                 } else {
                     Part::ToolResult {
