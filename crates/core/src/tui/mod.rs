@@ -79,6 +79,24 @@ pub async fn run_tui_mode(port: Option<u16>) -> anyhow::Result<()> {
 /// 2. 清屏后创建 `TuiApp` 并进入主循环。
 /// 3. 无论运行结果如何，最终调用 `ratatui::restore()` 还原终端状态，防止退出后终端乱码。
 pub async fn run_tui() -> anyhow::Result<()> {
+    // 设置 panic hook：在 TUI panic 时自动恢复终端状态，避免退出后终端乱码
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // 恢复终端状态：禁用鼠标捕获、离开备用屏幕、显示光标、关闭 raw mode
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::LeaveAlternateScreen
+        );
+        let _ = crossterm::terminal::disable_raw_mode();
+
+        // 打印友好的错误提示
+        eprintln!("\n❌ 程序发生致命错误，正在退出...\n");
+
+        // 调用原始 panic hook 输出 backtrace
+        original_hook(info);
+    }));
+
     let mut terminal = ratatui::init();
     terminal.clear()?;
 
@@ -88,7 +106,8 @@ pub async fn run_tui() -> anyhow::Result<()> {
     let mut app = TuiApp::new();
     let result = app.run(&mut terminal).await;
 
-    // 退出前禁用鼠标捕获
+    // 正常退出：恢复原始 panic hook，禁用鼠标捕获，还原终端
+    let _ = std::panic::take_hook();
     let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
     ratatui::restore();
     result
