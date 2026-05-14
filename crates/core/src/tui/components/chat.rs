@@ -405,7 +405,7 @@ impl Component for Chat {
             let (prefix, style) = match msg.role {
                 MessageRole::User => ("You", theme.style_user().add_modifier(Modifier::BOLD)),
                 MessageRole::Assistant => (
-                    "◆ FiCodeAgent",
+                    "◆ AI",
                     theme.style_brand().add_modifier(Modifier::BOLD),
                 ),
                 MessageRole::System => ("ℹ️ ", Style::default().fg(theme.warning)),
@@ -438,7 +438,7 @@ impl Component for Chat {
                 let spinner_line = Line::from(vec![
                     Span::styled("◆ ", theme.style_brand()),
                     Span::styled(
-                        "FiCodeAgent ",
+                        "AI ",
                         theme.style_brand().add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(spinner, theme.style_brand()),
