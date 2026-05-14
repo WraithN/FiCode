@@ -12,3 +12,7 @@ fi-code-core = { path = "../core" }
 fi-code-tui = { path = "../tui" }
 tokio = { version = "1.35", features = ["full"] }
 anyhow = "1.0"
+clap = { version = "4", features = ["derive"] }
+colored = "3.1.1"
+directories = "5.0"
+dirs = "5.0"

@@ -19,7 +19,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use fi_code_core::entry::{run, EntryOutcome};
+mod cli_args;
+mod entry;
+
+use entry::{run, EntryOutcome};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

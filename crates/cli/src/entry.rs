@@ -27,17 +27,17 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use colored::Colorize;
 
-use crate::agent::{agent_loop, LoopState};
-use crate::commands::slash::{SlashCommand, SlashCommandHandler};
-use crate::config::Config;
-use crate::mcp::manager::McpManager;
-use crate::provider::Provider;
-use crate::session::message::{Message, Part, Role};
-use crate::session::{SessionManager, SessionStatus};
-use crate::tools::set_mcp_manager;
-use crate::utils::cli::{Args, Commands};
-use crate::utils::workspace::set_workspace;
-use crate::{log_debug, log_info};
+use fi_code_core::agent::{agent_loop, LoopState};
+use fi_code_core::commands::slash::{SlashCommand, SlashCommandHandler};
+use fi_code_core::config::Config;
+use fi_code_core::mcp::manager::McpManager;
+use fi_code_core::provider::Provider;
+use fi_code_core::session::message::{Message, Part, Role};
+use fi_code_core::session::{SessionManager, SessionStatus};
+use fi_code_core::tools::set_mcp_manager;
+use crate::cli_args::{Args, Commands};
+use fi_code_core::utils::workspace::set_workspace;
+use fi_code_core::{log_debug, log_info};
 
 /// 入口执行结果：正常结束或需要启动 TUI
 #[derive(Debug)]
@@ -56,7 +56,7 @@ pub async fn run() -> Result<EntryOutcome> {
         Some(Commands::Server { port }) => {
             let config = Arc::new(RwLock::new(Config::load()?));
             let provider = Arc::new(RwLock::new(Provider::new(Arc::clone(&config))?));
-            crate::server::Server::new(provider, config, port)
+            fi_code_core::server::Server::new(provider, config, port)
                 .run()
                 .await;
             return Ok(EntryOutcome::Completed);
@@ -74,7 +74,7 @@ pub async fn run() -> Result<EntryOutcome> {
 
     #[cfg(debug_assertions)]
     {
-        use crate::utils::log::{set_log_level, LogLevel};
+        use fi_code_core::utils::log::{set_log_level, LogLevel};
         set_log_level(LogLevel::from_str(&args.log_level));
         log_info!("fi-code starting | log_level={}", args.log_level);
     }
@@ -92,10 +92,10 @@ pub async fn run() -> Result<EntryOutcome> {
         .canonicalize()
         .with_context(|| format!("无法解析工作目录: {:?}", workspace))?;
     set_workspace(workspace.clone());
-    crate::skills::init_skills();
+    fi_code_core::skills::init_skills();
     log_info!(
         "skills initialized | count={}",
-        crate::skills::get_registry().entries.len()
+        fi_code_core::skills::get_registry().entries.len()
     );
 
     log_info!(
@@ -125,7 +125,7 @@ pub async fn run() -> Result<EntryOutcome> {
     }
 
     let config = Arc::new(RwLock::new(Config::load()?));
-    let _watcher = crate::config::config::spawn_watcher(Arc::clone(&config))?;
+    let _watcher = fi_code_core::config::config::spawn_watcher(Arc::clone(&config))?;
 
     // 初始化 MCP Manager
     {
@@ -163,7 +163,7 @@ pub async fn run() -> Result<EntryOutcome> {
     }
 
     let provider = Arc::new(Provider::new(Arc::clone(&config))?);
-    crate::tools::set_task_provider(Arc::new(RwLock::new((*provider).clone())));
+    fi_code_core::tools::set_task_provider(Arc::new(RwLock::new((*provider).clone())));
 
     // -c 单命令模式
     if let Some(cmd) = args.cmd {
@@ -233,14 +233,14 @@ async fn run_single_command(
     provider: Arc<Provider>,
     session_manager: &SessionManager,
     sessions_dir: &PathBuf,
-    session: &mut crate::session::Session,
+    session: &mut fi_code_core::session::Session,
     query: &str,
     config: Arc<RwLock<Config>>,
 ) -> Result<()> {
     log_debug!("run_single_command | query_len={}", query.len());
 
     // 拦截 slash 指令
-    let slash_cmd = crate::commands::slash::parse(query);
+    let slash_cmd = fi_code_core::commands::slash::parse(query);
     if !matches!(slash_cmd, SlashCommand::Unknown(ref s) if s.is_empty()) {
         let provider_lock = Arc::new(std::sync::RwLock::new((*provider).clone()));
         let handler = SlashCommandHandler::new(provider_lock, config);
@@ -274,10 +274,10 @@ async fn run_single_command(
 }
 
 async fn handle_task_plan_and_save(
-    provider: Arc<Provider>,
-    session_manager: &SessionManager,
+    _provider: Arc<Provider>,
+    _session_manager: &SessionManager,
     sessions_dir: &PathBuf,
-    session: &mut crate::session::Session,
+    session: &mut fi_code_core::session::Session,
     state: LoopState,
     interactive: bool,
 ) -> Result<()> {
@@ -295,7 +295,7 @@ async fn handle_task_plan_and_save(
 
     if let Some(last_msg) = session.messages.last() {
         if last_msg.role == Role::Assistant {
-            let text = crate::provider::extract_text(&last_msg.parts);
+            let text = fi_code_core::provider::extract_text(&last_msg.parts);
             if !text.is_empty() {
                 println!("{}", text);
             }
@@ -313,7 +313,7 @@ async fn run_interactive(
     sessions_dir: &PathBuf,
     config: Arc<RwLock<Config>>,
 ) -> Result<()> {
-    crate::tools::set_task_provider(Arc::new(RwLock::new((*provider).clone())));
+    fi_code_core::tools::set_task_provider(Arc::new(RwLock::new((*provider).clone())));
     let mut session = choose_or_create_session(session_manager, provider.model_name()?).await?;
     let prompt_prefix = format!("{} >> ", &session.id[..session.id.len().min(8)]);
     let mut history = Vec::new();
@@ -379,7 +379,7 @@ async fn try_execute_slash(
     provider: &Arc<Provider>,
     config: &Arc<RwLock<Config>>,
 ) -> bool {
-    let slash_cmd = crate::commands::slash::parse(query);
+    let slash_cmd = fi_code_core::commands::slash::parse(query);
     let is_unknown = matches!(slash_cmd, SlashCommand::Unknown(ref s) if s.is_empty());
     if is_unknown {
         return false;
@@ -395,7 +395,7 @@ async fn try_execute_slash(
 async fn choose_or_create_session(
     manager: &SessionManager,
     model_name: &str,
-) -> Result<crate::session::Session> {
+) -> Result<fi_code_core::session::Session> {
     let sessions = manager.list_sessions()?;
     if sessions.is_empty() {
         return Ok(manager.create_session(model_name)?);

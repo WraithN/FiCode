@@ -102,7 +102,7 @@
 │   ├── core/               # 核心库（fi-code-core）：所有业务逻辑
 │   │   └── src/
 │   │       ├── lib.rs              # 模块聚合与公共导出
-│   │       ├── entry.rs            # 程序入口调度：CLI / TUI / Server 模式路由
+│   │       ├── entry.rs            # 程序入口调度：CLI / TUI / Server 模式路由（已移至 crates/cli/src/entry.rs）
 │   │       ├── agent/              # Agent 核心循环、Prompt 管理、Runner
 │   │       ├── commands/           # Slash 命令（/commit、/models 等）
 │   │       ├── config/             # 配置加载、JSONC 解析、环境变量占位符、热重载

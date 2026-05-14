@@ -24,7 +24,6 @@
 pub mod agent;
 pub mod commands;
 pub mod config;
-pub mod entry;
 pub mod mcp;
 pub mod permission;
 pub mod provider;
