@@ -199,6 +199,7 @@ impl Chat {
                     Part::ToolResult {
                         tool_call_id,
                         content,
+                        ..
                     } => {
                         log_info!(
                             "[Client] Chat SSE ToolResult | tool_use_id={} | content_len={}",
@@ -285,11 +286,53 @@ impl Chat {
             let content_para = Paragraph::new(turn.user_message.clone()).wrap(Wrap { trim: true });
             height += content_para.line_count(width).max(1) as u16;
             height += 1; // 空行
-            for part in &turn.parts {
-                if let Some(renderer) = self.renderer_registry.get(part) {
-                    height += renderer.height(part, width);
-                    height += 1; // Part 间距
+
+            // 按操作组统计高度，与 draw 逻辑保持一致
+            let mut part_idx = 0;
+            let mut turn_tool_count = 0usize;
+
+            while part_idx < turn.parts.len() {
+                let part = &turn.parts[part_idx];
+                let is_tool_sequence = matches!(part, Part::ToolUse { .. });
+
+                if is_tool_sequence {
+                    let seq_start = part_idx;
+                    let mut seq_end = part_idx;
+                    while seq_end < turn.parts.len() {
+                        match &turn.parts[seq_end] {
+                            Part::ToolUse { .. } | Part::ToolResult { .. } | Part::ToolError { .. } => seq_end += 1,
+                            _ => break,
+                        }
+                    }
+                    let tool_count = seq_end - seq_start;
+                    turn_tool_count += tool_count;
+
+                    // 组标题高度（多于1个工具时）
+                    if tool_count > 1 {
+                        height += 1 + 1; // 标题行 + 间距
+                    }
+
+                    // 组内 parts 高度
+                    for j in seq_start..seq_end {
+                        let p = &turn.parts[j];
+                        if let Some(renderer) = self.renderer_registry.get(p) {
+                            height += renderer.height(p, width);
+                            height += 1; // Part 间距
+                        }
+                    }
+                    part_idx = seq_end;
+                } else {
+                    if let Some(renderer) = self.renderer_registry.get(part) {
+                        height += renderer.height(part, width);
+                        height += 1; // Part 间距
+                    }
+                    part_idx += 1;
                 }
+            }
+
+            // 执行摘要行高度
+            if turn_tool_count > 0 {
+                height += 1 + 1; // 摘要行 + 间距
             }
         }
         for msg in &self.messages {
@@ -388,15 +431,138 @@ impl Component for Chat {
             // 空行
             current_y += 1;
 
-            // AI Parts
-            for part in &turn.parts {
-                if let Some(renderer) = self.renderer_registry.get(part) {
-                    let part_height = renderer.height(part, inner.width);
-                    if let Some((rect, skip_lines)) = clip_rect(current_y, part_height) {
-                        renderer.draw(frame, rect, part, theme, skip_lines);
+            // AI Parts — 按操作组渲染，连续的工具调用序列归为一组
+            let mut part_idx = 0;
+            let mut turn_tool_count = 0usize;
+            let mut turn_success_count = 0usize;
+            let mut turn_error_count = 0usize;
+            let mut turn_total_duration = 0u64;
+
+            while part_idx < turn.parts.len() {
+                let part = &turn.parts[part_idx];
+
+                // 检查是否是连续工具调用序列的开始
+                let is_tool_sequence = matches!(part, Part::ToolUse { .. });
+
+                if is_tool_sequence {
+                    // 收集整个工具调用序列（ToolUse + ToolResult + ToolError）
+                    let seq_start = part_idx;
+                    let mut seq_end = part_idx;
+
+                    while seq_end < turn.parts.len() {
+                        match &turn.parts[seq_end] {
+                            Part::ToolUse { .. } | Part::ToolResult { .. } | Part::ToolError { .. } => {
+                                seq_end += 1;
+                            }
+                            _ => break,
+                        }
                     }
-                    current_y += part_height + 1; // +1 for spacing
+
+                    let tool_count = seq_end - seq_start;
+
+                    // 统计该序列的信息
+                    let mut seq_success = 0usize;
+                    let mut seq_error = 0usize;
+                    let mut seq_duration = 0u64;
+                    let mut seq_tool_names: Vec<&str> = Vec::new();
+
+                    for j in seq_start..seq_end {
+                        match &turn.parts[j] {
+                            Part::ToolUse { name, .. } => {
+                                seq_tool_names.push(name);
+                            }
+                            Part::ToolResult { content, duration_ms, .. } => {
+                                if content.contains("Error") || content.contains("error") {
+                                    seq_error += 1;
+                                } else {
+                                    seq_success += 1;
+                                }
+                                if let Some(ms) = duration_ms {
+                                    seq_duration += ms;
+                                }
+                            }
+                            Part::ToolError { .. } => {
+                                seq_error += 1;
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // 累加到 Turn 级别统计
+                    turn_tool_count += seq_tool_names.len();
+                    turn_success_count += seq_success;
+                    turn_error_count += seq_error;
+                    turn_total_duration += seq_duration;
+
+                    // 如果有多于1个工具，渲染操作组标题
+                    if tool_count > 1 {
+                        let group_title = if seq_duration > 0 {
+                            if seq_duration < 1000 {
+                                format!("▶ {} 个工具 | ✅ {} | ❌ {} | ⏱ {}ms", seq_tool_names.len(), seq_success, seq_error, seq_duration)
+                            } else {
+                                format!("▶ {} 个工具 | ✅ {} | ❌ {} | ⏱ {:.1}s", seq_tool_names.len(), seq_success, seq_error, seq_duration as f64 / 1000.0)
+                            }
+                        } else {
+                            format!("▶ {} 个工具 | ✅ {} | ❌ {}", seq_tool_names.len(), seq_success, seq_error)
+                        };
+                        let group_line = Line::from(vec![Span::styled(
+                            group_title,
+                            Style::default().fg(theme.text_muted).add_modifier(Modifier::BOLD),
+                        )]);
+                        let group_para = Paragraph::new(group_line);
+                        let group_h = 1u16;
+                        if let Some((rect, _)) = clip_rect(current_y, group_h) {
+                            frame.render_widget(group_para, rect);
+                        }
+                        current_y += group_h + 1;
+                    }
+
+                    // 渲染序列内所有 parts
+                    for j in seq_start..seq_end {
+                        let p = &turn.parts[j];
+                        if let Some(renderer) = self.renderer_registry.get(p) {
+                            let part_height = renderer.height(p, inner.width);
+                            if let Some((rect, skip_lines)) = clip_rect(current_y, part_height) {
+                                renderer.draw(frame, rect, p, theme, skip_lines);
+                            }
+                            current_y += part_height + 1;
+                        }
+                    }
+
+                    part_idx = seq_end;
+                } else {
+                    // 渲染单个非工具 Part（Text、Reasoning、Image 等）
+                    if let Some(renderer) = self.renderer_registry.get(part) {
+                        let part_height = renderer.height(part, inner.width);
+                        if let Some((rect, skip_lines)) = clip_rect(current_y, part_height) {
+                            renderer.draw(frame, rect, part, theme, skip_lines);
+                        }
+                        current_y += part_height + 1;
+                    }
+                    part_idx += 1;
                 }
+            }
+
+            // 如果该 Turn 有工具调用，在末尾渲染执行摘要行
+            if turn_tool_count > 0 {
+                let summary = if turn_total_duration > 0 {
+                    if turn_total_duration < 1000 {
+                        format!("共 {} 个工具 | ✅ {} | ❌ {} | ⏱ {}ms", turn_tool_count, turn_success_count, turn_error_count, turn_total_duration)
+                    } else {
+                        format!("共 {} 个工具 | ✅ {} | ❌ {} | ⏱ {:.1}s", turn_tool_count, turn_success_count, turn_error_count, turn_total_duration as f64 / 1000.0)
+                    }
+                } else {
+                    format!("共 {} 个工具 | ✅ {} | ❌ {}", turn_tool_count, turn_success_count, turn_error_count)
+                };
+                let summary_line = Line::from(vec![Span::styled(
+                    summary,
+                    Style::default().fg(theme.text_muted),
+                )]);
+                let summary_h = 1u16;
+                if let Some((rect, _)) = clip_rect(current_y, summary_h) {
+                    frame.render_widget(Paragraph::new(summary_line), rect);
+                }
+                current_y += summary_h + 1;
             }
         }
 
@@ -602,6 +768,7 @@ mod tests {
             part: Part::ToolResult {
                 tool_call_id: "tool_1".to_string(),
                 content: "file.txt".to_string(),
+                duration_ms: Some(120),
             },
         });
         assert_eq!(chat.turns[0].parts.len(), 2);

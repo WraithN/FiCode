@@ -173,9 +173,20 @@ impl PartRenderer for ToolCallRenderer {
     fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme, skip_lines: u16) {
         if let Part::ToolUse { name, arguments, .. } = part {
             let (title, body) = format_tool_use(name, arguments);
+            // 根据工具类型分配不同的边框颜色，提升视觉辨识度
+            let border_color = match name.as_str() {
+                "bash" => theme.warning,
+                "write" | "edit" => theme.user,
+                "read" | "read_file" | "grep" | "glob" => theme.brand,
+                "git_status" | "git_diff" | "git_add" | "git_commit" | "git_log" | "git_worktree" | "git" => theme.success,
+                "web_fetch" => theme.accent_hover,
+                "create_task_plan" | "handle_task_plan" => theme.user,
+                "ask_for_question" => theme.warning,
+                _ => theme.border,
+            };
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border))
+                .border_style(Style::default().fg(border_color))
                 .title(
                     Line::from(title)
                         .style(theme.style_primary().add_modifier(Modifier::BOLD)),

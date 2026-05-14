@@ -539,6 +539,7 @@ fn format_tool_results(content_blocks: &[Part], tool_results: &[Part]) -> String
             Part::ToolResult {
                 tool_call_id,
                 content,
+                ..
             } => (tool_call_id, content, false),
             Part::ToolError {
                 tool_call_id,

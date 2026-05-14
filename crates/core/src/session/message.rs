@@ -87,6 +87,9 @@ pub enum Part {
     ToolResult {
         tool_call_id: String,
         content: String,
+        /// 工具执行耗时（毫秒），用于 TUI 展示性能信息
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
     },
     /// 工具执行错误（由 User 角色消息携带，回传给模型）
     ToolError {

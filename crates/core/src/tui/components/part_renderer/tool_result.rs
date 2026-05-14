@@ -93,7 +93,7 @@ pub struct ToolResultRenderer;
 
 impl PartRenderer for ToolResultRenderer {
     fn height(&self, part: &Part, width: u16) -> u16 {
-        if let Part::ToolResult { content, .. } = part {
+        if let Part::ToolResult { content, duration_ms, .. } = part {
             let (_, body) = format_tool_result(content);
             let lines: Vec<&str> = body.lines().collect();
             let mut h = 0u16;
@@ -101,20 +101,32 @@ impl PartRenderer for ToolResultRenderer {
                 let w = line.chars().count() as u16;
                 h += (w / width.max(1)).max(0) + 1;
             }
-            h.max(1) + 2 // +2 for borders
+            // +2 for borders, +1 for duration footer if present
+            let footer = if duration_ms.is_some() { 1 } else { 0 };
+            h.max(1) + 2 + footer
         } else {
             3
         }
     }
 
     fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme, skip_lines: u16) {
-        if let Part::ToolResult { content, .. } = part {
+        if let Part::ToolResult { content, duration_ms, .. } = part {
             let (title, body) = format_tool_result(content);
             let border_color = if content.contains("error") || content.contains("Error") {
                 theme.error
             } else {
                 theme.border
             };
+
+            // 如果有耗时信息，在底部增加一行 footer 显示耗时
+            let footer_text = duration_ms.map(|ms| {
+                if ms < 1000 {
+                    format!("⏱ {}ms", ms)
+                } else {
+                    format!("⏱ {:.1}s", ms as f64 / 1000.0)
+                }
+            });
+
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border_color))
@@ -122,7 +134,14 @@ impl PartRenderer for ToolResultRenderer {
                     Line::from(title)
                         .style(theme.style_primary().add_modifier(Modifier::BOLD)),
                 );
-            let paragraph = Paragraph::new(body)
+
+            let mut text_lines = body.lines().map(|s| s.to_string()).collect::<Vec<_>>();
+            if let Some(ref ft) = footer_text {
+                text_lines.push(format!("\n{}", ft));
+            }
+            let full_body = text_lines.join("\n");
+
+            let paragraph = Paragraph::new(full_body)
                 .wrap(Wrap { trim: true })
                 .style(theme.style_primary())
                 .block(block)

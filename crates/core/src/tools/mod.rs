@@ -914,7 +914,8 @@ async fn execute_single_tool_call(
     id: &str,
     name: &str,
     arguments: &serde_json::Value,
-) -> (String, bool) {
+) -> (String, bool, u64) {
+    let start = std::time::Instant::now();
     // =============================================================================
     // 前置检查：参数 JSON 完整性校验
     // =============================================================================
@@ -940,7 +941,7 @@ async fn execute_single_tool_call(
             name,
             raw
         );
-        return (error_msg, true);
+        return (error_msg, true, start.elapsed().as_millis() as u64);
     }
 
     let input: HashMap<String, serde_json::Value> = match arguments {
@@ -967,7 +968,8 @@ async fn execute_single_tool_call(
                     name,
                     output.len()
                 );
-                return (output, false);
+                let elapsed = start.elapsed().as_millis() as u64;
+                return (output, false, elapsed);
             }
             Err(e) => {
                 log_trace!(
@@ -982,7 +984,7 @@ async fn execute_single_tool_call(
                          请检查工具 '{}' 的参数要求，确保提供了所有必需参数，然后重新调用此工具。",
                         e, name
                     );
-                    return (enhanced_error, true);
+                    return (enhanced_error, true, start.elapsed().as_millis() as u64);
                 }
 
                 last_error = e;
@@ -1006,7 +1008,7 @@ async fn execute_single_tool_call(
         name,
         last_error
     );
-    (format!("Error: {} (已重试 {} 次)", last_error, MAX_TOOL_RETRIES), true)
+    (format!("Error: {} (已重试 {} 次)", last_error, MAX_TOOL_RETRIES), true, start.elapsed().as_millis() as u64)
 }
 
 pub async fn execute_tool_calls(
@@ -1041,7 +1043,7 @@ pub async fn execute_tool_calls(
             Some(async move {
                 log_info!("calling tool: ${}", name);
                 log_debug!("execute_tool_call | name={} | args={}", name, arguments);
-                let (content, is_error) = execute_single_tool_call(&id, &name, &arguments).await;
+                let (content, is_error, duration_ms) = execute_single_tool_call(&id, &name, &arguments).await;
 
                 // Parse JSON content to extract diff if present
                 let (display_content, diff, is_new_file, full_content) =
@@ -1079,6 +1081,7 @@ pub async fn execute_tool_calls(
                             part: Part::ToolResult {
                                 tool_call_id: id.clone(),
                                 content: display_content,
+                                duration_ms: Some(duration_ms),
                             },
                         });
                     }
@@ -1094,6 +1097,7 @@ pub async fn execute_tool_calls(
                     Part::ToolResult {
                         tool_call_id: id,
                         content,
+                        duration_ms: Some(duration_ms),
                     }
                 }
             })
