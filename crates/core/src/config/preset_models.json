@@ -1,0 +1,199 @@
+{
+  "openai": {
+    "provider_type": "open_ai_compatible",
+    "npm": "@ai-sdk/openai",
+    "name": "OpenAI",
+    "options": {
+      "apiKey": "",
+      "baseURL": "https://api.openai.com/v1",
+      "timeout": 300000,
+      "chunkTimeout": 10000
+    },
+    "models": {
+      "gpt-4o": {
+        "name": "GPT-4o",
+        "limit": {
+          "context": 128000,
+          "output": 16384
+        }
+      },
+      "gpt-4o-mini": {
+        "name": "GPT-4o Mini",
+        "limit": {
+          "context": 128000,
+          "output": 16384
+        }
+      },
+      "gpt-4-turbo": {
+        "name": "GPT-4 Turbo",
+        "limit": {
+          "context": 128000,
+          "output": 4096
+        }
+      }
+    }
+  },
+  "glm": {
+    "provider_type": "open_ai_compatible",
+    "npm": "@ai-sdk/openai-compatible",
+    "name": "智谱 GLM",
+    "options": {
+      "apiKey": "",
+      "baseURL": "https://open.bigmodel.cn/api/paas/v4",
+      "timeout": 300000,
+      "chunkTimeout": 10000
+    },
+    "models": {
+      "glm-4": {
+        "name": "GLM-4",
+        "limit": {
+          "context": 128000,
+          "output": 4096
+        }
+      },
+      "glm-4-flash": {
+        "name": "GLM-4 Flash",
+        "limit": {
+          "context": 128000,
+          "output": 4096
+        }
+      },
+      "glm-4v": {
+        "name": "GLM-4V",
+        "limit": {
+          "context": 8192,
+          "output": 4096
+        }
+      }
+    }
+  },
+  "kimi": {
+    "provider_type": "open_ai_compatible",
+    "npm": "@ai-sdk/openai-compatible",
+    "name": "Moonshot",
+    "options": {
+      "apiKey": "",
+      "baseURL": "https://api.moonshot.cn/v1",
+      "timeout": 300000,
+      "chunkTimeout": 10000
+    },
+    "models": {
+      "moonshot-v1-8k": {
+        "name": "Moonshot v1 8K",
+        "limit": {
+          "context": 8192,
+          "output": 4096
+        }
+      },
+      "moonshot-v1-32k": {
+        "name": "Moonshot v1 32K",
+        "limit": {
+          "context": 32768,
+          "output": 4096
+        }
+      },
+      "moonshot-v1-128k": {
+        "name": "Moonshot v1 128K",
+        "limit": {
+          "context": 128000,
+          "output": 4096
+        }
+      }
+    }
+  },
+  "qwen": {
+    "provider_type": "open_ai_compatible",
+    "npm": "@ai-sdk/openai-compatible",
+    "name": "通义千问",
+    "options": {
+      "apiKey": "",
+      "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "timeout": 300000,
+      "chunkTimeout": 10000
+    },
+    "models": {
+      "qwen-turbo": {
+        "name": "Qwen Turbo",
+        "limit": {
+          "context": 128000,
+          "output": 4096
+        }
+      },
+      "qwen-plus": {
+        "name": "Qwen Plus",
+        "limit": {
+          "context": 128000,
+          "output": 4096
+        }
+      },
+      "qwen-max": {
+        "name": "Qwen Max",
+        "limit": {
+          "context": 32000,
+          "output": 8192
+        }
+      }
+    }
+  },
+  "deepseek": {
+    "provider_type": "open_ai_compatible",
+    "npm": "@ai-sdk/openai-compatible",
+    "name": "DeepSeek",
+    "options": {
+      "apiKey": "",
+      "baseURL": "https://api.deepseek.com",
+      "timeout": 300000,
+      "chunkTimeout": 10000
+    },
+    "models": {
+      "deepseek-chat": {
+        "name": "DeepSeek-V3",
+        "limit": {
+          "context": 64000,
+          "output": 8192
+        }
+      },
+      "deepseek-reasoner": {
+        "name": "DeepSeek-R1",
+        "limit": {
+          "context": 64000,
+          "output": 8192
+        }
+      }
+    }
+  },
+  "anthropic": {
+    "provider_type": "anthropic",
+    "npm": "@ai-sdk/anthropic",
+    "name": "Anthropic",
+    "options": {
+      "apiKey": "",
+      "baseURL": "https://api.anthropic.com",
+      "timeout": 300000,
+      "chunkTimeout": 10000
+    },
+    "models": {
+      "claude-3-7-sonnet-20250219": {
+        "name": "Claude 3.7 Sonnet",
+        "limit": {
+          "context": 200000,
+          "output": 8192
+        }
+      },
+      "claude-3-5-sonnet-20241022": {
+        "name": "Claude 3.5 Sonnet",
+        "limit": {
+          "context": 200000,
+          "output": 8192
+        }
+      },
+      "claude-3-opus-20240229": {
+        "name": "Claude 3 Opus",
+        "limit": {
+          "context": 200000,
+          "output": 4096
+        }
+      }
+    }
+  }
+}
