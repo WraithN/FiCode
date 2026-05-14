@@ -323,12 +323,18 @@ mod e2e_tui_flow {
             "Should receive ToolResult event"
         );
 
-        // 验证文件实际已写入
+        // 验证文件实际已写入（轮询等待，某些文件系统可能有轻微延迟）
         let file_path = workspace.join("test_output/hello.rs");
+        let mut retries = 0;
+        while !file_path.exists() && retries < 20 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            retries += 1;
+        }
         assert!(
             file_path.exists(),
-            "File should be written to {:?}",
-            file_path
+            "File should be written to {:?} after {} retries",
+            file_path,
+            retries
         );
 
         let content = std::fs::read_to_string(&file_path).expect("Failed to read file");

@@ -28,10 +28,10 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::registry::CommandMeta;
-use crate::tui::components::Component;
-use crate::tui::event::AppEvent;
-use crate::tui::theme::Theme;
+use fi_code_shared::dto::CommandMeta;
+use crate::components::Component;
+use fi_code_shared::tui_event::AppEvent;
+use crate::theme::Theme;
 use unicode_width::UnicodeWidthStr;
 
 /// 子菜单类型，用于区分不同命令打开的交互式菜单。
@@ -711,11 +711,12 @@ impl Input {
         items: Vec<Line>,
         selected: usize,
     ) {
-        const MAX_VISIBLE_ITEMS: u16 = 8;
+        use fi_code_shared::constants::*;
+        // MAX_VISIBLE_SUBMENU_ITEMS 已从 fi_code_shared::constants 导入
 
         let items_len = items.len();
         let total_items = items_len as u16;
-        let visible_items = total_items.min(MAX_VISIBLE_ITEMS);
+        let visible_items = total_items.min(MAX_VISIBLE_SUBMENU_ITEMS);
         let height = visible_items + 2; // +2 for borders
         let width = input_area.width;
         let x = input_area.x;
@@ -742,7 +743,7 @@ impl Input {
         frame.render_widget(paragraph, area);
 
         // 3. 内容超出可视区域时绘制滚动条
-        if total_items > MAX_VISIBLE_ITEMS {
+        if total_items > MAX_VISIBLE_SUBMENU_ITEMS {
             let scrollbar_area = Rect::new(area.x + area.width - 1, area.y + 1, 1, area.height - 2);
             let mut scrollbar_state = ScrollbarState::new(items_len)
                 .position(selected)

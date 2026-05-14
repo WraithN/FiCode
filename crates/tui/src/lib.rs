@@ -19,15 +19,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// 子模块声明：TUI 由应用主循环、HTTP 客户端、UI 组件、事件、布局、主题六大部分组成
 pub mod app;
 pub mod client;
 pub mod components;
-pub mod event;
 pub mod layout;
 pub mod theme;
 
 use app::TuiApp;
+use fi_code_shared::constants::*;
 use std::sync::{Arc, RwLock};
 
 /// 启动 TUI 模式（包含嵌入式 Server + TUI 界面）。
@@ -39,26 +38,26 @@ use std::sync::{Arc, RwLock};
 /// 4. 等待 Server 就绪后启动 TUI 界面。
 /// 5. TUI 退出后自动关闭 Server。
 pub async fn run_tui_mode(port: Option<u16>) -> anyhow::Result<()> {
-    let config = Arc::new(RwLock::new(crate::config::Config::load()?));
-    let provider = Arc::new(RwLock::new(crate::provider::Provider::new(Arc::clone(&config))?));
+    let config = Arc::new(RwLock::new(fi_code_core::config::Config::load()?));
+    let provider = Arc::new(RwLock::new(fi_code_core::provider::Provider::new(Arc::clone(&config))?));
 
-    let log_broadcaster = Arc::new(crate::utils::log_store::LogBroadcaster::new(1000));
-    crate::utils::log::set_global_log_broadcaster(Arc::clone(&log_broadcaster));
+    let log_broadcaster = Arc::new(fi_code_core::utils::log_store::LogBroadcaster::new(1000));
+    fi_code_core::utils::log::set_global_log_broadcaster(Arc::clone(&log_broadcaster));
 
     // 启动 Server（后台任务）
-    let server = crate::server::Server::new(Arc::clone(&provider), Arc::clone(&config), port)
+    let server = fi_code_core::server::Server::new(Arc::clone(&provider), Arc::clone(&config), port)
         .with_log_broadcaster(log_broadcaster);
     let server_handle = tokio::spawn(async move {
         server.run().await;
     });
 
     // 等待 Server 启动
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(TUI_STARTUP_POLL_INTERVAL_MS)).await;
 
     // 测试模式下不启动 TUI，直接返回，便于 E2E 测试验证后端服务
     if std::env::var("FI_CODE_TEST_MODE").is_ok() {
         // 保持 Server 运行一段时间，让测试可以连接验证
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(TUI_SERVER_STARTUP_WAIT_SECS)).await;
         server_handle.abort();
         return Ok(());
     }

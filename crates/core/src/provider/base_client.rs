@@ -25,55 +25,15 @@ use crate::log_warn;
 use crate::session::message::Part;
 use anyhow::Result;
 use async_trait::async_trait;
+use fi_code_shared::constants::*;
 use std::time::Duration;
 
 // =============================================================================
 // 统一的停止原因枚举：兼容 OpenAI 与 Anthropic 的不同标准
 // =============================================================================
+// 已从 fi-code-shared crate 重新导出，保留此 re-export 维持向后兼容。
 
-/// 模型生成停止的统一抽象。
-/// OpenAI 使用 `finish_reason` 字段（如 `stop`、`tool_calls`），
-/// Anthropic 使用 `stop_reason` 字段（如 `end_turn`、`tool_use`）。
-/// 本枚举将两者映射到同一语义层，方便上层业务统一判断。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FinishReason {
-    /// 自然结束对话回合（OpenAI: `stop`，Anthropic: `end_turn`)
-    Stop,
-    /// 达到最大 token 限制（OpenAI: `length`，Anthropic: `max_tokens`)
-    Length,
-    /// 因为需要调用工具而停止（OpenAI: `tool_calls`，Anthropic: `tool_use`)
-    ToolUse,
-    /// 命中预设的停止序列（Anthropic: `stop_sequence`)
-    StopSequence,
-    /// 内容被安全过滤拦截（OpenAI: `content_filter`)
-    ContentFilter,
-    /// 其他未知或未标准化的原因
-    Other(String),
-}
-
-impl FinishReason {
-    /// 从 OpenAI 的 `finish_reason` 字符串转换为统一枚举
-    pub fn from_openai(reason: &str) -> Self {
-        match reason {
-            "stop" => FinishReason::Stop,
-            "length" => FinishReason::Length,
-            "tool_calls" => FinishReason::ToolUse,
-            "content_filter" => FinishReason::ContentFilter,
-            other => FinishReason::Other(other.to_string()),
-        }
-    }
-
-    /// 从 Anthropic 的 `stop_reason` 字符串转换为统一枚举
-    pub fn from_anthropic(reason: &str) -> Self {
-        match reason {
-            "end_turn" => FinishReason::Stop,
-            "max_tokens" => FinishReason::Length,
-            "tool_use" => FinishReason::ToolUse,
-            "stop_sequence" => FinishReason::StopSequence,
-            other => FinishReason::Other(other.to_string()),
-        }
-    }
-}
+pub use fi_code_shared::enums::FinishReason;
 
 // =============================================================================
 // 流式回调单元：客户端通过闭包将解析后的消息片段实时回传上层
@@ -156,9 +116,9 @@ pub struct RetryConfig {
 impl Default for RetryConfig {
     fn default() -> Self {
         Self {
-            max_retries: 3,
-            base_delay: Duration::from_millis(500),
-            max_delay: Duration::from_secs(30),
+            max_retries: MAX_TOOL_RETRIES,
+            base_delay: Duration::from_millis(RETRY_BASE_DELAY_MS),
+            max_delay: Duration::from_secs(RETRY_MAX_DELAY_SECS),
         }
     }
 }
@@ -177,8 +137,8 @@ fn is_retryable_error(err: &reqwest::Error) -> bool {
 /// 使用 Full Jitter 策略：在 `[min_delay, min(base*2^attempt, max_delay))` 内随机取值。
 /// 设置最小延迟 100ms，避免网络错误时几乎无间隔的无效重试。
 fn compute_backoff(attempt: u32, base: Duration, max: Duration) -> Duration {
-    let min_delay = Duration::from_millis(100);
-    let exp = std::cmp::min(attempt, 6); // 防止指数溢出，最大 2^6 = 64
+    let min_delay = Duration::from_millis(RETRY_MIN_DELAY_MS);
+    let exp = std::cmp::min(attempt, RETRY_MAX_EXPONENT); // 防止指数溢出
     let delay = base.saturating_mul(2_u32.pow(exp));
     let capped = std::cmp::min(delay, max);
 

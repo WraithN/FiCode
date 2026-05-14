@@ -86,7 +86,7 @@ match chunk.content {
 
 ### 3. TUI 层：处理增量式 ToolUse 更新
 
-**文件：** `crates/core/src/tui/components/chat.rs`
+**文件：** `crates/tui/src/components/chat.rs`
 
 当前 `handle_sse_event` 对 `SseEvent::Part { Part::ToolUse }` 的处理是直接 `push(part.clone())`。这会导致同一个工具调用被重复 push 多次。
 
@@ -121,7 +121,7 @@ SseEvent::Part { part } => {
 
 #### 4.1 ToolCallRenderer：人类可读摘要
 
-**文件：** `crates/core/src/tui/components/part_renderer/tool_call.rs`
+**文件：** `crates/tui/src/components/part_renderer/tool_call.rs`
 
 根据 `name` 解析 `arguments` JSON，生成摘要：
 
@@ -142,7 +142,7 @@ SseEvent::Part { part } => {
 
 #### 4.2 ToolResultRenderer：格式化结果
 
-**文件：** `crates/core/src/tui/components/part_renderer/tool_result.rs`
+**文件：** `crates/tui/src/components/part_renderer/tool_result.rs`
 
 - 如果 `content` 是有效的 JSON，尝试提取关键字段（如 `path`、`success`、`output`、`error`）进行格式化展示
 - 如果 `content` 是命令输出（多行文本），直接展示（保持现有行为）
@@ -150,7 +150,7 @@ SseEvent::Part { part } => {
 
 ### 5. ThinkingRenderer 展示优化
 
-**文件：** `crates/core/src/tui/components/part_renderer/thinking.rs`
+**文件：** `crates/tui/src/components/part_renderer/thinking.rs`
 
 - 已有 `ThinkingRenderer`，展示带边框的灰色 "▼ Thinking" 卡片
 - 当 thinking 过程结束时（收到第一个非空 `content` delta 时），空的 `Reasoning` Part 会被 `handle_sse_event` 移除

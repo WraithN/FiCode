@@ -1233,6 +1233,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "fi-code-core",
+ "fi-code-tui",
  "tokio",
 ]
 
@@ -1247,10 +1248,10 @@ dependencies = [
  "chrono",
  "clap",
  "colored",
- "crossterm",
  "directories",
  "dirs 5.0.1",
  "dotenvy",
+ "fi-code-shared",
  "futures",
  "glob",
  "html2md",
@@ -1259,8 +1260,6 @@ dependencies = [
  "notify",
  "once_cell",
  "rand 0.8.5",
- "ratatui",
- "ratatui-braille-bar",
  "regex",
  "reqwest 0.13.2",
  "serde",
@@ -1307,6 +1306,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "ulid",
 ]
 
 [[package]]
@@ -1329,9 +1329,18 @@ name = "fi-code-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
+ "crossterm",
  "fi-code-core",
+ "fi-code-shared",
+ "futures",
+ "ratatui",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
  "tokio",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -3797,16 +3806,6 @@ dependencies = [
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width 0.2.0",
-]
-
-[[package]]
-name = "ratatui-braille-bar"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4102f73f09a91cd9f05d82cf82337ff5240cdaf582975ed7543d519651af309e"
-dependencies = [
- "rand 0.9.3",
- "ratatui",
 ]
 
 [[package]]

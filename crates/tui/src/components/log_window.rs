@@ -28,9 +28,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::tui::components::Component;
-use crate::tui::event::{LogLevel, LogLine};
-use crate::tui::theme::Theme;
+use crate::components::Component;
+use fi_code_shared::tui_event::{LogLevel, LogLine};
+use crate::theme::Theme;
 
 /// 日志浮窗组件，用于实时显示应用运行日志。
 pub struct LogWindow {
@@ -74,9 +74,10 @@ impl LogWindow {
 
     pub fn append(&mut self, line: LogLine) {
         self.lines.push(line);
-        const MAX_LINES: usize = 5000;
-        if self.lines.len() > MAX_LINES {
-            self.lines.drain(..self.lines.len() - MAX_LINES);
+        use fi_code_shared::constants::*;
+        // MAX_LOG_LINES 已从 fi_code_shared::constants 导入
+        if self.lines.len() > MAX_LOG_LINES {
+            self.lines.drain(..self.lines.len() - MAX_LOG_LINES);
         }
         if self.auto_scroll {
             self.scroll_offset = 0;
@@ -186,7 +187,7 @@ impl Component for LogWindow {
         }
     }
 
-    fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<crate::tui::event::AppEvent> {
+    fn handle_event(&mut self, event: &Event, _focus: bool) -> Option<fi_code_shared::tui_event::AppEvent> {
         if !self.visible {
             return None;
         }

@@ -28,7 +28,7 @@ use crate::server::transport::sse::{SseEvent, TaskProgressItem};
 use crate::tools::get_event_tx;
 use crate::tools::subagent_tool_schema;
 use crate::tools::task::{Task, TaskManager, TaskPlan};
-use crate::tui::event::AppEvent;
+use crate::tui_event::AppEvent;
 
 /// 执行 handle_task_plan 工具的异步逻辑
 pub async fn execute_handle_task_plan(
@@ -99,7 +99,7 @@ pub async fn execute_handle_task_plan(
                     .map(|t| TaskProgressItem {
                         id: t.id.clone(),
                         name: t.name.clone(),
-                        status: t.status.clone(),
+                        status: t.status.to_string(),
                     })
                     .collect();
                 let _ = tx.try_send(AppEvent::SseEvent(SseEvent::TaskProgress {

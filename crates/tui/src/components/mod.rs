@@ -22,8 +22,8 @@
 use crossterm::event::Event;
 use ratatui::{layout::Rect, Frame};
 
-use crate::tui::event::AppEvent;
-use crate::tui::theme::Theme;
+use fi_code_shared::tui_event::AppEvent;
+use crate::theme::Theme;
 
 pub mod card_widget;
 pub mod chat;

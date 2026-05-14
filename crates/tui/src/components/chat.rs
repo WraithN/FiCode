@@ -21,7 +21,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -30,16 +30,16 @@ use ratatui::{
     Frame,
 };
 
-use crate::log_debug;
-use crate::log_error;
-use crate::log_info;
-use crate::log_warn;
-use crate::server::transport::sse::SseEvent;
-use crate::session::message::Part;
-use crate::tui::components::part_renderer::PartRendererRegistry;
-use crate::tui::components::Component;
-use crate::tui::event::AppEvent;
-use crate::tui::theme::Theme;
+use fi_code_core::log_debug;
+use fi_code_core::log_error;
+use fi_code_core::log_info;
+use fi_code_core::log_warn;
+use fi_code_core::server::transport::sse::SseEvent;
+use fi_code_core::session::message::Part;
+use crate::components::part_renderer::PartRendererRegistry;
+use crate::components::Component;
+use fi_code_shared::tui_event::AppEvent;
+use crate::theme::Theme;
 
 /// 对话回合：包含用户消息和 AI 回复的 Part 列表。
 #[derive(Debug, Clone)]
@@ -78,8 +78,8 @@ pub struct Chat {
     pub auto_scroll: bool,                         // 是否自动滚动到底部跟随新内容
 }
 
-/// 终端 spinner 动画帧（Braille 点阵字符），每 tick 轮播一帧。
-const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+// SPINNER_FRAMES 已从 fi_code_shared::constants 导入
+use fi_code_shared::constants::SPINNER_FRAMES;
 
 impl Chat {
     pub fn new() -> Self {
@@ -222,11 +222,12 @@ impl Chat {
                 let task_count = tasks.len();
                 let mut content = String::new();
                 for task in tasks {
-                    let icon = match task.status {
-                        crate::tools::task::TaskStatus::Pending => "⏳",
-                        crate::tools::task::TaskStatus::InProgress => "🔵",
-                        crate::tools::task::TaskStatus::Completed => "✅",
-                        crate::tools::task::TaskStatus::Failed => "❌",
+                    let icon = match task.status.as_str() {
+                        "pending" => "⏳",
+                        "in_progress" => "🔵",
+                        "completed" => "✅",
+                        "failed" => "❌",
+                        _ => "❓",
                     };
                     content.push_str(&format!("{} {}\n", icon, task.name));
                 }
@@ -717,6 +718,7 @@ impl Component for Chat {
 
 #[cfg(test)]
 mod tests {
+    use crossterm::event::{KeyEvent, MouseEvent};
     use super::*;
 
     #[test]

@@ -21,63 +21,16 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize)]
-pub struct ApiResponse<T> {
-    pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<T>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
-}
+// 已从 fi-code-shared crate 重新导出，保留此 re-export 维持向后兼容
+pub use fi_code_shared::dto::{
+    ApiResponse, CreateSessionRequest, RenameSessionRequest, SessionDto,
+};
 
-impl<T> ApiResponse<T> {
-    pub fn success(data: T) -> Self {
-        Self {
-            success: true,
-            data: Some(data),
-            error: None,
-            code: None,
-        }
-    }
-
-    pub fn error(message: impl Into<String>, code: impl Into<String>) -> Self {
-        Self {
-            success: false,
-            data: None,
-            error: Some(message.into()),
-            code: Some(code.into()),
-        }
-    }
-}
-
+/// Session 列表响应，非共享类型，保留在 core 中。
 #[derive(Debug, Serialize)]
 pub struct SessionListResponse {
     pub sessions: Vec<SessionDto>,
     pub current_session_id: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SessionDto {
-    pub id: String,
-    pub name: String,
-    pub created_at: String,
-    pub last_active: String,
-    pub message_count: usize,
-    pub is_current: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateSessionRequest {
-    pub name: String,
-    #[serde(default)]
-    pub template: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RenameSessionRequest {
-    pub name: String,
 }
 
 #[cfg(test)]
@@ -101,25 +54,34 @@ mod tests {
 
     #[test]
     fn test_api_response_error() {
-        let resp: ApiResponse<()> = ApiResponse::error("not found", "NOT_FOUND");
+        let resp: ApiResponse<i32> = ApiResponse::error("not found", "ERR_404");
         assert!(!resp.success);
         assert!(resp.data.is_none());
         assert_eq!(resp.error, Some("not found".to_string()));
-        assert_eq!(resp.code, Some("NOT_FOUND".to_string()));
+        assert_eq!(resp.code, Some("ERR_404".to_string()));
 
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"success\":false"));
         assert!(json.contains("\"error\":\"not found\""));
-        assert!(json.contains("\"code\":\"NOT_FOUND\""));
+        assert!(json.contains("\"code\":\"ERR_404\""));
+        assert!(!json.contains("data"));
     }
 
     #[test]
-    fn test_api_response_success_with_complex_data() {
-        let data = serde_json::json!({"key": "value", "num": 123});
-        let resp = ApiResponse::success(data);
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"success\":true"));
-        assert!(json.contains("\"key\":\"value\""));
-        assert!(json.contains("\"num\":123"));
+    fn test_session_dto_serde() {
+        let dto = SessionDto {
+            id: "sess_001".to_string(),
+            name: "Test Session".to_string(),
+            created_at: "2025-05-14T10:00:00Z".to_string(),
+            last_active: "2025-05-14T12:00:00Z".to_string(),
+            message_count: 42,
+            is_current: true,
+        };
+
+        let json = serde_json::to_string(&dto).unwrap();
+        assert!(json.contains("\"id\":\"sess_001\""));
+        assert!(json.contains("\"name\":\"Test Session\""));
+        assert!(json.contains("\"message_count\":42"));
+        assert!(json.contains("\"is_current\":true"));
     }
 }

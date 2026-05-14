@@ -26,7 +26,7 @@
 
 ### 1. FocusArea 扩展
 
-在 `crates/core/src/tui/event.rs` 的 `FocusArea` 枚举中添加 `LogWindow` 变体：
+在 `crates/tui/src/event.rs` 的 `FocusArea` 枚举中添加 `LogWindow` 变体：
 
 ```rust
 pub enum FocusArea {
@@ -40,7 +40,7 @@ pub enum FocusArea {
 
 ### 2. Hover 焦点切换
 
-在 `crates/core/src/tui/app.rs` 的 `route_event` 中，对 `MouseEventKind::Moved` 执行与 `Down` 相同的 `hit_test` 逻辑：
+在 `crates/tui/src/app.rs` 的 `route_event` 中，对 `MouseEventKind::Moved` 执行与 `Down` 相同的 `hit_test` 逻辑：
 
 ```rust
 Event::Mouse(mouse) => {
@@ -155,11 +155,11 @@ if self.log_window.is_visible() {
 
 | 文件 | 改动类型 | 说明 |
 |------|----------|------|
-| `crates/core/src/tui/event.rs` | 修改 | `FocusArea` 添加 `LogWindow` |
-| `crates/core/src/tui/app.rs` | 修改 | hover 切焦点、LogWindow hit_test、cycle_focus、dispatch_event |
-| `crates/core/src/tui/components/left_drawer.rs` | 修改 | 添加 scroll_offset、scrollbar、滚轮处理 |
-| `crates/core/src/tui/components/right_drawer.rs` | 修改 | 添加 scroll_offset、scrollbar、滚轮处理 |
-| `crates/core/src/tui/components/log_window.rs` | 修改 | 添加 scrollbar、滚轮处理 |
+| `crates/tui/src/event.rs` | 修改 | `FocusArea` 添加 `LogWindow` |
+| `crates/tui/src/app.rs` | 修改 | hover 切焦点、LogWindow hit_test、cycle_focus、dispatch_event |
+| `crates/tui/src/components/left_drawer.rs` | 修改 | 添加 scroll_offset、scrollbar、滚轮处理 |
+| `crates/tui/src/components/right_drawer.rs` | 修改 | 添加 scroll_offset、scrollbar、滚轮处理 |
+| `crates/tui/src/components/log_window.rs` | 修改 | 添加 scrollbar、滚轮处理 |
 
 ---
 

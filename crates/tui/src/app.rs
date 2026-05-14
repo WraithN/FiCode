@@ -27,14 +27,15 @@ use ratatui::layout::Rect;
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
-use crate::commands::registry::CommandMeta;
-use crate::log_debug;
-use crate::log_error;
-use crate::log_info;
-use crate::log_trace;
-use crate::log_warn;
-use crate::server::transport::sse::SseEvent;
-use crate::tui::components::{
+use fi_code_shared::dto::CommandMeta;
+use fi_code_core::log_debug;
+use fi_code_core::log_error;
+use fi_code_core::log_info;
+use fi_code_core::log_trace;
+use fi_code_core::log_warn;
+use fi_code_shared::constants::*;
+use fi_code_core::server::transport::sse::SseEvent;
+use crate::components::{
     chat::Chat,
     input::Input,
     left_drawer::LeftDrawer,
@@ -44,9 +45,9 @@ use crate::tui::components::{
     status_bar::StatusBar,
     Component,
 };
-use crate::tui::event::{AppEvent, CardAction, FocusArea, ModelItem, ProviderItem, QuestionAnswer};
-use crate::tui::layout::{LayoutManager, PanelState};
-use crate::tui::theme::Theme;
+use fi_code_shared::tui_event::{AppEvent, FocusArea, LogLevel, LogLine, ProviderItem, QuestionAnswer};
+use crate::layout::{LayoutManager, PanelState};
+use crate::theme::Theme;
 
 use super::client::TuiClient;
 
@@ -132,7 +133,7 @@ pub struct TuiApp {
     theme: Arc<Theme>,
     themes: Vec<Arc<Theme>>,
     theme_index: usize,
-    theme_presets: Vec<crate::tui::theme::ThemePreset>,
+    theme_presets: Vec<fi_code_shared::dto::ThemePreset>,
     preview_theme_backup: Option<(usize, Arc<Theme>)>,
 
     // === 各区域 UI 组件 ===
@@ -185,7 +186,7 @@ impl TuiApp {
                 }
             }
         });
-        let presets = crate::tui::theme::ThemePreset::all_presets();
+        let presets = fi_code_shared::dto::ThemePreset::all_presets();
         let themes: Vec<Arc<Theme>> = presets
             .iter()
             .map(|p| Arc::new(Theme::from_preset(p)))
@@ -194,7 +195,7 @@ impl TuiApp {
         let (term_w, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
 
         // 设置全局事件发送器，供工具调用时发送事件
-        crate::tools::set_event_tx(event_tx.clone());
+        fi_code_core::tools::set_event_tx(event_tx.clone());
 
         log_info!(
             "[Client] TuiApp initialized | theme={} | size={}x{}",
@@ -276,7 +277,7 @@ impl TuiApp {
             }
         }
 
-        let mut interval = tokio::time::interval(Duration::from_millis(40));
+        let mut interval = tokio::time::interval(Duration::from_millis(TUI_RENDER_INTERVAL_MS));
 
         while !self.should_quit {
             // 只有状态发生变化（dirty）时才执行重绘，避免无意义的 CPU 消耗。
@@ -496,6 +497,7 @@ impl TuiApp {
     }
 
     /// 切换到下一套配色主题（循环）。
+    #[allow(dead_code)]
     fn next_theme(&mut self) {
         self.theme_index = (self.theme_index + 1) % self.themes.len();
         self.theme = self.themes[self.theme_index].clone();
@@ -838,7 +840,7 @@ impl TuiApp {
             }
             AppEvent::QuestionAnswered { ref answer } => {
                 // 发送答案到工具通道
-                if let Some(tx) = crate::tools::QUESTION_CHANNEL.lock().unwrap().take() {
+                if let Some(tx) = fi_code_core::tools::QUESTION_CHANNEL.lock().unwrap().take() {
                     let _ = tx.send(answer.clone());
                 }
 
@@ -903,7 +905,7 @@ impl TuiApp {
                     self.input.set_session_id(Some(session_id.clone()));
                 }
                 if let SseEvent::Part {
-                    part: crate::session::message::Part::Usage {
+                    part: fi_code_core::session::message::Part::Usage {
                         input_tokens,
                         output_tokens,
                         latency_ms,
@@ -942,17 +944,17 @@ impl TuiApp {
             // 切换左侧文件抽屉：打开时自动将焦点移入，并异步请求当前目录文件树
             AppEvent::ToggleLeftDrawer => {
                 self.layout.toggle_left();
-                if self.layout.panel == crate::tui::layout::PanelState::LeftOpen {
+                if self.layout.panel == crate::layout::PanelState::LeftOpen {
                     self.focus = FocusArea::LeftDrawer;
                     let client = self.client.clone();
                     let tx = self.event_tx.clone();
                     tokio::spawn(async move {
                         if let Ok(file_tree) = client.get_file_tree(".").await {
-                            let files: Vec<crate::tui::components::left_drawer::FileNode> =
+                            let files: Vec<fi_code_shared::dto::FileNode> =
                                 file_tree
                                     .entries
                                     .into_iter()
-                                    .map(|e| crate::tui::components::left_drawer::FileNode {
+                                    .map(|e| fi_code_shared::dto::FileNode {
                                         path: e.path,
                                         name: e.name,
                                         is_dir: e.is_dir,
@@ -1024,7 +1026,7 @@ impl TuiApp {
                         })
                         .collect();
                     self.input
-                        .enter_submenu_mode(crate::tui::components::input::SubmenuKind::ModelList);
+                        .enter_submenu_mode(crate::components::input::SubmenuKind::ModelList);
                     self.input.set_submenu_context(provider_key.clone());
                     self.input.set_submenu_items(items);
                     self.focus = FocusArea::Input;
@@ -1057,12 +1059,6 @@ impl TuiApp {
                             }
                         }
                     });
-                }
-            }
-            AppEvent::SelectTheme(index) => {
-                if index < self.themes.len() {
-                    self.theme_index = index;
-                    self.theme = self.themes[index].clone();
                 }
             }
             // 切换会话：异步调用后端接口，完成后发送 ChatComplete 事件通知主循环
@@ -1147,7 +1143,7 @@ impl TuiApp {
             }
             AppEvent::SelectSkill(ref name) => {
                 self.input.close_submenu();
-                match crate::skills::load_skill_content(name) {
+                match fi_code_core::skills::load_skill_content(name) {
                     Ok(content) => {
                         self.chat.add_system_message(&format!(
                             "Skill '{}' loaded.\n\n{}",
@@ -1222,12 +1218,6 @@ impl TuiApp {
         self.log_window.update(&event);
     }
 
-    /// 启动聊天 SSE 流。
-    ///
-    /// 为了避免阻塞主循环，该函数会在新 tokio 任务中：
-    /// 1. 调用 `client.chat` 建立 SSE 连接。
-    /// 2. 使用内部 channel (`sse_tx`/`sse_rx`) 将收到的每个 SSE 事件转发到主事件通道。
-    /// 3. 流结束后发送 `ChatComplete`；若出错则发送 `SseEvent::Error`。
     async fn start_chat_stream(&mut self, message: String) {
         log_info!(
             "[Client] start_chat_stream | session_id={:?} | message_len={}",
@@ -1304,15 +1294,15 @@ impl TuiApp {
         tokio::spawn(async move {
             match client.get_logs(200).await {
                 Ok(entries) => {
-                    let lines: Vec<crate::tui::event::LogLine> = entries
+                    let lines: Vec<LogLine> = entries
                         .into_iter()
-                        .map(|e| crate::tui::event::LogLine {
+                        .map(|e| LogLine {
                             timestamp: e.timestamp,
                             level: match e.level.as_str() {
-                                "DEBUG" => crate::tui::event::LogLevel::Debug,
-                                "TRACE" => crate::tui::event::LogLevel::Trace,
-                                "ERROR" => crate::tui::event::LogLevel::Error,
-                                _ => crate::tui::event::LogLevel::Info,
+                                "DEBUG" => LogLevel::Debug,
+                                "TRACE" => LogLevel::Trace,
+                                "ERROR" => LogLevel::Error,
+                                _ => LogLevel::Info,
                             },
                             module: e.module,
                             message: e.message,
@@ -1337,7 +1327,6 @@ impl TuiApp {
         });
     }
 
-    /// 异步加载主题列表。
     fn spawn_load_themes(&self) {
         let client = self.client.clone();
         let tx = self.event_tx.clone();
@@ -1355,7 +1344,7 @@ impl TuiApp {
     /// /theme 命令特殊处理：直接进入主题子菜单。
     fn handle_execute_slash_command(&mut self, name: &str, _args_hint: &Option<String>) {
         if name == "skills" {
-            let registry = crate::skills::get_registry();
+            let registry = fi_code_core::skills::get_registry();
             if registry.entries.is_empty() {
                 let tx = self.event_tx.clone();
                 tokio::spawn(async move {
@@ -1366,7 +1355,7 @@ impl TuiApp {
                 return;
             }
             self.input
-                .enter_submenu_mode(crate::tui::components::input::SubmenuKind::Skill);
+                .enter_submenu_mode(crate::components::input::SubmenuKind::Skill);
             let items: Vec<(String, String, String)> = registry
                 .entries
                 .iter()
@@ -1384,7 +1373,7 @@ impl TuiApp {
 
         if name == "themes" {
             self.input
-                .enter_submenu_mode(crate::tui::components::input::SubmenuKind::Theme);
+                .enter_submenu_mode(crate::components::input::SubmenuKind::Theme);
             let items: Vec<(String, String, String)> = self
                 .theme_presets
                 .iter()
@@ -1397,7 +1386,7 @@ impl TuiApp {
 
         if name == "models" {
             self.input
-                .enter_submenu_mode(crate::tui::components::input::SubmenuKind::ModelProvider);
+                .enter_submenu_mode(crate::components::input::SubmenuKind::ModelProvider);
             let client = self.client.clone();
             let tx = self.event_tx.clone();
             tokio::spawn(async move {
@@ -1431,7 +1420,7 @@ impl TuiApp {
             tokio::spawn(async move {
                 match client.execute_command(&cmd_name, None, session_id).await {
                     Ok(output) => {
-                        if !matches!(output.r#type, crate::commands::registry::OutputType::Silent) {
+                        if !matches!(output.r#type, fi_code_core::commands::registry::OutputType::Silent) {
                             let _ = tx.send(AppEvent::ShowSystemMessage(output.message)).await;
                         }
                         if let Some(meta) = output.metadata {
@@ -1454,7 +1443,7 @@ impl TuiApp {
 }
 
 /// 解析后端 /api/models 返回的 JSON，转换为 ProviderItem 列表。
-fn parse_model_list(data: &serde_json::Value) -> Vec<crate::tui::event::ProviderItem> {
+fn parse_model_list(data: &serde_json::Value) -> Vec<fi_code_shared::tui_event::ProviderItem> {
     let mut providers = Vec::new();
     let Some(arr) = data.get("providers").and_then(|v| v.as_array()) else {
         return providers;
@@ -1497,7 +1486,7 @@ fn parse_model_list(data: &serde_json::Value) -> Vec<crate::tui::event::Provider
                     .and_then(|l| l.get("output"))
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as usize;
-                models.push(crate::tui::event::ModelItem {
+                models.push(fi_code_shared::tui_event::ModelItem {
                     key: m_key,
                     name: m_name,
                     context,
@@ -1505,7 +1494,7 @@ fn parse_model_list(data: &serde_json::Value) -> Vec<crate::tui::event::Provider
                 });
             }
         }
-        providers.push(crate::tui::event::ProviderItem {
+        providers.push(fi_code_shared::tui_event::ProviderItem {
             key,
             name,
             provider_type,
@@ -1514,7 +1503,6 @@ fn parse_model_list(data: &serde_json::Value) -> Vec<crate::tui::event::Provider
     }
     providers
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1523,7 +1511,7 @@ mod tests {
     fn create_test_app() -> TuiApp {
         let (event_tx, event_rx) = mpsc::channel(100);
         let (_, crossterm_rx) = mpsc::channel(100);
-        let presets = crate::tui::theme::ThemePreset::all_presets();
+        let presets = fi_code_shared::dto::ThemePreset::all_presets();
         let themes: Vec<Arc<Theme>> = presets
             .iter()
             .map(|p| Arc::new(Theme::from_preset(p)))

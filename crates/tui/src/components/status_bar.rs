@@ -28,9 +28,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::tui::components::Component;
-use crate::tui::event::AppEvent;
-use crate::tui::theme::Theme;
+use crate::components::Component;
+use fi_code_shared::tui_event::AppEvent;
+use crate::theme::Theme;
 
 /// 进度条动画状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,12 +59,8 @@ pub struct StatusBar {
     latency_ms: u32,    // 上次请求延迟（毫秒）
 }
 
-/// 旧进度条总格数（保留用于向后兼容）。
-const PROGRESS_BAR_WIDTH: usize = 20;
-/// CTX 进度条总格数。
-const CTX_BAR_WIDTH: usize = 10;
-/// 默认上下文窗口上限。
-const DEFAULT_CTX_LIMIT: usize = 128_000;
+use fi_code_shared::constants::*;
+// PROGRESS_BAR_WIDTH, CTX_BAR_WIDTH, DEFAULT_CTX_LIMIT 已从 fi_code_shared::constants 导入
 
 impl StatusBar {
     pub fn new() -> Self {
@@ -161,6 +157,7 @@ impl StatusBar {
     }
 
     /// 渲染旧版 20 格进度条字符串（保留用于向后兼容）。
+    #[allow(dead_code)]
     fn render_progress_bar(&self) -> String {
         let filled = self.current_filled();
         let empty = PROGRESS_BAR_WIDTH - filled;
@@ -203,6 +200,7 @@ impl StatusBar {
     }
 
     /// 格式化耗时显示（保留用于向后兼容）。
+    #[allow(dead_code)]
     fn format_elapsed(&self) -> String {
         if self.elapsed_secs == 0 {
             String::new()
@@ -562,8 +560,8 @@ mod tests {
         assert!(text.contains("TOK:"), "should show TOK");
         assert!(text.contains("↑24k"), "should show input tokens");
         assert!(text.contains("↓18k"), "should show output tokens");
-        assert!(text.contains("LAT:2.4s"), "should show latency");
-        assert!(text.contains("MDL:kimi-k2.5"), "should show full model name");
+        assert!(text.contains("LAT: 2.4s"), "should show latency");
+        assert!(text.contains("MDL: kimi-k2.5"), "should show full model name");
     }
 
     #[test]

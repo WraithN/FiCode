@@ -19,20 +19,5 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/// 共享常量：项目中的魔法值统一集中管理
-pub mod constants;
-
-/// 共享 DTO（Data Transfer Objects）：前后端 API 传输用的结构体
-pub mod dto;
-
-/// 共享枚举：前后端及跨模块共享的基础枚举类型
-pub mod enums;
-
-/// TUI 事件类型：被 core 和 tui crate 共享的事件枚举与相关结构体
-pub mod tui_event;
-
-// 重新导出常用类型，减少外部调用路径层级
-pub use constants::*;
-pub use dto::*;
-pub use enums::*;
-pub use tui_event::*;
+// 重新导出 shared crate 中的 ThemePreset，供 core 内部模块使用
+pub use fi_code_shared::dto::ThemePreset;

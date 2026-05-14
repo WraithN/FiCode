@@ -19,13 +19,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use fi_code_shared::constants::*;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use crate::agent::LoopState;
 
-const SESSION_TIMEOUT: Duration = Duration::from_secs(30 * 60); // 30 分钟
+const SESSION_TIMEOUT: Duration = Duration::from_secs(SESSION_TIMEOUT_MINUTES * 60);
 
 /// HTTP 会话管理器，内存中保存 session_id → LoopState 的映射
 pub struct HttpSessionManager {

@@ -19,8 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::server::transport::sse::SseEvent;
-use crate::tui::components::left_drawer::FileNode;
+use crate::dto::{CommandMeta, FileNode, SseEvent, ThemePreset};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,10 +134,10 @@ pub enum AppEvent {
         args_hint: Option<String>,
     },
     LoadCommands,
-    SetCommands(Vec<crate::commands::registry::CommandMeta>),
+    SetCommands(Vec<CommandMeta>),
     ShowSystemMessage(String),
     LoadThemes,
-    SetThemes(Vec<crate::tui::theme::ThemePreset>),
+    SetThemes(Vec<ThemePreset>),
     ToggleLogWindow,
     SetLogHistory(Vec<LogLine>),
     AppendLog(LogLine),

@@ -35,5 +35,5 @@ struct TuiArgs {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = TuiArgs::parse();
-    fi_code_core::tui::run_tui_mode(args.port).await
+    fi_code_tui::run_tui_mode(args.port).await
 }

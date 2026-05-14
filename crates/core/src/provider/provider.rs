@@ -87,11 +87,24 @@ impl Default for Provider {
 
 impl Provider {
     pub fn new(config: Arc<RwLock<Config>>) -> Result<Self> {
+        // 2. 先读取配置以获取超时设置（环境变量路径也需要使用相同的超时）
+        let timeout_ms = config
+            .read()
+            .map(|cfg| {
+                cfg.provider
+                    .values()
+                    .next()
+                    .map(|p| p.options.timeout)
+                    .unwrap_or(300_000)
+            })
+            .unwrap_or(300_000);
+
         // 复用同一个 reqwest::Client，避免每次请求都重新建立 TCP/TLS 连接
         // 配置连接和请求超时，避免网络卡顿导致无限等待
+        // 使用配置中的 timeout（默认 300 秒），而不是硬编码的 180 秒
         let http_client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_secs(180))
+            .timeout(Duration::from_millis(timeout_ms))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 

@@ -41,6 +41,8 @@ use crate::log_debug;
 use crate::log_error;
 use crate::log_info;
 use crate::log_trace;
+use crate::log_warn;
+use fi_code_shared::constants::*;
 use crate::provider::base_client::{AIClient, ChunkContent, FinishReason, TokenUsage};
 use crate::provider::execute_tool_calls;
 use crate::provider::Chunk;
@@ -295,7 +297,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     );
 
     // 消息历史截断：超过 30 条时只保留最近 30 条，防止长对话导致 Prompt 无限膨胀
-    const MAX_CONTEXT_MESSAGES: usize = 30;
+    // MAX_CONTEXT_MESSAGES 已从 fi_code_shared::constants 导入
     let messages_for_llm: &[Message] = if state.messages.len() > MAX_CONTEXT_MESSAGES {
         let start = state.messages.len().saturating_sub(MAX_CONTEXT_MESSAGES);
         &state.messages[start..]
@@ -591,13 +593,65 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
     on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Result<()> {
-    const MAX_TURNS: usize = 25;
+    let mut retry_count = 0u32;
+
     log_info!(
         "[Agent] agent_loop start | messages={} | turn_count={}",
         state.messages.len(),
         state.turn_count
     );
-    while run_one_turn(client, state, on_text, on_tool_event).await? {
+
+    loop {
+        // 保存当前状态，以便重试时恢复
+        let messages_len_before = state.messages.len();
+        let turn_count_before = state.turn_count;
+        let token_usage_before = state.token_usage;
+        let transition_reason_before = state.transition_reason.clone();
+
+        match run_one_turn(client, state, on_text, on_tool_event).await {
+            Ok(should_continue) => {
+                retry_count = 0;
+                if !should_continue {
+                    break;
+                }
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                // 判断是否为可重试的网络/流错误
+                let is_retryable = err_str.contains("interrupted")
+                    || err_str.contains("timeout")
+                    || err_str.contains("connection")
+                    || err_str.contains("reset")
+                    || err_str.contains("broken pipe");
+
+                if is_retryable && retry_count < MAX_RUN_ONE_TURN_RETRIES {
+                    retry_count += 1;
+                    // 恢复状态到 run_one_turn 之前
+                    state.messages.truncate(messages_len_before);
+                    state.turn_count = turn_count_before;
+                    state.token_usage = token_usage_before;
+                    state.transition_reason = transition_reason_before;
+
+                    let retry_msg = format!(
+                        "⚠️ 对话流中断，正在自动重试 ({}/{})",
+                        retry_count, MAX_RUN_ONE_TURN_RETRIES
+                    );
+                    log_warn!(
+                        "[Agent] run_one_turn failed with retryable error, retrying {}/{} | {}",
+                        retry_count, MAX_RUN_ONE_TURN_RETRIES, e
+                    );
+                    if let Some(ref mut cb) = on_text {
+                        cb(&retry_msg);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+
+                log_error!("[Agent] agent_loop end with error | {}", e);
+                return Err(e);
+            }
+        }
+
         if state.turn_count > MAX_TURNS {
             log_error!("[Agent] agent_loop max turns exceeded | {}", MAX_TURNS);
             return Err(anyhow::anyhow!(
@@ -606,6 +660,7 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
             ));
         }
     }
+
     log_info!(
         "[Agent] agent_loop end | total_turns={} | transition_reason={:?}",
         state.turn_count,

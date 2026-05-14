@@ -53,7 +53,7 @@ pub struct AppState {
     pub config: Arc<RwLock<Config>>,
     pub sessions: Arc<HttpSessionManager>,
     pub commands: Arc<CommandRegistry>,
-    pub themes: Vec<crate::tui::theme::ThemePreset>,
+    pub themes: Vec<crate::theme_preset::ThemePreset>,
     pub current_theme: Arc<RwLock<String>>,
     pub log_broadcaster: Option<Arc<crate::utils::log_store::LogBroadcaster>>,
 }
@@ -80,7 +80,7 @@ impl Server {
         let sessions = Arc::new(HttpSessionManager::new());
         let (commands, current_theme) = super::commands::build_command_registry(sessions.clone());
 
-        let themes = crate::tui::theme::ThemePreset::all_presets();
+        let themes = crate::theme_preset::ThemePreset::all_presets();
 
         Self {
             state: AppState {
@@ -226,7 +226,7 @@ pub(crate) async fn check_auth(
 /// 列出所有可用主题
 async fn handle_list_themes(
     State(state): State<AppState>,
-) -> Json<ApiResponse<Vec<crate::tui::theme::ThemePreset>>> {
+) -> Json<ApiResponse<Vec<crate::theme_preset::ThemePreset>>> {
     Json(ApiResponse::success(state.themes.clone()))
 }
 
@@ -301,7 +301,7 @@ pub mod test_helpers {
             config: config_arc,
             sessions,
             commands: Arc::new(commands),
-            themes: crate::tui::theme::ThemePreset::all_presets(),
+            themes: crate::theme_preset::ThemePreset::all_presets(),
             current_theme,
             log_broadcaster: Some(Arc::new(crate::utils::log_store::LogBroadcaster::new(100))),
         }

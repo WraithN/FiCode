@@ -13,8 +13,8 @@
 ### Task 1: 新增 ComponentAreas 结构体并存储区域
 
 **Files:**
-- Modify: `crates/core/src/tui/app.rs:118-205`（TuiApp 字段定义和 new 方法）
-- Modify: `crates/core/src/tui/app.rs:291-416`（draw 方法）
+- Modify: `crates/tui/src/app.rs:118-205`（TuiApp 字段定义和 new 方法）
+- Modify: `crates/tui/src/app.rs:291-416`（draw 方法）
 
 - [ ] **Step 1: 在 TuiApp 中新增 ComponentAreas 字段**
 
@@ -33,7 +33,7 @@ component_areas: ComponentAreas::default(),
 
 - [ ] **Step 2: 定义 ComponentAreas 结构体**
 
-在 `crates/core/src/tui/app.rs` 中 `TuiApp` 结构体之前添加：
+在 `crates/tui/src/app.rs` 中 `TuiApp` 结构体之前添加：
 
 ```rust
 /// 各组件在屏幕上的区域快照，由 draw() 方法在每次渲染后更新。
@@ -71,7 +71,7 @@ Expected: 编译通过
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/core/src/tui/app.rs
+git add crates/tui/src/app.rs
 git commit -m "feat(tui): add ComponentAreas struct to store component screen regions"
 ```
 
@@ -80,7 +80,7 @@ git commit -m "feat(tui): add ComponentAreas struct to store component screen re
 ### Task 2: 实现 hit_test 焦点检测
 
 **Files:**
-- Modify: `crates/core/src/tui/app.rs:416-580`（在 route_event 之前添加 hit_test 方法）
+- Modify: `crates/tui/src/app.rs:416-580`（在 route_event 之前添加 hit_test 方法）
 
 - [ ] **Step 1: 新增 hit_test 方法**
 
@@ -148,7 +148,7 @@ fn hit_test(&self, column: u16, row: u16) -> Option<FocusArea> {
 
 - [ ] **Step 2: 确认 Input 有 dropdown_area 访问方法**
 
-检查 `crates/core/src/tui/components/input.rs` 中是否有 `dropdown_area` 的 getter。如果没有，添加：
+检查 `crates/tui/src/components/input.rs` 中是否有 `dropdown_area` 的 getter。如果没有，添加：
 
 ```rust
 pub fn dropdown_area(&self) -> Option<Rect> {
@@ -164,7 +164,7 @@ Expected: 编译通过
 - [ ] **Step 4: Commit**
 
 ```bash
-git add crates/core/src/tui/app.rs crates/core/src/tui/components/input.rs
+git add crates/tui/src/app.rs crates/tui/src/components/input.rs
 git commit -m "feat(tui): add hit_test method for mouse coordinate to focus area mapping"
 ```
 
@@ -173,7 +173,7 @@ git commit -m "feat(tui): add hit_test method for mouse coordinate to focus area
 ### Task 3: 在 route_event 中处理鼠标左键按下切换焦点
 
 **Files:**
-- Modify: `crates/core/src/tui/app.rs:581-677`（route_event 方法）
+- Modify: `crates/tui/src/app.rs:581-677`（route_event 方法）
 
 - [ ] **Step 1: 修改 Event::Mouse 分支，增加 Down 事件处理**
 
@@ -220,7 +220,7 @@ Expected: 编译通过
 - [ ] **Step 3: Commit**
 
 ```bash
-git add crates/core/src/tui/app.rs
+git add crates/tui/src/app.rs
 git commit -m "feat(tui): mouse left-click switches focus to clicked component"
 ```
 

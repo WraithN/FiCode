@@ -22,6 +22,7 @@
 use crate::log_trace;
 use crate::tools::windows_compat::{get_bash_path, get_compat_mode, WindowsCompatMode};
 use crate::utils::workspace::workspace_dir;
+use fi_code_shared::constants::*;
 use glob::glob_with;
 use glob::MatchOptions;
 use std::fs::File;
@@ -133,8 +134,8 @@ impl BasicTool {
         };
 
         let result_json = serde_json::json!({
-            "content": preview.chars().take(50000).collect::<String>(),
-            "full_content": full_content.chars().take(50000).collect::<String>(),
+            "content": preview.chars().take(OUTPUT_TRUNCATE_LENGTH).collect::<String>(),
+            "full_content": full_content.chars().take(OUTPUT_TRUNCATE_LENGTH).collect::<String>(),
         });
         Ok(result_json.to_string())
     }
@@ -203,7 +204,7 @@ impl BasicTool {
             let _ = tx.send(result);
         });
 
-        match rx.recv_timeout(Duration::from_secs(120)) {
+        match rx.recv_timeout(Duration::from_secs(BASH_TIMEOUT_SECS)) {
             Ok(Ok(output)) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -218,7 +219,7 @@ impl BasicTool {
                 if combined.is_empty() {
                     "(no output)".to_string()
                 } else {
-                    combined.chars().take(50000).collect()
+                    combined.chars().take(OUTPUT_TRUNCATE_LENGTH).collect()
                 }
             }
             Ok(Err(e)) => format!("Error: {}", e),
@@ -336,7 +337,7 @@ impl BasicTool {
             .text()
             .map_err(|e| format!("Failed to read response: {}", e))?;
         let md = html2md::parse_html(&html);
-        Ok(md.chars().take(50000).collect())
+        Ok(md.chars().take(OUTPUT_TRUNCATE_LENGTH).collect())
     }
 
     // =========================================================================
@@ -355,7 +356,7 @@ impl BasicTool {
             Ok("No matches found".to_string())
         } else {
             let result = matches.join("\n");
-            Ok(result.chars().take(50000).collect())
+            Ok(result.chars().take(OUTPUT_TRUNCATE_LENGTH).collect())
         }
     }
 
@@ -466,7 +467,7 @@ impl BasicTool {
             Ok("No files found matching pattern".to_string())
         } else {
             let result = files.join("\n");
-            Ok(result.chars().take(50000).collect())
+            Ok(result.chars().take(OUTPUT_TRUNCATE_LENGTH).collect())
         }
     }
 
@@ -493,7 +494,7 @@ impl BasicTool {
             let _ = tx.send(output);
         });
 
-        match rx.recv_timeout(Duration::from_secs(120)) {
+        match rx.recv_timeout(Duration::from_secs(BASH_TIMEOUT_SECS)) {
             Ok(Ok(output)) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -508,7 +509,7 @@ impl BasicTool {
                 if combined.is_empty() {
                     "(no output)".to_string()
                 } else {
-                    combined.chars().take(50000).collect()
+                    combined.chars().take(OUTPUT_TRUNCATE_LENGTH).collect()
                 }
             }
             Ok(Err(e)) => format!("Error: {}", e),
@@ -590,7 +591,7 @@ mod tests {
     #[test]
     fn test_run_read() {
         ensure_workspace();
-        let lines = BasicTool::run_read("src/tools/basic_tools.rs", Some(10000)).unwrap();
+        let lines = BasicTool::run_read("src/tools/basic_tools.rs", Some(DEFAULT_READ_MAX_LINES)).unwrap();
         assert_ne!(lines, "");
     }
 

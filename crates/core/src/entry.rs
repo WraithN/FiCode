@@ -39,7 +39,16 @@ use crate::utils::cli::{Args, Commands};
 use crate::utils::workspace::set_workspace;
 use crate::{log_debug, log_info};
 
-pub async fn run() -> Result<()> {
+/// 入口执行结果：正常结束或需要启动 TUI
+#[derive(Debug)]
+pub enum EntryOutcome {
+    Completed,
+    StartTui {
+        port: Option<u16>,
+    },
+}
+
+pub async fn run() -> Result<EntryOutcome> {
     let args = Args::parse();
 
     // 如果指定了子命令
@@ -50,15 +59,15 @@ pub async fn run() -> Result<()> {
             crate::server::Server::new(provider, config, port)
                 .run()
                 .await;
-            return Ok(());
+            return Ok(EntryOutcome::Completed);
         }
         None => {
             // 检查是否有其他向后兼容的 flag
             if args.interactive || args.cmd.is_some() || args.session.is_some() || args.models {
                 // 继续原有 CLI 逻辑（什么都不做，继续往下执行）
             } else {
-                // 默认启动 TUI 模式
-                return crate::tui::run_tui_mode(None).await;
+                // 默认启动 TUI 模式，由调用方（cli crate）负责启动
+                return Ok(EntryOutcome::StartTui { port: None });
             }
         }
     }
@@ -112,7 +121,7 @@ pub async fn run() -> Result<()> {
     // -s 优先级最高
     if let Some(session_arg) = args.session {
         handle_session_arg(session_arg, &session_manager)?;
-        return Ok(());
+        return Ok(EntryOutcome::Completed);
     }
 
     let config = Arc::new(RwLock::new(Config::load()?));
@@ -150,7 +159,7 @@ pub async fn run() -> Result<()> {
                 }
             }
         }
-        return Ok(());
+        return Ok(EntryOutcome::Completed);
     }
 
     let provider = Arc::new(Provider::new(Arc::clone(&config))?);
@@ -171,7 +180,7 @@ pub async fn run() -> Result<()> {
             )
             .await?;
         }
-        return Ok(());
+        return Ok(EntryOutcome::Completed);
     }
 
     // -i 交互式模式
@@ -182,7 +191,7 @@ pub async fn run() -> Result<()> {
         config,
     )
     .await?;
-    Ok(())
+    Ok(EntryOutcome::Completed)
 }
 
 fn print_sessions_list(session_manager: &SessionManager) -> Result<()> {

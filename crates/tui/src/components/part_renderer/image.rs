@@ -36,13 +36,13 @@ impl PartRenderer for ImageRenderer {
     fn draw(&self, frame: &mut Frame, area: Rect, part: &Part, theme: &Theme, _skip_lines: u16) {
         if let Part::Image { source } = part {
             let text = match source {
-                crate::session::message::ImageSource::Path { path } => {
+                fi_code_core::session::message::ImageSource::Path { path } => {
                     format!("🖼 {}", path)
                 }
-                crate::session::message::ImageSource::Base64 { media_type, .. } => {
+                fi_code_core::session::message::ImageSource::Base64 { media_type, .. } => {
                     format!("🖼 [Base64 image: {}]", media_type)
                 }
-                crate::session::message::ImageSource::Url { url } => {
+                fi_code_core::session::message::ImageSource::Url { url } => {
                     format!("🖼 {}", url)
                 }
             };

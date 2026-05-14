@@ -28,5 +28,5 @@
 - 或：左侧显示原始内容，右侧显示编辑后内容
 
 ## 改动范围
-- `crates/core/src/tui/components/chat.rs`：ToolResult 处理逻辑
-- `crates/core/src/tui/components/card_widget.rs`：WriteFile 卡片渲染优化
+- `crates/tui/src/components/chat.rs`：ToolResult 处理逻辑
+- `crates/tui/src/components/card_widget.rs`：WriteFile 卡片渲染优化

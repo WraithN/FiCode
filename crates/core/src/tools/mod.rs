@@ -25,7 +25,8 @@ use crate::log_trace;
 use crate::mcp::manager::McpManager;
 use crate::provider::Provider;
 use crate::session::message::Part;
-use crate::tui::event::{AppEvent, QuestionAnswer};
+use crate::tui_event::{AppEvent, QuestionAnswer};
+use fi_code_shared::constants::*;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use tokio::sync::mpsc;
@@ -827,7 +828,7 @@ pub async fn tool_call(
             .and_then(|v| v.as_array())
             .ok_or("Missing or invalid options parameter")?;
 
-        let options: Vec<crate::tui::event::QuestionOption> = options_json
+        let options: Vec<crate::tui_event::QuestionOption> = options_json
             .iter()
             .filter_map(|v| serde_json::from_value(v.clone()).ok())
             .collect();
@@ -905,10 +906,7 @@ pub async fn tool_call(
 // 现在直接返回结构化的 `Vec<Part>`，省去上层再做一次格式转换。
 // 因 MCP 调用需要异步，此函数已升级为 `async`。
 
-/// 工具调用最大重试次数。
-const MAX_TOOL_RETRIES: u32 = 3;
-/// 工具调用重试间隔。
-const TOOL_RETRY_DELAY_MS: u64 = 200;
+// MAX_TOOL_RETRIES, TOOL_RETRY_DELAY_MS 已从 fi_code_shared::constants 导入
 
 async fn execute_single_tool_call(
     id: &str,

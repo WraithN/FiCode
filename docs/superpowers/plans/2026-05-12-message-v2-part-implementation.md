@@ -22,28 +22,28 @@
 | `crates/core/src/agent/agent.rs` | Modify | Update `run_one_turn` SSE emission to use `SseEvent::Part` |
 | `crates/core/src/agent/runner.rs` | Modify | Update `AgentRunner` SSE emission to use `SseEvent::Part` |
 | `crates/core/src/server/api/chat_api.rs` | Modify | Remove `send_last_assistant_details`; emit Parts in real-time |
-| `crates/core/src/tui/client.rs` | Modify | Parse `SseEvent::Part`; route to `Chat::handle_part_event` |
-| `crates/core/src/tui/app.rs` | Modify | Route `AppEvent::SseEvent(Part)` to chat component |
-| `crates/core/src/tui/components/chat.rs` | Modify | Replace `handle_sse_event` with `handle_part_event`; prepare for Part renderers |
-| `crates/core/src/tui/components/status_bar.rs` | Modify | Rename fields; add CTX progress bar; compact/extreme layouts |
+| `crates/tui/src/client.rs` | Modify | Parse `SseEvent::Part`; route to `Chat::handle_part_event` |
+| `crates/tui/src/app.rs` | Modify | Route `AppEvent::SseEvent(Part)` to chat component |
+| `crates/tui/src/components/chat.rs` | Modify | Replace `handle_sse_event` with `handle_part_event`; prepare for Part renderers |
+| `crates/tui/src/components/status_bar.rs` | Modify | Rename fields; add CTX progress bar; compact/extreme layouts |
 
 ### Phase 2: TUI Renderers (New Files)
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `crates/core/src/tui/components/part_renderer/mod.rs` | Create | `PartRenderer` trait and registry |
-| `crates/core/src/tui/components/part_renderer/wave_marker.rs` | Create | WaveMarker line rendering |
-| `crates/core/src/tui/components/part_renderer/usage.rs` | Create | Usage footer line rendering |
-| `crates/core/src/tui/components/part_renderer/thinking.rs` | Create | Thinking/Reasoning card rendering |
-| `crates/core/src/tui/components/part_renderer/tool_call.rs` | Create | ToolUse card + dispatch to sub-renderers |
-| `crates/core/src/tui/components/part_renderer/tool_result.rs` | Create | ToolResult card + dispatch to sub-renderers |
-| `crates/core/src/tui/components/part_renderer/tool_error.rs` | Create | ToolError card rendering |
-| `crates/core/src/tui/components/part_renderer/file_preview.rs` | Create | File preview with line numbers and syntax highlighting |
-| `crates/core/src/tui/components/part_renderer/diff.rs` | Create | Unified diff rendering |
-| `crates/core/src/tui/components/part_renderer/shell_output.rs` | Create | Shell command + output rendering |
-| `crates/core/src/tui/components/part_renderer/task_list.rs` | Create | Task list with status icons |
-| `crates/core/src/tui/components/part_renderer/image.rs` | Create | Image placeholder rendering |
-| `crates/core/src/tui/components/part_renderer/text.rs` | Create | Plain text rendering |
+| `crates/tui/src/components/part_renderer/mod.rs` | Create | `PartRenderer` trait and registry |
+| `crates/tui/src/components/part_renderer/wave_marker.rs` | Create | WaveMarker line rendering |
+| `crates/tui/src/components/part_renderer/usage.rs` | Create | Usage footer line rendering |
+| `crates/tui/src/components/part_renderer/thinking.rs` | Create | Thinking/Reasoning card rendering |
+| `crates/tui/src/components/part_renderer/tool_call.rs` | Create | ToolUse card + dispatch to sub-renderers |
+| `crates/tui/src/components/part_renderer/tool_result.rs` | Create | ToolResult card + dispatch to sub-renderers |
+| `crates/tui/src/components/part_renderer/tool_error.rs` | Create | ToolError card rendering |
+| `crates/tui/src/components/part_renderer/file_preview.rs` | Create | File preview with line numbers and syntax highlighting |
+| `crates/tui/src/components/part_renderer/diff.rs` | Create | Unified diff rendering |
+| `crates/tui/src/components/part_renderer/shell_output.rs` | Create | Shell command + output rendering |
+| `crates/tui/src/components/part_renderer/task_list.rs` | Create | Task list with status icons |
+| `crates/tui/src/components/part_renderer/image.rs` | Create | Image placeholder rendering |
+| `crates/tui/src/components/part_renderer/text.rs` | Create | Plain text rendering |
 
 ### Phase 3: WaveMarker Backend Integration
 
@@ -51,7 +51,7 @@
 |------|--------|----------------|
 | `crates/core/src/agent/agent.rs` | Modify | Insert `WaveMarker` at start of each agent loop iteration |
 | `crates/core/src/tools/basic_tools.rs` | Modify | Add `git_write_tree` helper |
-| `crates/core/src/tui/components/chat.rs` | Modify | WaveMarker `g`/`r` interaction handling |
+| `crates/tui/src/components/chat.rs` | Modify | WaveMarker `g`/`r` interaction handling |
 
 ---
 
@@ -385,9 +385,9 @@ cd /home/nan/fi-code && git add crates/core/src/agent/agent.rs crates/core/src/a
 ### Task 5: Update TUI SSE Reception
 
 **Files:**
-- Modify: `crates/core/src/tui/client.rs`
-- Modify: `crates/core/src/tui/app.rs`
-- Modify: `crates/core/src/tui/components/chat.rs`
+- Modify: `crates/tui/src/client.rs`
+- Modify: `crates/tui/src/app.rs`
+- Modify: `crates/tui/src/components/chat.rs`
 
 - [ ] **Step 1: Update `client.rs` to parse `SseEvent::Part`**
 
@@ -518,7 +518,7 @@ Expected: Tests pass after adapting to new structures.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/client.rs crates/core/src/tui/app.rs crates/core/src/tui/components/chat.rs && git commit -m "feat: update TUI to receive and route SseEvent::Part
+cd /home/nan/fi-code && git add crates/tui/src/client.rs crates/tui/src/app.rs crates/tui/src/components/chat.rs && git commit -m "feat: update TUI to receive and route SseEvent::Part
 
 - client.rs: parse SseEvent::Part with detailed preview logging
 - app.rs: route Part events to Chat::handle_part_event
@@ -530,8 +530,8 @@ cd /home/nan/fi-code && git add crates/core/src/tui/client.rs crates/core/src/tu
 ### Task 6: Status Bar Redesign
 
 **Files:**
-- Modify: `crates/core/src/tui/components/status_bar.rs`
-- Modify: `crates/core/src/tui/app.rs` (update status bar API calls)
+- Modify: `crates/tui/src/components/status_bar.rs`
+- Modify: `crates/tui/src/app.rs` (update status bar API calls)
 
 - [ ] **Step 1: Update `StatusBar` struct fields**
 
@@ -597,7 +597,7 @@ cd /home/nan/fi-code && cargo test -p fi-code-core status_bar
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/status_bar.rs crates/core/src/tui/app.rs && git commit -m "feat: redesign status bar with CTX/TOK/LAT/MDL fields
+cd /home/nan/fi-code && git add crates/tui/src/components/status_bar.rs crates/tui/src/app.rs && git commit -m "feat: redesign status bar with CTX/TOK/LAT/MDL fields
 
 - Add CTX progress bar with color-coded occupancy
 - Rename IN/OUT to TOK with up/down arrows
@@ -612,8 +612,8 @@ cd /home/nan/fi-code && git add crates/core/src/tui/components/status_bar.rs cra
 ### Task 7: PartRenderer Trait and Registry
 
 **Files:**
-- Create: `crates/core/src/tui/components/part_renderer/mod.rs`
-- Modify: `crates/core/src/tui/components/mod.rs`
+- Create: `crates/tui/src/components/part_renderer/mod.rs`
+- Modify: `crates/tui/src/components/mod.rs`
 
 - [ ] **Step 1: Create `part_renderer/mod.rs`**
 
@@ -697,14 +697,14 @@ Add `pub mod part_renderer;` to the module declarations.
 - [ ] **Step 3: Create stub files for all sub-renderers**
 
 Create empty files:
-- `crates/core/src/tui/components/part_renderer/text.rs`
-- `crates/core/src/tui/components/part_renderer/thinking.rs`
-- `crates/core/src/tui/components/part_renderer/tool_call.rs`
-- `crates/core/src/tui/components/part_renderer/tool_result.rs`
-- `crates/core/src/tui/components/part_renderer/tool_error.rs`
-- `crates/core/src/tui/components/part_renderer/wave_marker.rs`
-- `crates/core/src/tui/components/part_renderer/usage.rs`
-- `crates/core/src/tui/components/part_renderer/image.rs`
+- `crates/tui/src/components/part_renderer/text.rs`
+- `crates/tui/src/components/part_renderer/thinking.rs`
+- `crates/tui/src/components/part_renderer/tool_call.rs`
+- `crates/tui/src/components/part_renderer/tool_result.rs`
+- `crates/tui/src/components/part_renderer/tool_error.rs`
+- `crates/tui/src/components/part_renderer/wave_marker.rs`
+- `crates/tui/src/components/part_renderer/usage.rs`
+- `crates/tui/src/components/part_renderer/image.rs`
 
 Each stub:
 ```rust
@@ -726,7 +726,7 @@ impl PartRenderer for TextRenderer {
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/ crates/core/src/tui/components/mod.rs && git commit -m "feat: add PartRenderer trait and registry skeleton
+cd /home/nan/fi-code && git add crates/tui/src/components/part_renderer/ crates/tui/src/components/mod.rs && git commit -m "feat: add PartRenderer trait and registry skeleton
 
 - Define PartRenderer trait with height/draw/handle_event
 - Create PartRendererRegistry with dispatch by Part variant
@@ -738,7 +738,7 @@ cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/ cr
 ### Task 8: WaveMarker Renderer
 
 **Files:**
-- Create: `crates/core/src/tui/components/part_renderer/wave_marker.rs`
+- Create: `crates/tui/src/components/part_renderer/wave_marker.rs`
 
 - [ ] **Step 1: Implement WaveMarkerRenderer**
 
@@ -805,7 +805,7 @@ fn format_tokens(n: u32) -> String {
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/wave_marker.rs && git commit -m "feat: implement WaveMarkerRenderer
+cd /home/nan/fi-code && git add crates/tui/src/components/part_renderer/wave_marker.rs && git commit -m "feat: implement WaveMarkerRenderer
 
 - Render step/total with green bold styling
 - Show git snapshot hash
@@ -817,7 +817,7 @@ cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/wav
 ### Task 9: Usage Renderer
 
 **Files:**
-- Create: `crates/core/src/tui/components/part_renderer/usage.rs`
+- Create: `crates/tui/src/components/part_renderer/usage.rs`
 
 - [ ] **Step 1: Implement UsageRenderer**
 
@@ -876,7 +876,7 @@ fn format_tokens(n: u32) -> String {
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/usage.rs && git commit -m "feat: implement UsageRenderer
+cd /home/nan/fi-code && git add crates/tui/src/components/part_renderer/usage.rs && git commit -m "feat: implement UsageRenderer
 
 - Right-aligned usage footer line
 - Show input/output tokens with arrows
@@ -889,7 +889,7 @@ cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/usa
 ### Task 10: Thinking Renderer
 
 **Files:**
-- Create: `crates/core/src/tui/components/part_renderer/thinking.rs`
+- Create: `crates/tui/src/components/part_renderer/thinking.rs`
 
 - [ ] **Step 1: Implement ThinkingRenderer**
 
@@ -947,7 +947,7 @@ impl PartRenderer for ThinkingRenderer {
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/thinking.rs && git commit -m "feat: implement ThinkingRenderer
+cd /home/nan/fi-code && git add crates/tui/src/components/part_renderer/thinking.rs && git commit -m "feat: implement ThinkingRenderer
 
 - Migrate existing Thinking card rendering logic
 - Calculate dynamic height based on text wrapping"
@@ -958,12 +958,12 @@ cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/thi
 ### Task 11: ToolCall Renderer with Dispatch
 
 **Files:**
-- Create: `crates/core/src/tui/components/part_renderer/tool_call.rs`
-- Create: `crates/core/src/tui/components/part_renderer/file_preview.rs`
-- Create: `crates/core/src/tui/components/part_renderer/diff.rs`
-- Create: `crates/core/src/tui/components/part_renderer/shell_output.rs`
-- Create: `crates/core/src/tui/components/part_renderer/task_list.rs`
-- Create: `crates/core/src/tui/components/part_renderer/generic_tool.rs`
+- Create: `crates/tui/src/components/part_renderer/tool_call.rs`
+- Create: `crates/tui/src/components/part_renderer/file_preview.rs`
+- Create: `crates/tui/src/components/part_renderer/diff.rs`
+- Create: `crates/tui/src/components/part_renderer/shell_output.rs`
+- Create: `crates/tui/src/components/part_renderer/task_list.rs`
+- Create: `crates/tui/src/components/part_renderer/generic_tool.rs`
 
 - [ ] **Step 1: Implement ToolCallRenderer with dispatch**
 
@@ -1046,7 +1046,7 @@ Fallback for unknown tools:
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/tool_call.rs crates/core/src/tui/components/part_renderer/file_preview.rs crates/core/src/tui/components/part_renderer/diff.rs crates/core/src/tui/components/part_renderer/shell_output.rs crates/core/src/tui/components/part_renderer/task_list.rs crates/core/src/tui/components/part_renderer/generic_tool.rs && git commit -m "feat: implement ToolCallRenderer with dispatch and sub-renderers
+cd /home/nan/fi-code && git add crates/tui/src/components/part_renderer/tool_call.rs crates/tui/src/components/part_renderer/file_preview.rs crates/tui/src/components/part_renderer/diff.rs crates/tui/src/components/part_renderer/shell_output.rs crates/tui/src/components/part_renderer/task_list.rs crates/tui/src/components/part_renderer/generic_tool.rs && git commit -m "feat: implement ToolCallRenderer with dispatch and sub-renderers
 
 - ToolCallRenderer dispatches by tool name
 - FilePreviewRenderer: first 10 lines with line numbers
@@ -1061,7 +1061,7 @@ cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/too
 ### Task 12: ToolResult Renderer
 
 **Files:**
-- Create: `crates/core/src/tui/components/part_renderer/tool_result.rs`
+- Create: `crates/tui/src/components/part_renderer/tool_result.rs`
 
 - [ ] **Step 1: Implement ToolResultRenderer**
 
@@ -1102,7 +1102,7 @@ Note: The actual dispatch requires access to the Turn's `parts` Vec to look up t
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/tool_result.rs && git commit -m "feat: add ToolResultRenderer skeleton
+cd /home/nan/fi-code && git add crates/tui/src/components/part_renderer/tool_result.rs && git commit -m "feat: add ToolResultRenderer skeleton
 
 - Will dispatch to same sub-renderers as ToolCall
 - Full dispatch logic wired in Chat::draw (Task 14)"
@@ -1113,8 +1113,8 @@ cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/too
 ### Task 13: ToolError and Image Renderers
 
 **Files:**
-- Create: `crates/core/src/tui/components/part_renderer/tool_error.rs`
-- Create: `crates/core/src/tui/components/part_renderer/image.rs`
+- Create: `crates/tui/src/components/part_renderer/tool_error.rs`
+- Create: `crates/tui/src/components/part_renderer/image.rs`
 
 - [ ] **Step 1: Implement ToolErrorRenderer**
 
@@ -1204,7 +1204,7 @@ impl PartRenderer for ImageRenderer {
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/tool_error.rs crates/core/src/tui/components/part_renderer/image.rs && git commit -m "feat: implement ToolErrorRenderer and ImageRenderer
+cd /home/nan/fi-code && git add crates/tui/src/components/part_renderer/tool_error.rs crates/tui/src/components/part_renderer/image.rs && git commit -m "feat: implement ToolErrorRenderer and ImageRenderer
 
 - ToolErrorRenderer: red-bordered card with error message
 - ImageRenderer: show path/URL with image icon"
@@ -1215,7 +1215,7 @@ cd /home/nan/fi-code && git add crates/core/src/tui/components/part_renderer/too
 ### Task 14: Wire Renderers into Chat::draw
 
 **Files:**
-- Modify: `crates/core/src/tui/components/chat.rs`
+- Modify: `crates/tui/src/components/chat.rs`
 
 - [ ] **Step 1: Add PartRendererRegistry to Chat**
 
@@ -1264,7 +1264,7 @@ In the draw loop, when encountering `Part::ToolResult`, look up the matching `Pa
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/chat.rs && git commit -m "feat: wire Part renderers into Chat::draw
+cd /home/nan/fi-code && git add crates/tui/src/components/chat.rs && git commit -m "feat: wire Part renderers into Chat::draw
 
 - Add PartRendererRegistry to Chat struct
 - Replace card-based rendering with Part-based rendering
@@ -1394,8 +1394,8 @@ cd /home/nan/fi-code && git add crates/core/src/agent/agent.rs && git commit -m 
 ### Task 17: WaveMarker Interactions
 
 **Files:**
-- Modify: `crates/core/src/tui/components/chat.rs`
-- Modify: `crates/core/src/tui/app.rs`
+- Modify: `crates/tui/src/components/chat.rs`
+- Modify: `crates/tui/src/app.rs`
 
 - [ ] **Step 1: Add `g` and `r` key handlers**
 
@@ -1450,7 +1450,7 @@ AppEvent::RollbackToWave { snapshot, step } => {
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/nan/fi-code && git add crates/core/src/tui/components/chat.rs crates/core/src/tui/app.rs crates/core/src/tui/event.rs && git commit -m "feat: add WaveMarker g/r interactions
+cd /home/nan/fi-code && git add crates/tui/src/components/chat.rs crates/tui/src/app.rs crates/tui/src/event.rs && git commit -m "feat: add WaveMarker g/r interactions
 
 - g: browse git snapshot (read-only)
 - r: rollback to wave and retry"

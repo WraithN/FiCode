@@ -23,19 +23,18 @@ use anyhow::{anyhow, Result};
 use futures::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json};
 use tokio::sync::mpsc;
 
-use crate::commands::registry::{CommandMeta, CommandOutput};
-use crate::log_debug;
-use crate::log_error;
-use crate::log_info;
-use crate::log_trace;
-use crate::log_warn;
-use crate::server::transport::rpc::{JsonRpcRequest, JsonRpcResponse};
-use crate::server::transport::sse::SseEvent;
-use crate::tui::event::{AppEvent, LogLevel, LogLine};
-use crate::utils::log_store::LogEntry;
+use fi_code_core::commands::registry::CommandOutput;
+use fi_code_shared::dto::CommandMeta;
+use fi_code_core::log_debug;
+use fi_code_core::log_info;
+use fi_code_core::log_warn;
+use fi_code_core::server::transport::rpc::{JsonRpcRequest, JsonRpcResponse};
+use fi_code_core::server::transport::sse::SseEvent;
+use fi_code_shared::tui_event::{AppEvent, LogLevel, LogLine};
+use fi_code_core::utils::log_store::LogEntry;
 
 /// 单个会话的元信息。
 #[derive(Debug, Deserialize)]
@@ -52,13 +51,9 @@ pub struct SessionListResult {
     pub current_session_id: Option<String>,
 }
 
-/// 通用 REST API 响应包装器。
-#[derive(Debug, Deserialize)]
-pub struct ApiResponse<T> {
-    pub success: bool,
-    pub data: Option<T>,
-    pub error: Option<String>,
-}
+// 已从 fi-code-shared crate 重新导出，保留此 re-export 维持向后兼容
+pub use fi_code_shared::constants::*;
+use fi_code_shared::dto::ApiResponse;
 
 /// 文件树中的单个节点。
 #[derive(Debug, Deserialize)]
@@ -94,13 +89,13 @@ impl TuiClient {
     pub fn new() -> Self {
         let client = Client::builder()
             .tcp_nodelay(true)
-            .timeout(std::time::Duration::from_secs(300))
-            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(TUI_TIMEOUT_SECS))
+            .connect_timeout(std::time::Duration::from_secs(TUI_CONNECT_TIMEOUT_SECS))
             .build()
             .unwrap_or_else(|_| Client::new());
         Self {
             client,
-            base_url: "http://localhost:4040".to_string(),
+            base_url: format!("http://localhost:{}", DEFAULT_SERVER_PORT),
         }
     }
 
@@ -108,8 +103,8 @@ impl TuiClient {
     pub fn with_base_url(base_url: &str) -> Self {
         let client = Client::builder()
             .tcp_nodelay(true)
-            .timeout(std::time::Duration::from_secs(300))
-            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(TUI_TIMEOUT_SECS))
+            .connect_timeout(std::time::Duration::from_secs(TUI_CONNECT_TIMEOUT_SECS))
             .build()
             .unwrap_or_else(|_| Client::new());
         Self {
@@ -417,14 +412,14 @@ impl TuiClient {
     }
 
     /// 获取所有可用主题预设列表
-    pub async fn list_themes(&self) -> Result<Vec<crate::tui::theme::ThemePreset>> {
+    pub async fn list_themes(&self) -> Result<Vec<fi_code_shared::dto::ThemePreset>> {
         let url = format!("{}/api/themes", self.base_url);
         log_debug!("HTTP -> GET {}", url);
 
         let resp = self.client.get(&url).send().await?;
         let status = resp.status();
         let resp = resp
-            .json::<ApiResponse<Vec<crate::tui::theme::ThemePreset>>>()
+            .json::<ApiResponse<Vec<fi_code_shared::dto::ThemePreset>>>()
             .await?;
         log_debug!(
             "HTTP <- GET {} | status={} | count={}",

@@ -22,8 +22,8 @@
 use crossterm::event::Event;
 use ratatui::{layout::Rect, Frame};
 
-use crate::session::message::Part;
-use crate::tui::theme::Theme;
+use fi_code_core::session::message::Part;
+use crate::theme::Theme;
 
 /// Part 渲染器 trait：为每一种 `Part` 变体提供高度计算、绘制和可选的事件处理。
 pub trait PartRenderer {

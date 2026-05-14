@@ -19,22 +19,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use fi_code_shared::constants::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Provider API 类型
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderType {
-    OpenAiCompatible,
-    Anthropic,
-}
-
-impl Default for ProviderType {
-    fn default() -> Self {
-        ProviderType::OpenAiCompatible
-    }
-}
+// 已从 fi-code-shared crate 重新导出，保留此 re-export 维持向后兼容
+pub use fi_code_shared::enums::{McpServerType, ProviderType};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct Config {
@@ -87,13 +77,6 @@ impl Default for McpServerConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum McpServerType {
-    Local,
-    Remote,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ProviderConfig {
     #[serde(default)]
     pub provider_type: ProviderType,
@@ -122,8 +105,8 @@ impl Default for ProviderOptions {
         Self {
             api_key: String::new(),
             base_url: String::new(),
-            timeout: 300_000,
-            chunk_timeout: 10_000,
+            timeout: DEFAULT_TIMEOUT_MS,
+            chunk_timeout: DEFAULT_CHUNK_TIMEOUT_MS,
             headers: None,
         }
     }

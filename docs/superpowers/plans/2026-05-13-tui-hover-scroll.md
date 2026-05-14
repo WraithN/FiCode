@@ -14,18 +14,18 @@
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `crates/core/src/tui/event.rs` | 修改 | `FocusArea` 添加 `LogWindow` |
-| `crates/core/src/tui/app.rs` | 修改 | hover 切焦点、hit_test LogWindow、cycle_focus、dispatch_event |
-| `crates/core/src/tui/components/left_drawer.rs` | 修改 | scroll_offset、scrollbar、滚轮 |
-| `crates/core/src/tui/components/right_drawer.rs` | 修改 | scroll_offset、scrollbar、滚轮 |
-| `crates/core/src/tui/components/log_window.rs` | 修改 | scrollbar、滚轮 |
+| `crates/tui/src/event.rs` | 修改 | `FocusArea` 添加 `LogWindow` |
+| `crates/tui/src/app.rs` | 修改 | hover 切焦点、hit_test LogWindow、cycle_focus、dispatch_event |
+| `crates/tui/src/components/left_drawer.rs` | 修改 | scroll_offset、scrollbar、滚轮 |
+| `crates/tui/src/components/right_drawer.rs` | 修改 | scroll_offset、scrollbar、滚轮 |
+| `crates/tui/src/components/log_window.rs` | 修改 | scrollbar、滚轮 |
 
 ---
 
 ### Task 1: FocusArea 添加 LogWindow
 
 **Files:**
-- Modify: `crates/core/src/tui/event.rs:170-175`
+- Modify: `crates/tui/src/event.rs:170-175`
 
 - [ ] **Step 1: 修改 FocusArea 枚举**
 
@@ -49,7 +49,7 @@ Expected: 编译通过，但 `app.rs` 中 `match` 会报 `non-exhaustive pattern
 - [ ] **Step 3: Commit**
 
 ```bash
-git add crates/core/src/tui/event.rs
+git add crates/tui/src/event.rs
 git commit -m "feat(tui): add LogWindow to FocusArea enum"
 ```
 
@@ -58,7 +58,7 @@ git commit -m "feat(tui): add LogWindow to FocusArea enum"
 ### Task 2: app.rs 修改 — hover 焦点切换与 LogWindow 支持
 
 **Files:**
-- Modify: `crates/core/src/tui/app.rs`
+- Modify: `crates/tui/src/app.rs`
 
 - [ ] **Step 1: hit_test 修改 — LogWindow 返回焦点**
 
@@ -160,7 +160,7 @@ Expected: 编译通过
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/core/src/tui/app.rs
+git add crates/tui/src/app.rs
 git commit -m "feat(tui): hover focus switch and LogWindow focus support"
 ```
 
@@ -169,7 +169,7 @@ git commit -m "feat(tui): hover focus switch and LogWindow focus support"
 ### Task 3: LeftDrawer 添加滚动条和滚轮支持
 
 **Files:**
-- Modify: `crates/core/src/tui/components/left_drawer.rs`
+- Modify: `crates/tui/src/components/left_drawer.rs`
 
 - [ ] **Step 1: 添加 scroll_offset 和导入**
 
@@ -357,7 +357,7 @@ Expected: 全部通过
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/core/src/tui/components/left_drawer.rs
+git add crates/tui/src/components/left_drawer.rs
 git commit -m "feat(tui): add scrollbar and mouse wheel scroll to LeftDrawer"
 ```
 
@@ -366,7 +366,7 @@ git commit -m "feat(tui): add scrollbar and mouse wheel scroll to LeftDrawer"
 ### Task 4: RightDrawer 添加滚动条和滚轮支持
 
 **Files:**
-- Modify: `crates/core/src/tui/components/right_drawer.rs`
+- Modify: `crates/tui/src/components/right_drawer.rs`
 
 - [ ] **Step 1: 添加 scroll_offset 和导入**
 
@@ -512,7 +512,7 @@ Expected: 全部通过
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/core/src/tui/components/right_drawer.rs
+git add crates/tui/src/components/right_drawer.rs
 git commit -m "feat(tui): add scrollbar and mouse wheel scroll to RightDrawer"
 ```
 
@@ -521,7 +521,7 @@ git commit -m "feat(tui): add scrollbar and mouse wheel scroll to RightDrawer"
 ### Task 5: LogWindow 添加滚动条和滚轮支持
 
 **Files:**
-- Modify: `crates/core/src/tui/components/log_window.rs`
+- Modify: `crates/tui/src/components/log_window.rs`
 
 - [ ] **Step 1: draw 方法添加 Scrollbar**
 
@@ -603,7 +603,7 @@ Expected: 全部通过
 - [ ] **Step 4: Commit**
 
 ```bash
-git add crates/core/src/tui/components/log_window.rs
+git add crates/tui/src/components/log_window.rs
 git commit -m "feat(tui): add scrollbar and mouse wheel scroll to LogWindow"
 ```
 

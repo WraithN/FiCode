@@ -42,12 +42,8 @@ use super::super::server::{check_auth, AppState};
 use super::super::transport::rpc::JsonRpcResponse;
 use super::super::transport::sse::{create_sse_channel, SseEvent, SseSender};
 
-/// Chat 请求体
-#[derive(Deserialize)]
-pub struct ChatRequest {
-    pub session_id: Option<String>,
-    pub message: String,
-}
+// 已从 fi-code-shared crate 重新导出，保留此 re-export 维持向后兼容
+pub use fi_code_shared::dto::ChatRequest;
 
 /// Chat 端点处理器 — 返回 SSE
 pub async fn handle_chat_endpoint(
@@ -270,20 +266,8 @@ async fn run_agent_chat(
     Ok(())
 }
 
-/// 模型切换请求体
-#[derive(Deserialize)]
-pub struct SwitchModelRequest {
-    pub provider: String,
-    pub model: String,
-    pub api_key: Option<String>,
-}
-
-/// 模型切换响应
-#[derive(serde::Serialize)]
-pub struct SwitchModelResponse {
-    pub provider: String,
-    pub model: String,
-}
+// 已从 fi-code-shared crate 重新导出，保留此 re-export 维持向后兼容
+pub use fi_code_shared::dto::{SwitchModelRequest, SwitchModelResponse};
 
 /// POST /api/model/switch — 切换当前使用的模型
 pub async fn handle_switch_model(

@@ -24,36 +24,9 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-/// 任务进度项
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskProgressItem {
-    pub id: String,
-    pub name: String,
-    pub status: crate::tools::task::TaskStatus,
-}
+// 已从 fi-code-shared crate 重新导出，保留此 re-export 维持向后兼容
+pub use fi_code_shared::dto::{SseEvent, TaskProgressItem};
 
-/// SSE 事件类型
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum SseEvent {
-    #[serde(rename = "message")]
-    Message { content: String },
-
-    #[serde(rename = "part")]
-    Part { part: crate::session::message::Part },
-
-    #[serde(rename = "task_progress")]
-    TaskProgress {
-        plan_id: String,
-        tasks: Vec<TaskProgressItem>,
-    },
-
-    #[serde(rename = "error")]
-    Error { message: String },
-
-    #[serde(rename = "done")]
-    Done { session_id: String },
-}
 
 /// SSE 发送端，供 agent_loop 写入事件
 #[derive(Clone)]

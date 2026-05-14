@@ -27,9 +27,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::server::transport::sse::TaskProgressItem;
-use crate::tui::event::CardAction;
-use crate::tui::theme::Theme;
+use fi_code_core::server::transport::sse::TaskProgressItem;
+use fi_code_shared::tui_event::CardAction;
+use crate::theme::Theme;
 
 /// 卡片数据结构，表示聊天界面中的一个结构化信息块。
 #[derive(Debug, Clone)]
@@ -82,7 +82,7 @@ impl<'a> CardWidget<'a> {
     }
 
     /// 计算卡片在给定宽度下的渲染高度。
-    pub fn calculate_height(&self, width: u16) -> u16 {
+    pub fn calculate_height(&self, _width: u16) -> u16 {
         let title_height = 1;
         let content_lines = self.card.content.lines().count() as u16;
         let footer_height = if self.show_footer() { 1 } else { 0 };
@@ -365,7 +365,7 @@ mod tests {
 
         let backend = TestBackend::new(40, 8);
         let mut terminal = Terminal::new(backend).unwrap();
-        let theme = crate::tui::theme::Theme::deep_ocean();
+        let theme = crate::theme::Theme::deep_ocean();
         let card = Card {
             id: "c1".to_string(),
             kind: CardKind::Summary,
@@ -407,7 +407,7 @@ mod tests {
 
         let backend = TestBackend::new(30, 6);
         let mut terminal = Terminal::new(backend).unwrap();
-        let theme = crate::tui::theme::Theme::deep_ocean();
+        let theme = crate::theme::Theme::deep_ocean();
         let card = Card {
             id: "c2".to_string(),
             kind: CardKind::Error,

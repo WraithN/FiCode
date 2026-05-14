@@ -22,29 +22,21 @@
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 
-use crate::tui::components::Component;
-use crate::tui::event::AppEvent;
-use crate::tui::theme::Theme;
-
-/// 文件树节点。
-#[derive(Debug, Clone)]
-pub struct FileNode {
-    pub path: String,
-    pub name: String,
-    pub is_dir: bool,
-    pub depth: usize, // 缩进深度，用于层级可视化
-}
+use crate::components::Component;
+use fi_code_shared::tui_event::AppEvent;
+use crate::theme::Theme;
 
 /// 左侧文件抽屉组件，展示项目文件树，支持上下导航与选中。
 pub struct LeftDrawer {
-    files: Vec<FileNode>,
+    files: Vec<fi_code_shared::dto::FileNode>,
     selected_index: usize,
+    #[allow(dead_code)]
     expanded_folders: std::collections::HashSet<String>, // 预留：记录已展开的文件夹
     scroll_offset: usize, // 垂直滚动偏移
 }
@@ -54,7 +46,8 @@ impl LeftDrawer {
         Self {
             files: Vec::new(),
             selected_index: 0,
-            expanded_folders: std::collections::HashSet::new(),
+            #[allow(dead_code)]
+    expanded_folders: std::collections::HashSet::new(),
             scroll_offset: 0,
         }
     }
@@ -69,7 +62,7 @@ impl LeftDrawer {
     }
 
     /// 设置文件列表并重置选中位置到顶部。
-    pub fn set_files(&mut self, files: Vec<FileNode>) {
+    pub fn set_files(&mut self, files: Vec<fi_code_shared::dto::FileNode>) {
         self.files = files;
         self.selected_index = 0;
     }
@@ -192,13 +185,13 @@ mod tests {
     fn test_file_navigation() {
         let mut drawer = LeftDrawer::new();
         drawer.set_files(vec![
-            FileNode {
+            fi_code_shared::dto::FileNode {
                 path: "src".to_string(),
                 name: "src".to_string(),
                 is_dir: true,
                 depth: 0,
             },
-            FileNode {
+            fi_code_shared::dto::FileNode {
                 path: "Cargo.toml".to_string(),
                 name: "Cargo.toml".to_string(),
                 is_dir: false,
@@ -213,9 +206,9 @@ mod tests {
     fn test_scroll_boundary() {
         let mut drawer = LeftDrawer::new();
         drawer.set_files(vec![
-            FileNode { path: "a".into(), name: "a".into(), is_dir: false, depth: 0 },
-            FileNode { path: "b".into(), name: "b".into(), is_dir: false, depth: 0 },
-            FileNode { path: "c".into(), name: "c".into(), is_dir: false, depth: 0 },
+            fi_code_shared::dto::FileNode { path: "a".into(), name: "a".into(), is_dir: false, depth: 0 },
+            fi_code_shared::dto::FileNode { path: "b".into(), name: "b".into(), is_dir: false, depth: 0 },
+            fi_code_shared::dto::FileNode { path: "c".into(), name: "c".into(), is_dir: false, depth: 0 },
         ]);
 
         drawer.scroll_down(10);

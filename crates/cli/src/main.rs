@@ -19,9 +19,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use fi_code_core::entry::run;
+use fi_code_core::entry::{run, EntryOutcome};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    run().await
+    match run().await? {
+        EntryOutcome::Completed => Ok(()),
+        EntryOutcome::StartTui { port } => fi_code_tui::run_tui_mode(port).await,
+    }
 }
