@@ -75,6 +75,184 @@ impl LoopState {
     }
 }
 
+// =============================================================================
+// 单轮对话状态（TurnState）
+// =============================================================================
+
+/// 单轮对话的运行时状态。
+///
+/// 封装 `run_one_turn` 内部的所有整轮生命周期变量，
+/// 避免函数内局部变量散乱，提升可读性和可维护性。
+#[derive(Debug)]
+pub struct TurnState {
+    /// 聚合 LLM 流式输出的所有内容块（Text / Think / ToolUse）
+    pub content_blocks: Vec<Part>,
+    /// LLM 停止原因
+    pub finish_reason: Option<FinishReason>,
+    /// 本轮 Token 使用量
+    pub turn_usage: TokenUsage,
+    /// 当前会话 ID
+    pub session_id: String,
+    /// WaveMarker：标记本轮的 Git 快照、时间戳、Token delta 等元信息
+    pub wave_marker: Part,
+    /// WaveMarker delta 计算的 Token 基线
+    pub token_baseline: TokenUsage,
+    /// Assistant 消息在 messages 中的索引（用于后续更新 WaveMarker）
+    pub assistant_idx: usize,
+}
+
+impl TurnState {
+    /// 创建新的 TurnState。
+    ///
+    /// `wave_step` 是 WaveMarker 的 step 值（通常等于当前轮数 + 1）。
+    /// `token_baseline` 是计算 delta 的基线（通常为上一轮结束时的累计 Token）。
+    pub fn new(
+        session_id: String,
+        wave_step: u32,
+        token_baseline: TokenUsage,
+    ) -> Self {
+        let snapshot = crate::tools::basic_tools::BasicTool::git_write_tree().ok();
+        let wave_marker = Part::WaveMarker {
+            step: wave_step,
+            total: None,
+            git_snapshot: snapshot,
+            timestamp: crate::session::message::current_timestamp_ms(),
+            delta_tokens: MsgTokenUsage::default(),
+        };
+        Self {
+            content_blocks: Vec::new(),
+            finish_reason: None,
+            turn_usage: TokenUsage::default(),
+            session_id,
+            wave_marker,
+            token_baseline,
+            assistant_idx: 0,
+        }
+    }
+
+    /// 处理单个流式 chunk，更新 `content_blocks`、`finish_reason`、`turn_usage`。
+    pub fn process_chunk(&mut self, chunk: Chunk) {
+        match chunk.content {
+            ChunkContent::Text(text) => {
+                if let Some(Part::Text { text: last }) = self.content_blocks.last_mut() {
+                    last.push_str(&text);
+                } else {
+                    self.content_blocks.push(Part::Text { text });
+                }
+            }
+            ChunkContent::Think(text) => {
+                if let Some(Part::Reasoning { thinking: last, .. }) = self.content_blocks.last_mut() {
+                    last.push_str(&text);
+                } else {
+                    self.content_blocks.push(Part::Reasoning {
+                        thinking: text,
+                        signature: None,
+                    });
+                }
+            }
+            ChunkContent::ToolUse(ref tool) => {
+                if let Part::ToolUse { id, name, arguments } = tool {
+                    log_debug!(
+                        "LLM tool_use | id={} | name={} | args={}",
+                        id,
+                        name,
+                        arguments
+                    );
+                    // 按 id 去重：已有同 id 的 ToolUse 则更新，避免 SSE 增量 flush 时重复 push
+                    if let Some(existing) = self.content_blocks.iter_mut().find_map(|p| {
+                        if let Part::ToolUse { id: eid, .. } = p {
+                            if eid == id { Some(p) } else { None }
+                        } else {
+                            None
+                        }
+                    }) {
+                        *existing = tool.clone();
+                        return;
+                    }
+                }
+                self.content_blocks.push(tool.clone());
+            }
+            ChunkContent::Usage(usage) => {
+                self.turn_usage.prompt_tokens += usage.prompt_tokens;
+                self.turn_usage.completion_tokens += usage.completion_tokens;
+                log_debug!(
+                    "LLM usage | prompt={} | completion={} | total_prompt={} | total_completion={}",
+                    usage.prompt_tokens,
+                    usage.completion_tokens,
+                    self.turn_usage.prompt_tokens,
+                    self.turn_usage.completion_tokens
+                );
+            }
+            ChunkContent::Finish(ref reason) => {
+                log_debug!("LLM finish_reason={:?}", reason);
+                self.finish_reason = Some(reason.clone());
+            }
+            ChunkContent::Notification(_) => {
+                // 通知类消息不需要聚合到 content_blocks，已在闭包中转发给客户端
+            }
+        }
+    }
+
+    /// 将 WaveMarker + content_blocks 组装为 Assistant 消息并追加到 messages。
+    /// 同时记录 `assistant_idx`。
+    pub fn append_assistant_message(&mut self, messages: &mut Vec<Message>) {
+        let mut assistant_parts = vec![self.wave_marker.clone()];
+        assistant_parts.extend(self.content_blocks.clone());
+        self.assistant_idx = messages.len();
+        messages.push(Message::new(
+            self.session_id.clone(),
+            Role::Assistant,
+            assistant_parts,
+        ));
+    }
+
+    /// 更新 messages 中 `assistant_idx` 对应消息的 WaveMarker。
+    ///
+    /// `total` 为总轮数（用于 WaveMarker 的 total 字段）。
+    /// `current_usage` 为当前累计 Token 使用量（用于计算 delta）。
+    pub fn update_wave_marker(
+        &self,
+        messages: &mut [Message],
+        total: Option<u32>,
+        current_usage: &TokenUsage,
+    ) {
+        if let Some(Part::WaveMarker {
+            delta_tokens,
+            total: t,
+            ..
+        }) = messages[self.assistant_idx].parts.first_mut()
+        {
+            *delta_tokens = MsgTokenUsage {
+                prompt_tokens: current_usage
+                    .prompt_tokens
+                    .saturating_sub(self.token_baseline.prompt_tokens),
+                completion_tokens: current_usage
+                    .completion_tokens
+                    .saturating_sub(self.token_baseline.completion_tokens),
+            };
+            *t = total;
+        }
+    }
+
+    /// 判断本轮的 ToolUse 是否需要 MCP 两步发现
+    ///（即存在 mcp: 前缀且参数为空的工具调用）。
+    pub fn needs_mcp_two_step(&self) -> bool {
+        self.content_blocks.iter().any(|p| {
+            if let Part::ToolUse { name, arguments, .. } = p {
+                name.starts_with("mcp:") && arguments.as_object().map(|o| o.is_empty()).unwrap_or(true)
+            } else {
+                false
+            }
+        })
+    }
+
+    /// 累加本轮 Token 使用量到 LoopState。
+    pub fn accumulate_token_usage(&self, state: &mut LoopState) {
+        state.token_usage.prompt_tokens += self.turn_usage.prompt_tokens;
+        state.token_usage.completion_tokens += self.turn_usage.completion_tokens;
+    }
+}
+
 #[cfg(debug_assertions)]
 static PROMPT_LOGGED_ONCE: std::sync::Once = std::sync::Once::new();
 
@@ -84,79 +262,6 @@ static PROMPT_LOGGED_ONCE: std::sync::Once = std::sync::Once::new();
 
 /// 运行单轮对话：
 /// 1. 通过 `stream_message` 发起流式请求，并传入闭包实时消费 Chunk；
-/// 2. 在闭包内部将同类型的文本/思考增量聚合为完整的内容块；
-/// 3. tool_use 由客户端拼装完整后，以 `ChunkContent::ToolUse` 形式传入闭包；
-/// 4. 将 assistant 回复追加到状态；
-/// 5. 若停止原因为 `ToolUse`，则执行工具调用并将结果以 user 身份回传；
-/// 6. 返回 `true` 表示需要继续下一轮，`false` 表示本轮结束。
-/// 辅助函数：处理流式 chunk，将内容聚合到 content_blocks
-fn process_chunk(
-    chunk: Chunk,
-    content_blocks: &mut Vec<Part>,
-    finish_reason: &mut Option<FinishReason>,
-    token_usage: &mut TokenUsage,
-) {
-    match chunk.content {
-        ChunkContent::Text(text) => {
-            if let Some(Part::Text { text: last }) = content_blocks.last_mut() {
-                last.push_str(&text);
-            } else {
-                content_blocks.push(Part::Text { text });
-            }
-        }
-        ChunkContent::Think(text) => {
-            if let Some(Part::Reasoning { thinking: last, .. }) = content_blocks.last_mut() {
-                last.push_str(&text);
-            } else {
-                content_blocks.push(Part::Reasoning {
-                    thinking: text,
-                    signature: None,
-                });
-            }
-        }
-        ChunkContent::ToolUse(ref tool) => {
-            if let Part::ToolUse { id, name, arguments } = tool {
-                log_debug!(
-                    "LLM tool_use | id={} | name={} | args={}",
-                    id,
-                    name,
-                    arguments
-                );
-                // 按 id 去重：已有同 id 的 ToolUse 则更新，避免 SSE 增量 flush 时重复 push
-                if let Some(existing) = content_blocks.iter_mut().find_map(|p| {
-                    if let Part::ToolUse { id: eid, .. } = p {
-                        if eid == id { Some(p) } else { None }
-                    } else {
-                        None
-                    }
-                }) {
-                    *existing = tool.clone();
-                    return;
-                }
-            }
-            content_blocks.push(tool.clone());
-        }
-        ChunkContent::Usage(usage) => {
-            token_usage.prompt_tokens += usage.prompt_tokens;
-            token_usage.completion_tokens += usage.completion_tokens;
-            log_debug!(
-                "LLM usage | prompt={} | completion={} | total_prompt={} | total_completion={}",
-                usage.prompt_tokens,
-                usage.completion_tokens,
-                token_usage.prompt_tokens,
-                token_usage.completion_tokens
-            );
-        }
-        ChunkContent::Finish(ref reason) => {
-            log_debug!("LLM finish_reason={:?}", reason);
-            *finish_reason = Some(reason.clone());
-        }
-        ChunkContent::Notification(_) => {
-            // 通知类消息不需要聚合到 content_blocks，已在闭包中转发给客户端
-        }
-    }
-}
-
 /// 收集所有需要两步发现的 MCP 工具的 schema 文本。
 async fn collect_mcp_schema_texts(content_blocks: &[Part]) -> Vec<String> {
     let mut schema_texts = Vec::new();
@@ -185,41 +290,12 @@ async fn collect_mcp_schema_texts(content_blocks: &[Part]) -> Vec<String> {
     schema_texts
 }
 
-fn update_wave_marker(
-    messages: &mut [Message],
-    idx: usize,
-    total: Option<u32>,
-    current_usage: &TokenUsage,
-    baseline: &TokenUsage,
-) {
-    if let Some(Part::WaveMarker {
-        delta_tokens,
-        total: t,
-        ..
-    }) = messages[idx].parts.first_mut()
-    {
-        *delta_tokens = MsgTokenUsage {
-            prompt_tokens: current_usage
-                .prompt_tokens
-                .saturating_sub(baseline.prompt_tokens),
-            completion_tokens: current_usage
-                .completion_tokens
-                .saturating_sub(baseline.completion_tokens),
-        };
-        *t = total;
-    }
-}
-
 pub async fn run_one_turn<C: AIClient + ?Sized>(
     client: &C,
     state: &mut LoopState,
     on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Result<bool> {
-    let mut content_blocks = Vec::new();
-    let mut finish_reason = None;
-    let mut turn_usage = TokenUsage::default();
-
     // 从当前消息历史中继承 session_id，确保工具结果消息与对话属于同一会话
     let session_id = state
         .messages
@@ -227,19 +303,16 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         .map(|m| m.session_id.clone())
         .unwrap_or_default();
 
-    // === WaveMarker setup ===
-    let snapshot = crate::tools::basic_tools::BasicTool::git_write_tree().ok();
-    let token_baseline = state.token_usage.clone();
-    let wave_marker = Part::WaveMarker {
-        step: state.turn_count as u32 + 1,
-        total: None,
-        git_snapshot: snapshot,
-        timestamp: crate::session::message::current_timestamp_ms(),
-        delta_tokens: MsgTokenUsage::default(),
-    };
+    let mut turn = TurnState::new(
+        session_id.clone(),
+        state.turn_count as u32 + 1,
+        state.token_usage.clone(),
+    );
+
+    // 发送 WaveMarker SSE 事件
     if let Some(ref mut cb) = on_tool_event {
         let _ = cb(crate::server::transport::sse::SseEvent::Part {
-            part: wave_marker.clone(),
+            part: turn.wave_marker.clone(),
         });
     }
 
@@ -297,7 +370,6 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     );
 
     // 消息历史截断：超过 30 条时只保留最近 30 条，防止长对话导致 Prompt 无限膨胀
-    // MAX_CONTEXT_MESSAGES 已从 fi_code_shared::constants 导入
     let messages_for_llm: &[Message] = if state.messages.len() > MAX_CONTEXT_MESSAGES {
         let start = state.messages.len().saturating_sub(MAX_CONTEXT_MESSAGES);
         &state.messages[start..]
@@ -326,59 +398,44 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
                 }
                 _ => {}
             }
-            process_chunk(
-                chunk,
-                &mut content_blocks,
-                &mut finish_reason,
-                &mut turn_usage,
-            )
+            turn.process_chunk(chunk);
         })
         .await?;
 
     log_info!(
         "[Agent] LLM stream complete | turn={} | blocks={} | turn_usage={:?}",
         state.turn_count,
-        content_blocks.len(),
-        turn_usage
+        turn.content_blocks.len(),
+        turn.turn_usage
     );
 
     log_debug!(
         "[Agent] assistant message appended | blocks={}",
-        content_blocks.len()
+        turn.content_blocks.len()
     );
 
     // 将 Assistant 的完整回复追加到状态（包含 WaveMarker）
-    for (idx, block) in content_blocks.iter().enumerate() {
+    for (idx, block) in turn.content_blocks.iter().enumerate() {
         let preview = format!("{:?}", block).chars().take(200).collect::<String>();
         log_debug!("assistant block[{}] | {}", idx, preview);
         log_trace!("assistant block[{}] | {:?}", idx, block);
     }
-    let mut assistant_parts = vec![wave_marker];
-    assistant_parts.extend(content_blocks.clone());
-    let assistant_idx = state.messages.len();
-    state.messages.push(Message::new(
-        session_id.clone(),
-        Role::Assistant,
-        assistant_parts,
-    ));
+    turn.append_assistant_message(&mut state.messages);
 
     // 累加本轮 Token 使用量到全局状态
-    state.token_usage.prompt_tokens += turn_usage.prompt_tokens;
-    state.token_usage.completion_tokens += turn_usage.completion_tokens;
+    turn.accumulate_token_usage(state);
 
     // 判断停止原因：只有明确为 ToolUse 时才继续执行工具调用回合
-    if finish_reason != Some(FinishReason::ToolUse) {
-        update_wave_marker(
+    if turn.finish_reason != Some(FinishReason::ToolUse) {
+        turn.update_wave_marker(
             &mut state.messages,
-            assistant_idx,
             Some(state.turn_count as u32 + 1),
             &state.token_usage,
-            &token_baseline,
         );
         state.transition_reason = None;
         log_info!(
             "[Agent] run_one_turn end | no tool use | finish_reason={:?}",
-            finish_reason
+            turn.finish_reason
         );
         return Ok(false);
     }
@@ -386,22 +443,8 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     // =============================================================================
     // MCP Two-Step-Discovery
     // =============================================================================
-    // 如果 LLM 返回的 ToolUse 中包含 mcp: 前缀且参数为空，
-    // 则获取完整 input_schema，构造补充消息，重新调用 LLM。
-
-    let needs_two_step = content_blocks.iter().any(|p| {
-        if let Part::ToolUse {
-            name, arguments, ..
-        } = p
-        {
-            name.starts_with("mcp:") && arguments.as_object().map(|o| o.is_empty()).unwrap_or(true)
-        } else {
-            false
-        }
-    });
-
-    if needs_two_step {
-        let schema_texts = collect_mcp_schema_texts(&content_blocks).await;
+    if turn.needs_mcp_two_step() {
+        let schema_texts = collect_mcp_schema_texts(&turn.content_blocks).await;
 
         if !schema_texts.is_empty() {
             state.messages.push(Message::new(
@@ -416,30 +459,25 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
             ));
 
             // 重新调用 LLM 获取带参数的 ToolUse
-            content_blocks.clear();
-            finish_reason = None;
+            turn.content_blocks.clear();
+            turn.finish_reason = None;
 
             client
                 .stream_message(&system_prompt, &state.messages, &schema, &mut |chunk| {
-                    process_chunk(
-                        chunk,
-                        &mut content_blocks,
-                        &mut finish_reason,
-                        &mut turn_usage,
-                    )
+                    turn.process_chunk(chunk);
                 })
                 .await?;
 
             state.messages.push(Message::new(
                 session_id.clone(),
                 Role::Assistant,
-                content_blocks.clone(),
+                turn.content_blocks.clone(),
             ));
         }
     }
 
     // 发送 ToolUse 事件
-    for block in &content_blocks {
+    for block in &turn.content_blocks {
         if let Part::ToolUse {
             id,
             name,
@@ -459,14 +497,12 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     }
 
     // 执行所有工具调用，并收集结果
-    let tool_results = execute_tool_calls(&content_blocks, on_tool_event).await;
+    let tool_results = execute_tool_calls(&turn.content_blocks, on_tool_event).await;
     if tool_results.is_empty() {
-        update_wave_marker(
+        turn.update_wave_marker(
             &mut state.messages,
-            assistant_idx,
             Some(state.turn_count as u32 + 1),
             &state.token_usage,
-            &token_baseline,
         );
         state.transition_reason = None;
         log_info!("[Agent] run_one_turn end | tool_use finish but no results");
@@ -486,19 +522,18 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     let all_success = tool_results.iter().all(|p| {
         matches!(p, Part::ToolResult { .. })
     });
-    let has_preamble = content_blocks
+    let has_preamble = turn
+        .content_blocks
         .iter()
         .any(|p| matches!(p, Part::Text { .. }));
 
     if all_success && has_preamble {
-        update_wave_marker(
+        turn.update_wave_marker(
             &mut state.messages,
-            assistant_idx,
             Some(state.turn_count as u32 + 1),
             &state.token_usage,
-            &token_baseline,
         );
-        let summary = format_tool_results(&content_blocks, &tool_results);
+        let summary = format_tool_results(&turn.content_blocks, &tool_results);
         log_info!("[Agent] direct output | summary_len={}", summary.len());
 
         // 通过 SSE 实时发送总结文本到前端
@@ -526,12 +561,10 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     state.turn_count += 1;
     state.transition_reason = Some("tool_result".to_string());
 
-    update_wave_marker(
+    turn.update_wave_marker(
         &mut state.messages,
-        assistant_idx,
         None,
         &state.token_usage,
-        &token_baseline,
     );
 
     log_info!(

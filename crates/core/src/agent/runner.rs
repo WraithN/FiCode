@@ -27,11 +27,11 @@
 
 use anyhow::Result;
 
+use crate::agent::TurnState;
 use crate::log_debug;
 use crate::provider::base_client::{AIClient, ChunkContent, FinishReason, TokenUsage};
 use crate::provider::execute_tool_calls;
-use crate::provider::Chunk;
-use crate::session::message::{Message, Part, Role, TokenUsage as MsgTokenUsage};
+use crate::session::message::{Message, Part, Role};
 
 // =============================================================================
 // Agent 运行结果
@@ -130,29 +130,23 @@ impl AgentRunner {
         on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
         on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
     ) -> Result<(bool, Option<FinishReason>, TokenUsage)> {
-        let mut content_blocks = Vec::new();
-        let mut finish_reason = None;
-        let mut turn_usage = TokenUsage::default();
-
         // 从当前消息历史中继承 session_id
         let session_id = messages
             .last()
             .map(|m| m.session_id.clone())
             .unwrap_or_default();
 
-        // === WaveMarker setup ===
-        let snapshot = crate::tools::basic_tools::BasicTool::git_write_tree().ok();
-        let token_baseline = turn_usage.clone();
-        let wave_marker = Part::WaveMarker {
-            step: messages.iter().filter(|m| m.role == Role::Assistant).count() as u32 + 1,
-            total: None,
-            git_snapshot: snapshot,
-            timestamp: crate::session::message::current_timestamp_ms(),
-            delta_tokens: MsgTokenUsage::default(),
-        };
+        let assistant_count = messages.iter().filter(|m| m.role == Role::Assistant).count() as u32;
+        let mut turn = TurnState::new(
+            session_id.clone(),
+            assistant_count + 1,
+            TokenUsage::default(),
+        );
+
+        // 发送 WaveMarker SSE 事件
         if let Some(ref mut cb) = on_tool_event {
             let _ = cb(crate::server::transport::sse::SseEvent::Part {
-                part: wave_marker.clone(),
+                part: turn.wave_marker.clone(),
             });
         }
 
@@ -203,56 +197,40 @@ impl AgentRunner {
                         }
                         _ => {}
                     }
-                    Self::process_chunk(
-                        chunk,
-                        &mut content_blocks,
-                        &mut finish_reason,
-                        &mut turn_usage,
-                    )
+                    turn.process_chunk(chunk);
                 },
             )
             .await?;
 
         // 组装 Assistant 消息：WaveMarker + content_blocks
-        let mut assistant_parts = vec![wave_marker];
-        assistant_parts.extend(content_blocks.clone());
-        let assistant_idx = messages.len();
-        messages.push(Message::new(
-            session_id.clone(),
-            Role::Assistant,
-            assistant_parts,
-        ));
+        turn.append_assistant_message(messages);
 
         // 非 ToolUse 则结束循环
-        if finish_reason != Some(FinishReason::ToolUse) {
+        if turn.finish_reason != Some(FinishReason::ToolUse) {
             log_debug!(
                 "AgentRunner::run_one_turn | finish_reason={:?}, stopping",
-                finish_reason
+                turn.finish_reason
             );
             let assistant_count = messages.iter().filter(|m| m.role == Role::Assistant).count() as u32;
-            update_wave_marker_runner(
+            turn.update_wave_marker(
                 messages,
-                assistant_idx,
                 Some(assistant_count),
-                &turn_usage,
-                &token_baseline,
+                &turn.turn_usage,
             );
-            return Ok((false, finish_reason, turn_usage));
+            return Ok((false, turn.finish_reason, turn.turn_usage));
         }
 
         // 执行所有工具调用并收集结果
-        let tool_results = execute_tool_calls(&content_blocks, on_tool_event).await;
+        let tool_results = execute_tool_calls(&turn.content_blocks, on_tool_event).await;
         if tool_results.is_empty() {
             log_debug!("AgentRunner::run_one_turn | tool_use but no results, stopping");
             let assistant_count = messages.iter().filter(|m| m.role == Role::Assistant).count() as u32;
-            update_wave_marker_runner(
+            turn.update_wave_marker(
                 messages,
-                assistant_idx,
                 Some(assistant_count),
-                &turn_usage,
-                &token_baseline,
+                &turn.turn_usage,
             );
-            return Ok((false, finish_reason, turn_usage));
+            return Ok((false, turn.finish_reason, turn.turn_usage));
         }
 
         log_debug!(
@@ -265,20 +243,19 @@ impl AgentRunner {
         let all_success = tool_results.iter().all(|p| {
             matches!(p, Part::ToolResult { .. })
         });
-        let has_preamble = content_blocks
+        let has_preamble = turn
+            .content_blocks
             .iter()
             .any(|p| matches!(p, Part::Text { .. }));
 
         if all_success && has_preamble {
             let assistant_count = messages.iter().filter(|m| m.role == Role::Assistant).count() as u32;
-            update_wave_marker_runner(
+            turn.update_wave_marker(
                 messages,
-                assistant_idx,
                 Some(assistant_count),
-                &turn_usage,
-                &token_baseline,
+                &turn.turn_usage,
             );
-            let summary = format_tool_results(&content_blocks, &tool_results);
+            let summary = format_tool_results(&turn.content_blocks, &tool_results);
             log_debug!("AgentRunner::direct output | summary_len={}", summary.len());
 
             if let Some(ref mut cb) = on_text {
@@ -291,82 +268,19 @@ impl AgentRunner {
                 }
             }
 
-            return Ok((false, finish_reason, turn_usage));
+            return Ok((false, turn.finish_reason, turn.turn_usage));
         }
 
         // 将工具结果封装为 User 消息回传
         messages.push(Message::new(session_id, Role::User, tool_results));
 
-        update_wave_marker_runner(
+        turn.update_wave_marker(
             messages,
-            assistant_idx,
             None,
-            &turn_usage,
-            &token_baseline,
+            &turn.turn_usage,
         );
 
-        Ok((true, finish_reason, turn_usage))
-    }
-
-    /// 处理流式 chunk，将内容聚合到 `content_blocks`。
-    fn process_chunk(
-        chunk: Chunk,
-        content_blocks: &mut Vec<Part>,
-        finish_reason: &mut Option<FinishReason>,
-        token_usage: &mut TokenUsage,
-    ) {
-        match chunk.content {
-            ChunkContent::Text(text) => {
-                if let Some(Part::Text { text: last }) = content_blocks.last_mut() {
-                    last.push_str(&text);
-                } else {
-                    content_blocks.push(Part::Text { text });
-                }
-            }
-            ChunkContent::Think(text) => {
-                if let Some(Part::Reasoning { thinking: last, .. }) = content_blocks.last_mut() {
-                    last.push_str(&text);
-                } else {
-                    content_blocks.push(Part::Reasoning {
-                        thinking: text,
-                        signature: None,
-                    });
-                }
-            }
-            ChunkContent::ToolUse(ref tool) => {
-                if let Part::ToolUse { id, name, arguments } = tool {
-                    log_debug!(
-                        "LLM tool_use | id={} | name={} | args={}",
-                        id,
-                        name,
-                        arguments
-                    );
-                    // 按 id 去重：已有同 id 的 ToolUse 则更新，避免重复 push
-                    if let Some(existing) = content_blocks.iter_mut().find_map(|p| {
-                        if let Part::ToolUse { id: eid, .. } = p {
-                            if eid == id { Some(p) } else { None }
-                        } else {
-                            None
-                        }
-                    }) {
-                        *existing = tool.clone();
-                    } else {
-                        content_blocks.push(tool.clone());
-                    }
-                }
-            }
-            ChunkContent::Usage(usage) => {
-                token_usage.prompt_tokens += usage.prompt_tokens;
-                token_usage.completion_tokens += usage.completion_tokens;
-            }
-            ChunkContent::Finish(ref reason) => {
-                log_debug!("LLM finish_reason={:?}", reason);
-                *finish_reason = Some(reason.clone());
-            }
-            ChunkContent::Notification(_) => {
-                // 通知类消息不需要聚合到 content_blocks，已在闭包中转发给客户端
-            }
-        }
+        Ok((true, turn.finish_reason, turn.turn_usage))
     }
 }
 
@@ -406,30 +320,4 @@ fn format_tool_results(content_blocks: &[Part], tool_results: &[Part]) -> String
         }
     }
     lines.join("\n")
-}
-
-/// 更新 Assistant 消息中的 WaveMarker。
-fn update_wave_marker_runner(
-    messages: &mut [Message],
-    idx: usize,
-    total: Option<u32>,
-    current_usage: &TokenUsage,
-    baseline: &TokenUsage,
-) {
-    if let Some(Part::WaveMarker {
-        delta_tokens,
-        total: t,
-        ..
-    }) = messages[idx].parts.first_mut()
-    {
-        *delta_tokens = MsgTokenUsage {
-            prompt_tokens: current_usage
-                .prompt_tokens
-                .saturating_sub(baseline.prompt_tokens),
-            completion_tokens: current_usage
-                .completion_tokens
-                .saturating_sub(baseline.completion_tokens),
-        };
-        *t = total;
-    }
 }
