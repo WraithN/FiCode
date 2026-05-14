@@ -194,6 +194,13 @@ impl AgentRunner {
                                 });
                             }
                         }
+                        ChunkContent::Notification(msg) => {
+                            if let Some(ref mut cb) = on_tool_event {
+                                let _ = cb(crate::server::transport::sse::SseEvent::Message {
+                                    content: msg.clone(),
+                                });
+                            }
+                        }
                         _ => {}
                     }
                     Self::process_chunk(
@@ -355,6 +362,9 @@ impl AgentRunner {
             ChunkContent::Finish(ref reason) => {
                 log_debug!("LLM finish_reason={:?}", reason);
                 *finish_reason = Some(reason.clone());
+            }
+            ChunkContent::Notification(_) => {
+                // 通知类消息不需要聚合到 content_blocks，已在闭包中转发给客户端
             }
         }
     }

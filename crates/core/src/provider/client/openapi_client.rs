@@ -41,6 +41,7 @@ use crate::session::message::{Message, Part, Role};
 // =============================================================================
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct OpenAiClient {
     client: reqwest::Client,
@@ -152,7 +153,28 @@ impl AIClient for OpenAiClient {
             .headers(headers)
             .json(&body)
             .build()?;
-        let resp = send_with_retry(&self.client, request, &self.retry_config).await?;
+        let max_retries = self.retry_config.max_retries;
+        let retry_msgs: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let notifier = {
+            let retry_msgs = Arc::clone(&retry_msgs);
+            Box::new(move |attempt: u32, msg: &str| {
+                let mut guard = retry_msgs.lock().unwrap();
+                guard.push(format!(
+                    "[API 重试 {}/{}] {}",
+                    attempt, max_retries, msg
+                ));
+            })
+        };
+        let resp = send_with_retry(&self.client, request, &self.retry_config, Some(notifier)).await?;
+        // send_with_retry 返回后，将所有重试通知通过 on_chunk 发送给客户端
+        {
+            let guard = retry_msgs.lock().unwrap();
+            for msg in guard.iter() {
+                on_chunk(Chunk {
+                    content: ChunkContent::Notification(msg.clone()),
+                });
+            }
+        }
 
         let status = resp.status();
         if !status.is_success() {

@@ -149,6 +149,9 @@ fn process_chunk(
             log_debug!("LLM finish_reason={:?}", reason);
             *finish_reason = Some(reason.clone());
         }
+        ChunkContent::Notification(_) => {
+            // 通知类消息不需要聚合到 content_blocks，已在闭包中转发给客户端
+        }
     }
 }
 
@@ -307,11 +310,16 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
     client
         .stream_message(&system_prompt, messages_for_llm, &schema, &mut |chunk| {
-            // 实时转发文本内容，实现真流式
+            // 实时转发文本内容和系统通知，实现真流式
             match &chunk.content {
                 ChunkContent::Text(text) | ChunkContent::Think(text) => {
                     if let Some(ref mut cb) = on_text {
                         cb(text);
+                    }
+                }
+                ChunkContent::Notification(msg) => {
+                    if let Some(ref mut cb) = on_text {
+                        cb(msg);
                     }
                 }
                 _ => {}

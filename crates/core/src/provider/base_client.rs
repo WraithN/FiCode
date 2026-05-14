@@ -91,6 +91,8 @@ pub enum ChunkContent {
     ToolUse(Part),
     Usage(TokenUsage),
     Finish(FinishReason),
+    /// 系统通知（如 API 重试提示），不直接属于 AI 输出内容
+    Notification(String),
 }
 
 /// Token 使用量统计。
@@ -195,8 +197,22 @@ fn compute_backoff(attempt: u32, base: Duration, max: Duration) -> Duration {
 /// - `request` 必须支持 `try_clone()`。对于基于 `String` / `Bytes` 的 JSON body，
 ///   reqwest 通常可以成功克隆；若 body 是不可克隆的流，则会在首次重试时返回错误。
 /// - 对于非成功但不可重试的 HTTP 响应，直接原样返回，由调用方处理错误 body。
-async fn do_retry_backoff(attempt: u32, config: &RetryConfig, context: &str, detail: &str) {
+/// 计算并执行退避等待，可选发送重试通知。
+async fn do_retry_backoff(
+    attempt: u32,
+    config: &RetryConfig,
+    context: &str,
+    detail: &str,
+    notifier: &mut Option<Box<dyn FnMut(u32, &str) + Send>>,
+) {
     let backoff = compute_backoff(attempt, config.base_delay, config.max_delay);
+    let msg = format!(
+        "访问 API 失败，正在进行第 {} 次重试（共 {} 次），等待 {:?}：{}",
+        attempt + 1,
+        config.max_retries,
+        backoff,
+        detail
+    );
     log_trace!(
         "[Server] send_with_retry | attempt={} | {} | backoff={:?}",
         attempt + 1,
@@ -211,6 +227,10 @@ async fn do_retry_backoff(attempt: u32, config: &RetryConfig, context: &str, det
         backoff,
         detail
     );
+    // 如果调用方提供了通知回调，发送重试通知消息
+    if let Some(ref mut cb) = notifier {
+        cb(attempt + 1, &msg);
+    }
     tokio::time::sleep(backoff).await;
 }
 
@@ -218,6 +238,7 @@ pub async fn send_with_retry(
     client: &reqwest::Client,
     request: reqwest::Request,
     config: &RetryConfig,
+    mut notifier: Option<Box<dyn FnMut(u32, &str) + Send>>,
 ) -> Result<reqwest::Response> {
     let mut attempt = 0u32;
 
@@ -232,7 +253,7 @@ pub async fn send_with_retry(
                 if !is_retryable_error(&err) || attempt >= config.max_retries {
                     return Err(err.into());
                 }
-                do_retry_backoff(attempt, config, "network error", &err.to_string()).await;
+                do_retry_backoff(attempt, config, "network error", &err.to_string(), &mut notifier).await;
                 attempt += 1;
                 continue;
             }
@@ -250,7 +271,7 @@ pub async fn send_with_retry(
             return Ok(resp);
         }
         let text = resp.text().await.unwrap_or_default();
-        do_retry_backoff(attempt, config, &format!("HTTP {}", status), &text).await;
+        do_retry_backoff(attempt, config, &format!("HTTP {}", status), &text, &mut notifier).await;
         attempt += 1;
     }
 }

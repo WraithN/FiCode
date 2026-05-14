@@ -33,6 +33,7 @@ use crate::provider::base_client::{
     send_with_retry, AIClient, Chunk, ChunkContent, FinishReason, RetryConfig,
 };
 use crate::session::message::{ImageSource, Message, Part, Role};
+use std::sync::Arc;
 
 // =============================================================================
 // Anthropic API 客户端
@@ -118,7 +119,28 @@ impl AIClient for AnthropicClient {
             .headers(headers)
             .json(&body)
             .build()?;
-        let resp = send_with_retry(&self.client, request, &self.retry_config).await?;
+        let max_retries = self.retry_config.max_retries;
+        let retry_msgs: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let notifier = {
+            let retry_msgs = Arc::clone(&retry_msgs);
+            Box::new(move |attempt: u32, msg: &str| {
+                let mut guard = retry_msgs.lock().unwrap();
+                guard.push(format!(
+                    "[API 重试 {}/{}] {}",
+                    attempt, max_retries, msg
+                ));
+            })
+        };
+        let resp = send_with_retry(&self.client, request, &self.retry_config, Some(notifier)).await?;
+        // send_with_retry 返回后，将所有重试通知通过 on_chunk 发送给客户端
+        {
+            let guard = retry_msgs.lock().unwrap();
+            for msg in guard.iter() {
+                on_chunk(Chunk {
+                    content: ChunkContent::Notification(msg.clone()),
+                });
+            }
+        }
 
         // 检查 HTTP 状态码
         let status = resp.status();
