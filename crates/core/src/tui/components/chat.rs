@@ -341,8 +341,8 @@ impl Chat {
             height += content_para.line_count(width).max(1) as u16;
             height += 1; // 空行
         }
-        if self.is_generating {
-            height += 1; // spinner
+        if self.is_generating || !self.turns.is_empty() {
+            height += 1; // spinner 或静止满格状态指示器
         }
         height
     }
@@ -596,7 +596,9 @@ impl Component for Chat {
             current_y += 1; // 空行
         }
 
-        // Spinner
+        // AI 状态指示器
+        // 生成中：动画 spinner；等待用户输入：静止满格 ●
+        let has_conversation = !self.turns.is_empty();
         if self.is_generating {
             let spinner = SPINNER_FRAMES[self.spinner_frame];
             let spinner_height = 1u16;
@@ -610,6 +612,20 @@ impl Component for Chat {
                     Span::styled(spinner, theme.style_brand()),
                 ]);
                 frame.render_widget(Paragraph::new(spinner_line), rect);
+            }
+        } else if has_conversation {
+            // 有对话历史且未在生成：显示静止满格，表示等待用户输入
+            let status_height = 1u16;
+            if let Some((rect, _)) = clip_rect(current_y, status_height) {
+                let status_line = Line::from(vec![
+                    Span::styled("◆ ", theme.style_brand()),
+                    Span::styled(
+                        "AI ",
+                        theme.style_brand().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("●", theme.style_brand()),
+                ]);
+                frame.render_widget(Paragraph::new(status_line), rect);
             }
         }
 
