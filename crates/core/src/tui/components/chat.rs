@@ -614,7 +614,22 @@ impl Component for Chat {
                 frame.render_widget(Paragraph::new(spinner_line), rect);
             }
         } else if has_conversation {
-            // 有对话历史且未在生成：显示静止满格，表示等待用户输入
+            // 有对话历史且未在生成：显示静止满格，颜色反映最后一轮状态
+            // 检查最后一轮是否有错误（ToolError 或包含 Error 的 ToolResult）
+            let last_turn_has_error = self.turns.last().map_or(false, |turn| {
+                turn.parts.iter().any(|p| match p {
+                    Part::ToolError { .. } => true,
+                    Part::ToolResult { content, .. } => {
+                        content.contains("Error") || content.contains("error")
+                    }
+                    _ => false,
+                })
+            });
+            let dot_color = if last_turn_has_error {
+                theme.error // 红色：最后一轮有错误
+            } else {
+                theme.success // 绿色：正常完成
+            };
             let status_height = 1u16;
             if let Some((rect, _)) = clip_rect(current_y, status_height) {
                 let status_line = Line::from(vec![
@@ -623,7 +638,7 @@ impl Component for Chat {
                         "AI ",
                         theme.style_brand().add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled("●", theme.style_brand()),
+                    Span::styled("●", Style::default().fg(dot_color)),
                 ]);
                 frame.render_widget(Paragraph::new(status_line), rect);
             }
