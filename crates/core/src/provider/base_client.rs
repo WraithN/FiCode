@@ -26,6 +26,7 @@ use crate::session::message::Part;
 use anyhow::Result;
 use async_trait::async_trait;
 use fi_code_shared::constants::*;
+use serde::Serialize;
 use std::time::Duration;
 
 // =============================================================================
@@ -56,7 +57,7 @@ pub enum ChunkContent {
 }
 
 /// Token 使用量统计。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct TokenUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,

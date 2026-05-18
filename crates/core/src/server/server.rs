@@ -56,6 +56,8 @@ pub struct AppState {
     pub themes: Vec<crate::theme_preset::ThemePreset>,
     pub current_theme: Arc<RwLock<String>>,
     pub log_broadcaster: Option<Arc<crate::utils::log_store::LogBroadcaster>>,
+    /// 磁盘会话管理器，用于将内存会话持久化到 JSONL
+    pub session_manager: Option<Arc<crate::session::SessionManager>>,
 }
 
 pub struct Server {
@@ -82,6 +84,15 @@ impl Server {
 
         let themes = crate::theme_preset::ThemePreset::all_presets();
 
+        // 初始化磁盘会话管理器
+        let session_manager = {
+            let config_dir = directories::ProjectDirs::from("", "", "fi-code")
+                .map(|d| d.config_dir().to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from(".config/fi-code"));
+            let sessions_dir = config_dir.join("sessions");
+            Some(Arc::new(crate::session::SessionManager::new(sessions_dir)))
+        };
+
         Self {
             state: AppState {
                 provider,
@@ -91,6 +102,7 @@ impl Server {
                 themes,
                 current_theme,
                 log_broadcaster: None,
+                session_manager,
             },
             port,
         }
@@ -119,6 +131,10 @@ impl Server {
             .route(
                 "/api/sessions/:id/switch",
                 post(session_api::switch_session),
+            )
+            .route(
+                "/api/sessions/:id/messages",
+                get(session_api::get_session_messages),
             )
             .route("/api/files", get(file_api::file_tree))
             .route("/api/files/content", get(file_api::file_content))
@@ -150,7 +166,13 @@ impl Server {
 
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", self.port))
             .await
-            .unwrap();
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to bind server to port {}: {}. Please check if the port is already in use.",
+                    self.port,
+                    e
+                );
+            });
 
         println!("🚀 Server listening on http://0.0.0.0:{}", self.port);
 
@@ -304,6 +326,7 @@ pub mod test_helpers {
             themes: crate::theme_preset::ThemePreset::all_presets(),
             current_theme,
             log_broadcaster: Some(Arc::new(crate::utils::log_store::LogBroadcaster::new(100))),
+            session_manager: None,
         }
     }
 
