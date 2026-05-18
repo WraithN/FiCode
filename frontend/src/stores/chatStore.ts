@@ -35,9 +35,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   appendPart: (turnId: string, part: Part) => {
     set((state) => ({
-      turns: state.turns.map((turn) =>
-        turn.id === turnId ? { ...turn, parts: [...turn.parts, part] } : turn
-      ),
+      turns: state.turns.map((turn) => {
+        if (turn.id !== turnId) return turn;
+        const lastPart = turn.parts[turn.parts.length - 1];
+        // 合并相邻的 text part，避免流式输出时每个 chunk 都变成独立块
+        if (lastPart && lastPart.type === 'text' && part.type === 'text') {
+          const merged: Part = { type: 'text', text: lastPart.text + part.text };
+          return { ...turn, parts: [...turn.parts.slice(0, -1), merged] };
+        }
+        return { ...turn, parts: [...turn.parts, part] };
+      }),
     }));
   },
 

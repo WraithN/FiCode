@@ -6,10 +6,13 @@ import { LogPanel } from './LogPanel';
 import { ChatPanel } from '../chat/ChatPanel';
 import { InputBox } from '../chat/InputBox';
 import { useUIStore } from '../../stores/uiStore';
+import { useConnectionStore } from '../../stores/connectionStore';
 import { getPresetByName, applyTheme } from '../../themes';
+import { getStatus } from '../../services/model';
 
 export const AppLayout: React.FC = () => {
-  const { themeName } = useUIStore();
+  const { themeName, setCurrentModel } = useUIStore();
+  const { setConnectionStatus } = useConnectionStore();
 
   useEffect(() => {
     let preset = getPresetByName(themeName);
@@ -18,6 +21,19 @@ export const AppLayout: React.FC = () => {
     }
     if (preset) applyTheme(preset);
   }, [themeName]);
+
+  // 初始化：获取当前模型名和连接状态
+  useEffect(() => {
+    getStatus()
+      .then((model) => {
+        setCurrentModel(model);
+        setConnectionStatus('connected');
+      })
+      .catch((err) => {
+        console.warn('[AppLayout] Failed to get status:', err);
+        setConnectionStatus('error', err.message);
+      });
+  }, [setCurrentModel, setConnectionStatus]);
 
   return (
     <div className="w-screen h-screen flex flex-col bg-bg text-text-primary overflow-hidden">
