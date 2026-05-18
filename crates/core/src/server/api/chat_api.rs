@@ -35,8 +35,10 @@ use crate::log_debug;
 use crate::log_error;
 use crate::log_info;
 use crate::log_trace;
-use crate::session::message::{Message, Part, Role};
+use crate::session::message::{current_timestamp_ms, Message, Part, Role};
+use crate::session::session::{Session, SessionStatus};
 use crate::tools::set_task_provider;
+use crate::utils::workspace::workspace_dir;
 
 use super::super::server::{check_auth, AppState};
 use super::super::transport::rpc::JsonRpcResponse;
@@ -253,8 +255,41 @@ async fn run_agent_chat(
         })
         .await;
 
-    // 保存会话状态
+    // 保存会话状态（内存）
+    let messages_for_disk = loop_state.messages.clone();
     state.sessions.save(&session_id, loop_state);
+
+    // 持久化到磁盘（JSONL）
+    if let Some(ref sm) = state.session_manager {
+        let model = match state.provider.read() {
+            Ok(p) => p.model_name().unwrap_or("unknown").to_string(),
+            Err(_) => "unknown".to_string(),
+        };
+        let now = current_timestamp_ms();
+        // 尝试复用已有会话的 created_at，否则使用当前时间
+        let created_at = sm
+            .load_session(&session_id)
+            .map(|s| s.created_at)
+            .unwrap_or(now);
+        let session = Session {
+            id: session_id.clone(),
+            project_path: workspace_dir().to_string_lossy().to_string(),
+            created_at,
+            updated_at: now,
+            model,
+            status: SessionStatus::Active,
+            agent_type: fi_code_shared::dto::AgentType::Build,
+            messages: messages_for_disk,
+        };
+        let sm = Arc::clone(sm);
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = sm.save_session(&session) {
+                log_error!("[Server] Failed to save session to disk: {}", e);
+            } else {
+                log_info!("[Server] Session saved to disk | id={}", session.id);
+            }
+        });
+    }
 
     // 发送 done 事件
     let _ = sse_sender

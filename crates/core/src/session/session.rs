@@ -45,6 +45,7 @@ use serde_json::json;
 use crate::log_debug;
 use crate::session::message::{current_timestamp_ms, Message, MessageBuilder, Part, Role};
 use crate::utils::workspace::workspace_dir;
+use fi_code_shared::dto::AgentType;
 
 // =============================================================================
 // 会话状态枚举
@@ -75,6 +76,7 @@ pub struct Session {
     pub updated_at: u64,
     pub model: String,
     pub status: SessionStatus,
+    pub agent_type: AgentType,
     pub messages: Vec<Message>,
 }
 
@@ -129,6 +131,7 @@ impl SessionManager {
             updated_at: now,
             model: model.to_string(),
             status: SessionStatus::Active,
+            agent_type: AgentType::Build,
             messages: Vec::new(),
         };
         self.write_session_header(&session)?;
@@ -461,6 +464,10 @@ fn session_to_record(session: &Session) -> Record {
         "status".to_string(),
         serde_json::to_value(&session.status).unwrap(),
     );
+    fields.insert(
+        "agent_type".to_string(),
+        serde_json::to_value(&session.agent_type).unwrap(),
+    );
     Record {
         type_: "session".to_string(),
         fields,
@@ -482,6 +489,11 @@ fn parse_session_record(record: Record) -> Result<Session> {
                 .cloned()
                 .unwrap_or(json!("active")),
         )?,
+        agent_type: record
+            .fields
+            .get("agent_type")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default(),
         messages: Vec::new(),
     })
 }
@@ -653,5 +665,45 @@ mod tests {
         assert_eq!(manager.find_session(&s.id).unwrap().id, s.id);
         assert_eq!(manager.find_session(prefix).unwrap().id, s.id);
         assert!(manager.find_session("zzzz").is_err());
+    }
+
+    /// 测试旧版 JSONL 记录（无 agent_type 字段）向后兼容
+    #[test]
+    fn test_session_backward_compat_missing_agent_type() {
+        let record = Record {
+            type_: "session".to_string(),
+            fields: {
+                let mut m = serde_json::Map::new();
+                m.insert("id".to_string(), json!("test-session"));
+                m.insert("project_path".to_string(), json!("/tmp"));
+                m.insert("created_at".to_string(), json!(1234567890u64));
+                m.insert("updated_at".to_string(), json!(1234567890u64));
+                m.insert("model".to_string(), json!("gpt-4"));
+                m.insert("status".to_string(), json!("active"));
+                m
+            },
+        };
+        let session = parse_session_record(record).unwrap();
+        assert_eq!(session.agent_type, AgentType::Build);
+    }
+
+    /// 测试 agent_type 序列化和反序列化
+    #[test]
+    fn test_session_roundtrip_agent_type() {
+        let session = Session {
+            id: "test".to_string(),
+            project_path: "/tmp".to_string(),
+            created_at: 0,
+            updated_at: 0,
+            model: "gpt-4".to_string(),
+            status: SessionStatus::Active,
+            agent_type: AgentType::Plan,
+            messages: vec![],
+        };
+        let record = session_to_record(&session);
+        assert_eq!(record.fields.get("agent_type").unwrap(), &json!("plan"));
+
+        let parsed = parse_session_record(record).unwrap();
+        assert_eq!(parsed.agent_type, AgentType::Plan);
     }
 }
