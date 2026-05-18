@@ -96,6 +96,18 @@ impl PromptBuilder {
         prompt
     }
 
+    /// 构建系统提示词，并追加 Agent Profile 的后缀说明。
+    pub fn build_with_profile(
+        &self,
+        tools_schema: &serde_json::Value,
+        registry: &SkillRegistry,
+        profile: &crate::agent::profile::AgentProfile,
+    ) -> String {
+        let mut prompt = self.build(tools_schema, registry);
+        prompt.push_str(profile.prompt_suffix);
+        prompt
+    }
+
     /// 替换模板中的占位符。
     ///
     /// 如果 `content` 为 `Some`，直接用内容替换占位符；
@@ -416,5 +428,21 @@ mod tests {
         assert!(!prompt.contains("## 6. Project Rules"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_build_with_profile_appends_suffix() {
+        use crate::agent::profile::AgentProfile;
+        use fi_code_shared::dto::AgentType;
+
+        let builder = PromptBuilder::new();
+        let registry = SkillRegistry::new();
+        let schema = serde_json::Value::Array(vec![]);
+        let profile = AgentProfile::for_type(AgentType::Plan);
+
+        let prompt = builder.build_with_profile(&schema, &registry, profile);
+
+        assert!(prompt.contains("Agent Mode: Plan"));
+        assert!(prompt.contains("planning assistant"));
     }
 }
