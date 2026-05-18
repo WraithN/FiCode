@@ -29,8 +29,8 @@ use ratatui::{
 };
 
 use crate::components::Component;
-use fi_code_shared::tui_event::AppEvent;
 use crate::theme::Theme;
+use fi_code_shared::tui_event::AppEvent;
 
 /// 进度条动画状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +51,7 @@ pub struct StatusBar {
     progress_tick: u64, // 动画帧计数器
     last_filled: usize, // 暂停时定格的填充格数
     model_name: String, // 当前模型名
+    agent_name: String, // 当前 Agent 名称
     token_in: usize,    // 输入 Token 计数
     token_out: usize,   // 输出 Token 计数
     elapsed_secs: u64,  // 当前耗时（秒），保留用于向后兼容
@@ -69,6 +70,7 @@ impl StatusBar {
             progress_tick: 0,
             last_filled: 0,
             model_name: "unknown".to_string(),
+            agent_name: "Build".to_string(),
             token_in: 0,
             token_out: 0,
             elapsed_secs: 0,
@@ -108,6 +110,11 @@ impl StatusBar {
     /// 更新当前模型名。
     pub fn set_model(&mut self, model: String) {
         self.model_name = model;
+    }
+
+    /// 更新当前 Agent 名称。
+    pub fn set_agent(&mut self, agent_name: String) {
+        self.agent_name = agent_name;
     }
 
     /// 更新 Token 计数。
@@ -286,11 +293,21 @@ impl StatusBar {
         if width >= 100 {
             // ===== 标准模式 =====
             spans.push(Span::styled(" │ ", theme.style_muted()));
+            spans.push(Span::styled(
+                format!("AGT: {}", self.agent_name),
+                theme.style_primary(),
+            ));
+
+            spans.push(Span::styled(" │ ", theme.style_muted()));
             spans.push(Span::styled("CTX: ", theme.style_primary()));
             spans.push(Span::styled(ctx_bar, ctx_style));
 
             // 空间充裕时显示具体数值
-            let ctx_text = format!(" {}/{}", Self::format_tokens(self.ctx_current), Self::format_tokens(self.ctx_limit));
+            let ctx_text = format!(
+                " {}/{}",
+                Self::format_tokens(self.ctx_current),
+                Self::format_tokens(self.ctx_limit)
+            );
             spans.push(Span::styled(ctx_text, theme.style_muted()));
 
             if self.token_in > 0 || self.token_out > 0 {
@@ -405,9 +422,18 @@ mod tests {
         assert_eq!(bar.progress_state, ProgressState::Idle);
         assert_eq!(bar.progress_tick, 0);
         assert_eq!(bar.model_name, "unknown");
+        assert_eq!(bar.agent_name, "Build");
         assert_eq!(bar.ctx_limit, DEFAULT_CTX_LIMIT);
         assert_eq!(bar.ctx_current, 0);
         assert_eq!(bar.latency_ms, 0);
+    }
+
+    #[test]
+    fn test_status_bar_agent() {
+        let mut bar = StatusBar::new();
+        assert_eq!(bar.agent_name, "Build");
+        bar.set_agent("Plan".to_string());
+        assert_eq!(bar.agent_name, "Plan");
     }
 
     #[test]
@@ -555,13 +581,22 @@ mod tests {
         let text = line.to_string();
 
         assert!(text.contains("FiCode"), "should show brand");
-        assert!(text.contains("CTX:"), "should show CTX label in standard mode");
-        assert!(text.contains("64k/128k"), "should show ctx ratio when space permits");
+        assert!(
+            text.contains("CTX:"),
+            "should show CTX label in standard mode"
+        );
+        assert!(
+            text.contains("64k/128k"),
+            "should show ctx ratio when space permits"
+        );
         assert!(text.contains("TOK:"), "should show TOK");
         assert!(text.contains("↑24k"), "should show input tokens");
         assert!(text.contains("↓18k"), "should show output tokens");
         assert!(text.contains("LAT: 2.4s"), "should show latency");
-        assert!(text.contains("MDL: kimi-k2.5"), "should show full model name");
+        assert!(
+            text.contains("MDL: kimi-k2.5"),
+            "should show full model name"
+        );
     }
 
     #[test]
@@ -577,12 +612,24 @@ mod tests {
         let text = line.to_string();
 
         assert!(text.contains("FiCode"), "should show brand");
-        assert!(!text.contains("CTX:"), "should NOT show CTX label in compact mode");
-        assert!(text.contains("TOK:↓18k"), "should show only output tokens in compact mode");
-        assert!(!text.contains("↑24k"), "should NOT show input tokens in compact mode");
+        assert!(
+            !text.contains("CTX:"),
+            "should NOT show CTX label in compact mode"
+        );
+        assert!(
+            text.contains("TOK:↓18k"),
+            "should show only output tokens in compact mode"
+        );
+        assert!(
+            !text.contains("↑24k"),
+            "should NOT show input tokens in compact mode"
+        );
         assert!(text.contains("LAT:2.4s"), "should show latency");
         assert!(text.contains("k2.5"), "should show short model name");
-        assert!(!text.contains("MDL:"), "should NOT show MDL label in compact mode");
+        assert!(
+            !text.contains("MDL:"),
+            "should NOT show MDL label in compact mode"
+        );
     }
 
     #[test]
@@ -600,8 +647,14 @@ mod tests {
         assert!(text.contains("FiCode"), "should show brand");
         assert!(text.contains("LAT:2.4s"), "should show latency");
         assert!(text.contains("k2.5"), "should show short model name");
-        assert!(!text.contains("TOK:"), "should NOT show TOK in extreme mode");
-        assert!(!text.contains("10:"), "should NOT show clock in extreme mode");
+        assert!(
+            !text.contains("TOK:"),
+            "should NOT show TOK in extreme mode"
+        );
+        assert!(
+            !text.contains("10:"),
+            "should NOT show clock in extreme mode"
+        );
     }
 
     #[test]
