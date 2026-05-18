@@ -160,6 +160,33 @@ pub fn current_timestamp_ms() -> u64 {
         .as_millis() as u64
 }
 
+// ------------------------------------------------------------------------------
+// Agent 类型枚举
+// ------------------------------------------------------------------------------
+
+/// Agent 类型：Build（全功能）和 Plan（只读规划）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentType {
+    Build,
+    Plan,
+}
+
+impl Default for AgentType {
+    fn default() -> Self {
+        AgentType::Build
+    }
+}
+
+impl AgentType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AgentType::Build => "Build",
+            AgentType::Plan => "Plan",
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // MessageBuilder：用于从持久化记录流式重建 Message
 // -----------------------------------------------------------------------------
@@ -228,6 +255,11 @@ pub enum SseEvent {
     },
     #[serde(rename = "error")]
     Error { message: String },
+    #[serde(rename = "agent_info")]
+    AgentInfo {
+        agent_type: AgentType,
+        agent_name: String,
+    },
     #[serde(rename = "done")]
     Done { session_id: String },
 }
@@ -445,4 +477,35 @@ pub struct CreateSessionRequest {
 #[derive(Debug, Deserialize)]
 pub struct RenameSessionRequest {
     pub name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_agent_type_default_is_build() {
+        assert_eq!(AgentType::default(), AgentType::Build);
+    }
+
+    #[test]
+    fn test_agent_type_serde_roundtrip() {
+        let build = AgentType::Build;
+        let json = serde_json::to_string(&build).unwrap();
+        assert_eq!(json, "\"build\"");
+        let decoded: AgentType = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, AgentType::Build);
+
+        let plan = AgentType::Plan;
+        let json = serde_json::to_string(&plan).unwrap();
+        assert_eq!(json, "\"plan\"");
+        let decoded: AgentType = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, AgentType::Plan);
+    }
+
+    #[test]
+    fn test_agent_type_as_str() {
+        assert_eq!(AgentType::Build.as_str(), "Build");
+        assert_eq!(AgentType::Plan.as_str(), "Plan");
+    }
 }

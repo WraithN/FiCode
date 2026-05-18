@@ -19,7 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::dto::{CommandMeta, FileNode, SseEvent, ThemePreset};
+use crate::dto::{AgentType, CommandMeta, FileNode, SseEvent, ThemePreset};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +160,11 @@ pub enum AppEvent {
     RollbackToWave {
         snapshot: String,
         step: u32,
+    },
+    SwitchAgent(AgentType),
+    AgentSwitched {
+        agent_type: AgentType,
+        agent_name: String,
     },
     Quit,
 }
