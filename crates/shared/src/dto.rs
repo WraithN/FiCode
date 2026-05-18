@@ -178,7 +178,15 @@ impl Default for AgentType {
     }
 }
 
+impl std::fmt::Display for AgentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl AgentType {
+    /// 返回用于界面显示的名称（首字母大写），如 `"Build"`、`"Plan"`。
+    /// 注意：这与序列化时的 wire format（snake_case）不同。
     pub fn as_str(&self) -> &'static str {
         match self {
             AgentType::Build => "Build",
@@ -255,6 +263,8 @@ pub enum SseEvent {
     },
     #[serde(rename = "error")]
     Error { message: String },
+    /// Agent 信息变更事件，携带当前 Agent 类型与名称。
+    /// 序列化标签为 `"agent_info"`，前端通过此事件更新界面状态。
     #[serde(rename = "agent_info")]
     AgentInfo {
         agent_type: AgentType,
@@ -433,6 +443,7 @@ pub struct CommandMeta {
 pub struct ChatRequest {
     pub session_id: Option<String>,
     pub message: String,
+    pub agent: Option<AgentType>,
 }
 
 /// 模型切换请求体。
@@ -507,5 +518,11 @@ mod tests {
     fn test_agent_type_as_str() {
         assert_eq!(AgentType::Build.as_str(), "Build");
         assert_eq!(AgentType::Plan.as_str(), "Plan");
+    }
+
+    #[test]
+    fn test_agent_type_deserialize_invalid() {
+        let result: Result<AgentType, _> = serde_json::from_str("\"unknown\"");
+        assert!(result.is_err());
     }
 }

@@ -27,7 +27,9 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use colored::Colorize;
 
+use crate::cli_args::{Args, Commands};
 use fi_code_core::agent::{agent_loop, LoopState};
+use fi_code_shared::dto::AgentType;
 use fi_code_core::commands::slash::{SlashCommand, SlashCommandHandler};
 use fi_code_core::config::Config;
 use fi_code_core::mcp::manager::McpManager;
@@ -35,7 +37,6 @@ use fi_code_core::provider::Provider;
 use fi_code_core::session::message::{Message, Part, Role};
 use fi_code_core::session::{SessionManager, SessionStatus};
 use fi_code_core::tools::set_mcp_manager;
-use crate::cli_args::{Args, Commands};
 use fi_code_core::utils::workspace::set_workspace;
 use fi_code_core::{log_debug, log_info};
 
@@ -43,9 +44,7 @@ use fi_code_core::{log_debug, log_info};
 #[derive(Debug)]
 pub enum EntryOutcome {
     Completed,
-    StartTui {
-        port: Option<u16>,
-    },
+    StartTui { port: Option<u16> },
 }
 
 pub async fn run() -> Result<EntryOutcome> {
@@ -59,6 +58,24 @@ pub async fn run() -> Result<EntryOutcome> {
             fi_code_core::server::Server::new(provider, config, port)
                 .run()
                 .await;
+            return Ok(EntryOutcome::Completed);
+        }
+        Some(Commands::Logs {
+            limit,
+            follow,
+            session,
+            tool,
+            raw,
+        }) => {
+            use fi_code_core::utils::turn_log_cli::{run_logs_cli, LogsOptions};
+            let options = LogsOptions {
+                limit,
+                follow,
+                session_filter: session,
+                tool_filter: tool,
+                raw,
+            };
+            run_logs_cli(options)?;
             return Ok(EntryOutcome::Completed);
         }
         None => {
@@ -260,7 +277,7 @@ async fn run_single_command(
 
     let mut state = LoopState::new(session.messages.clone());
     let client = provider.get_client()?;
-    agent_loop(client.as_ref(), &mut state, &mut None, &mut None).await?;
+    agent_loop(client.as_ref(), &mut state, AgentType::Build, &mut None, &mut None).await?;
 
     handle_task_plan_and_save(
         provider,
@@ -352,7 +369,7 @@ async fn run_interactive(
 
                 let mut state = LoopState::new(session.messages.clone());
                 let client = provider.get_client()?;
-                agent_loop(client.as_ref(), &mut state, &mut None, &mut None).await?;
+                agent_loop(client.as_ref(), &mut state, AgentType::Build, &mut None, &mut None).await?;
 
                 handle_task_plan_and_save(
                     Arc::clone(&provider),

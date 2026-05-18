@@ -30,7 +30,8 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio_stream::StreamExt;
 
-use crate::agent::{agent_loop, LoopState};
+use crate::agent::{agent_loop, profile::AgentProfile, LoopState};
+use fi_code_shared::dto::AgentType;
 use crate::log_debug;
 use crate::log_error;
 use crate::log_info;
@@ -62,6 +63,9 @@ pub async fn handle_chat_endpoint(
     if let Some(resp) = check_auth(&headers, &state.config).await {
         return Json(resp).into_response();
     }
+
+    let agent_type = req.agent.unwrap_or_default();
+    log_info!("[Server] handle_chat_endpoint | agent={:?}", agent_type);
 
     let session_id = match req.session_id {
         Some(id) => {
@@ -100,6 +104,7 @@ pub async fn handle_chat_endpoint(
             state,
             spawn_session_id.clone(),
             req.message,
+            agent_type,
             sse_sender,
         ))
         .catch_unwind()
@@ -148,13 +153,25 @@ async fn run_agent_chat(
     state: AppState,
     session_id: String,
     message: String,
+    agent_type: AgentType,
     sse_sender: SseSender,
 ) -> Result<(), String> {
     log_info!(
-        "[Server] run_agent_chat start | session_id={} | message_len={}",
+        "[Server] run_agent_chat start | session_id={} | message_len={} | agent={:?}",
         session_id,
-        message.len()
+        message.len(),
+        agent_type
     );
+
+    // 发送当前 Agent 信息
+    let profile = AgentProfile::for_type(agent_type);
+    let _ = sse_sender
+        .send(SseEvent::AgentInfo {
+            agent_type,
+            agent_name: profile.name.to_string(),
+        })
+        .await;
+
     // 设置全局 Provider，供 handle_task_plan 工具使用
     set_task_provider(Arc::clone(&state.provider));
 
@@ -222,6 +239,7 @@ async fn run_agent_chat(
     if let Err(e) = agent_loop(
         client.as_ref(),
         &mut loop_state,
+        agent_type,
         &mut on_text,
         &mut on_tool_event,
     )

@@ -306,6 +306,7 @@ async fn collect_mcp_schema_texts(content_blocks: &[Part]) -> Vec<String> {
 pub async fn run_one_turn<C: AIClient + ?Sized>(
     client: &C,
     state: &mut LoopState,
+    agent_type: AgentType,
     on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Result<bool> {
@@ -331,7 +332,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
     let registry = get_registry();
     let schema = tool_schema().await;
-    let profile = AgentProfile::for_type(AgentType::Build);
+    let profile = AgentProfile::for_type(agent_type);
     let filtered_schema = profile.tool_filter.apply(&schema);
     let system_prompt = PromptBuilder::new().build_with_profile(&filtered_schema, registry, profile);
 
@@ -557,7 +558,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     }
 
     // 执行所有工具调用，并收集结果
-    let tool_results = execute_tool_calls(&turn.content_blocks, AgentType::Build, on_tool_event).await;
+    let tool_results = execute_tool_calls(&turn.content_blocks, agent_type, on_tool_event).await;
     if tool_results.is_empty() {
         turn.update_wave_marker(
             &mut state.messages,
@@ -726,6 +727,7 @@ fn format_tool_results(content_blocks: &[Part], tool_results: &[Part]) -> String
 pub async fn agent_loop<C: AIClient + ?Sized>(
     client: &C,
     state: &mut LoopState,
+    agent_type: AgentType,
     on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Result<()> {
@@ -744,7 +746,7 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
         let token_usage_before = state.token_usage;
         let transition_reason_before = state.transition_reason.clone();
 
-        match run_one_turn(client, state, on_text, on_tool_event).await {
+        match run_one_turn(client, state, agent_type, on_text, on_tool_event).await {
             Ok(should_continue) => {
                 retry_count = 0;
                 if !should_continue {

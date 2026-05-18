@@ -240,6 +240,9 @@ impl TuiClient {
                                 format!("Error(msg={})", message)
                             }
                             SseEvent::Done { .. } => "Done".to_string(),
+                            SseEvent::AgentInfo { agent_type, agent_name } => {
+                                format!("AgentInfo(type={:?} name={})", agent_type, agent_name)
+                            }
                         };
                         log_debug!("[Client] HTTP SSE event | {}", event_preview);
                         if let SseEvent::Done { session_id: sid } = &event {
