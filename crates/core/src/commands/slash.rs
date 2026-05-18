@@ -183,26 +183,10 @@ pub struct InitCommandHandler;
 impl CommandHandler for InitCommandHandler {
     async fn execute(&self, _args: Option<String>, ctx: &CommandContext) -> Result<CommandOutput> {
         use crate::agent::runner::AgentRunner;
-        use crate::tools::tool_schema;
         use crate::utils::workspace::workspace_dir;
 
         let workspace = workspace_dir();
         let agents_path = workspace.join("AGENTS.md");
-
-        let system_prompt = r#"你是一个项目文档助手。请深入分析当前项目的结构、技术栈、代码风格和重要约定，生成一份 AGENTS.md 文件。AGENTS.md 的目标是帮助 AI 编程助手快速理解项目背景。
-
-你可以使用以下工具来探索代码库：
-- read / read_file: 读取文件内容
-- grep: 搜索代码内容
-- bash: 执行命令（如 find, ls, tree 等）
-- write: 写入文件（用于生成 AGENTS.md）
-
-分析时请注意：
-1. 阅读项目根目录的关键文件（README.md, Cargo.toml, package.json 等）
-2. 浏览 src/ 目录结构
-3. 查看主要模块的入口文件
-4. 总结项目使用的技术栈、架构模式和开发约定
-5. 将结果写入 AGENTS.md"#;
 
         let user_prompt = format!(
             "请为当前项目生成 AGENTS.md，保存路径为: {}",
@@ -214,9 +198,8 @@ impl CommandHandler for InitCommandHandler {
             .read()
             .map_err(|_| anyhow!("Provider锁中毒"))?
             .get_client()?;
-        let schema = tool_schema().await;
 
-        let runner = AgentRunner::new(client, system_prompt, schema);
+        let runner = AgentRunner::new(client, fi_code_shared::dto::AgentType::Build);
         let initial_messages = vec![Message::new(
             "init-session".to_string(),
             Role::User,

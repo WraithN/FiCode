@@ -27,11 +27,14 @@
 
 use anyhow::Result;
 
+use crate::agent::profile::AgentProfile;
+use crate::agent::PromptBuilder;
 use crate::agent::TurnState;
 use crate::log_debug;
 use crate::provider::base_client::{AIClient, ChunkContent, FinishReason, TokenUsage};
 use crate::provider::execute_tool_calls;
 use crate::session::message::{Message, Part, Role};
+use fi_code_shared::dto::AgentType;
 
 // =============================================================================
 // Agent 运行结果
@@ -53,22 +56,16 @@ pub struct AgentRunResult {
 /// Agent 运行器，持有对话所需的全部依赖。
 pub struct AgentRunner {
     client: Box<dyn AIClient>,
-    system_prompt: String,
-    tools_schema: serde_json::Value,
+    pub agent_type: AgentType,
     max_turns: usize,
 }
 
 impl AgentRunner {
     /// 构造一个 `AgentRunner`。
-    pub fn new(
-        client: Box<dyn AIClient>,
-        system_prompt: impl Into<String>,
-        tools_schema: serde_json::Value,
-    ) -> Self {
+    pub fn new(client: Box<dyn AIClient>, agent_type: AgentType) -> Self {
         Self {
             client,
-            system_prompt: system_prompt.into(),
-            tools_schema,
+            agent_type,
             max_turns: 25,
         }
     }
@@ -136,7 +133,10 @@ impl AgentRunner {
             .map(|m| m.session_id.clone())
             .unwrap_or_default();
 
-        let assistant_count = messages.iter().filter(|m| m.role == Role::Assistant).count() as u32;
+        let assistant_count = messages
+            .iter()
+            .filter(|m| m.role == Role::Assistant)
+            .count() as u32;
         let mut turn = TurnState::new(
             session_id.clone(),
             assistant_count + 1,
@@ -150,6 +150,15 @@ impl AgentRunner {
             });
         }
 
+        // 获取 Profile 并过滤工具
+        let profile = AgentProfile::for_type(self.agent_type);
+        let all_schema = crate::tools::tool_schema().await;
+        let tools_schema = profile.tool_filter.apply(&all_schema);
+
+        // 构建带 Profile 后缀的系统提示词
+        let registry = crate::skills::get_registry();
+        let system_prompt = PromptBuilder::new().build_with_profile(&tools_schema, registry, profile);
+
         // 消息历史截断：超过 30 条时只保留最近 30 条
         const MAX_CONTEXT_MESSAGES: usize = 30;
         let messages_for_llm: &[Message] = if messages.len() > MAX_CONTEXT_MESSAGES {
@@ -161,9 +170,9 @@ impl AgentRunner {
 
         self.client
             .stream_message(
-                &self.system_prompt,
+                &system_prompt,
                 messages_for_llm,
-                &self.tools_schema,
+                &tools_schema,
                 &mut |chunk| {
                     match &chunk.content {
                         ChunkContent::Text(text) => {
@@ -211,25 +220,23 @@ impl AgentRunner {
                 "AgentRunner::run_one_turn | finish_reason={:?}, stopping",
                 turn.finish_reason
             );
-            let assistant_count = messages.iter().filter(|m| m.role == Role::Assistant).count() as u32;
-            turn.update_wave_marker(
-                messages,
-                Some(assistant_count),
-                &turn.turn_usage,
-            );
+            let assistant_count = messages
+                .iter()
+                .filter(|m| m.role == Role::Assistant)
+                .count() as u32;
+            turn.update_wave_marker(messages, Some(assistant_count), &turn.turn_usage);
             return Ok((false, turn.finish_reason, turn.turn_usage));
         }
 
         // 执行所有工具调用并收集结果
-        let tool_results = execute_tool_calls(&turn.content_blocks, on_tool_event).await;
+        let tool_results = execute_tool_calls(&turn.content_blocks, self.agent_type, on_tool_event).await;
         if tool_results.is_empty() {
             log_debug!("AgentRunner::run_one_turn | tool_use but no results, stopping");
-            let assistant_count = messages.iter().filter(|m| m.role == Role::Assistant).count() as u32;
-            turn.update_wave_marker(
-                messages,
-                Some(assistant_count),
-                &turn.turn_usage,
-            );
+            let assistant_count = messages
+                .iter()
+                .filter(|m| m.role == Role::Assistant)
+                .count() as u32;
+            turn.update_wave_marker(messages, Some(assistant_count), &turn.turn_usage);
             return Ok((false, turn.finish_reason, turn.turn_usage));
         }
 
@@ -240,21 +247,20 @@ impl AgentRunner {
 
         // 客户端直出优化：如果所有工具都成功，且 Turn 1 已有前置文本说明，
         // 则跳过 Turn 2，直接格式化输出工具结果。
-        let all_success = tool_results.iter().all(|p| {
-            matches!(p, Part::ToolResult { .. })
-        });
+        let all_success = tool_results
+            .iter()
+            .all(|p| matches!(p, Part::ToolResult { .. }));
         let has_preamble = turn
             .content_blocks
             .iter()
             .any(|p| matches!(p, Part::Text { .. }));
 
         if all_success && has_preamble {
-            let assistant_count = messages.iter().filter(|m| m.role == Role::Assistant).count() as u32;
-            turn.update_wave_marker(
-                messages,
-                Some(assistant_count),
-                &turn.turn_usage,
-            );
+            let assistant_count = messages
+                .iter()
+                .filter(|m| m.role == Role::Assistant)
+                .count() as u32;
+            turn.update_wave_marker(messages, Some(assistant_count), &turn.turn_usage);
             let summary = format_tool_results(&turn.content_blocks, &tool_results);
             log_debug!("AgentRunner::direct output | summary_len={}", summary.len());
 
@@ -274,11 +280,7 @@ impl AgentRunner {
         // 将工具结果封装为 User 消息回传
         messages.push(Message::new(session_id, Role::User, tool_results));
 
-        turn.update_wave_marker(
-            messages,
-            None,
-            &turn.turn_usage,
-        );
+        turn.update_wave_marker(messages, None, &turn.turn_usage);
 
         Ok((true, turn.finish_reason, turn.turn_usage))
     }
@@ -320,4 +322,19 @@ fn format_tool_results(content_blocks: &[Part], tool_results: &[Part]) -> String
         }
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fi_code_shared::dto::AgentType;
+
+    #[test]
+    fn test_agent_runner_new_with_plan() {
+        let runner = AgentRunner::new(
+            Box::new(crate::provider::mock_client::MockAIClient::new()),
+            AgentType::Plan,
+        );
+        assert_eq!(runner.agent_type, AgentType::Plan);
+    }
 }

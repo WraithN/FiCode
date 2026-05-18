@@ -147,12 +147,8 @@ impl TaskManager {
             }],
         );
 
-        let runner = AgentRunner::new(
-            (self.client_factory)(),
-            self.subagent_prompt.clone(),
-            self.subagent_tools_schema.clone(),
-        )
-        .with_max_turns(self.max_turns_per_task);
+        let runner = AgentRunner::new((self.client_factory)(), fi_code_shared::dto::AgentType::Build)
+            .with_max_turns(self.max_turns_per_task);
 
         let result = runner.run(vec![initial_msg]).await?;
         let summary = extract_summary(&result.messages);

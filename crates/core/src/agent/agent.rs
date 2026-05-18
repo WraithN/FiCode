@@ -35,6 +35,7 @@
 
 use anyhow::Result;
 
+use crate::agent::turn_logger::{TurnLogEntry, TurnLogger};
 use crate::agent::PromptBuilder;
 use crate::log_block;
 use crate::log_debug;
@@ -42,13 +43,15 @@ use crate::log_error;
 use crate::log_info;
 use crate::log_trace;
 use crate::log_warn;
-use fi_code_shared::constants::*;
 use crate::provider::base_client::{AIClient, ChunkContent, FinishReason, TokenUsage};
 use crate::provider::execute_tool_calls;
 use crate::provider::Chunk;
 use crate::session::message::{Message, Part, Role, TokenUsage as MsgTokenUsage};
+use crate::agent::profile::AgentProfile;
 use crate::skills::get_registry;
 use crate::tools::tool_schema;
+use fi_code_shared::constants::*;
+use fi_code_shared::dto::AgentType;
 
 // =============================================================================
 // 对话循环状态（LoopState）
@@ -106,11 +109,7 @@ impl TurnState {
     ///
     /// `wave_step` 是 WaveMarker 的 step 值（通常等于当前轮数 + 1）。
     /// `token_baseline` 是计算 delta 的基线（通常为上一轮结束时的累计 Token）。
-    pub fn new(
-        session_id: String,
-        wave_step: u32,
-        token_baseline: TokenUsage,
-    ) -> Self {
+    pub fn new(session_id: String, wave_step: u32, token_baseline: TokenUsage) -> Self {
         let snapshot = crate::tools::basic_tools::BasicTool::git_write_tree().ok();
         let wave_marker = Part::WaveMarker {
             step: wave_step,
@@ -141,7 +140,8 @@ impl TurnState {
                 }
             }
             ChunkContent::Think(text) => {
-                if let Some(Part::Reasoning { thinking: last, .. }) = self.content_blocks.last_mut() {
+                if let Some(Part::Reasoning { thinking: last, .. }) = self.content_blocks.last_mut()
+                {
                     last.push_str(&text);
                 } else {
                     self.content_blocks.push(Part::Reasoning {
@@ -151,7 +151,12 @@ impl TurnState {
                 }
             }
             ChunkContent::ToolUse(ref tool) => {
-                if let Part::ToolUse { id, name, arguments } = tool {
+                if let Part::ToolUse {
+                    id,
+                    name,
+                    arguments,
+                } = tool
+                {
                     log_debug!(
                         "LLM tool_use | id={} | name={} | args={}",
                         id,
@@ -161,7 +166,11 @@ impl TurnState {
                     // 按 id 去重：已有同 id 的 ToolUse 则更新，避免 SSE 增量 flush 时重复 push
                     if let Some(existing) = self.content_blocks.iter_mut().find_map(|p| {
                         if let Part::ToolUse { id: eid, .. } = p {
-                            if eid == id { Some(p) } else { None }
+                            if eid == id {
+                                Some(p)
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
@@ -238,8 +247,12 @@ impl TurnState {
     ///（即存在 mcp: 前缀且参数为空的工具调用）。
     pub fn needs_mcp_two_step(&self) -> bool {
         self.content_blocks.iter().any(|p| {
-            if let Part::ToolUse { name, arguments, .. } = p {
-                name.starts_with("mcp:") && arguments.as_object().map(|o| o.is_empty()).unwrap_or(true)
+            if let Part::ToolUse {
+                name, arguments, ..
+            } = p
+            {
+                name.starts_with("mcp:")
+                    && arguments.as_object().map(|o| o.is_empty()).unwrap_or(true)
             } else {
                 false
             }
@@ -318,7 +331,9 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
     let registry = get_registry();
     let schema = tool_schema().await;
-    let system_prompt = PromptBuilder::new().build(&schema, registry);
+    let profile = AgentProfile::for_type(AgentType::Build);
+    let filtered_schema = profile.tool_filter.apply(&schema);
+    let system_prompt = PromptBuilder::new().build_with_profile(&filtered_schema, registry, profile);
 
     #[cfg(debug_assertions)]
     PROMPT_LOGGED_ONCE.call_once(|| {
@@ -382,7 +397,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         messages_for_llm.len()
     );
 
-    client
+    if let Err(e) = client
         .stream_message(&system_prompt, messages_for_llm, &schema, &mut |chunk| {
             // 实时转发文本内容和系统通知，实现真流式
             match &chunk.content {
@@ -400,7 +415,23 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
             }
             turn.process_chunk(chunk);
         })
-        .await?;
+        .await
+    {
+        TurnLogger::global().log_turn(TurnLogEntry {
+            timestamp: chrono::Local::now().to_rfc3339(),
+            session_id: turn.session_id.clone(),
+            turn_index: state.turn_count,
+            finish_reason: turn.finish_reason.as_ref().map(|f| format!("{:?}", f)),
+            token_usage: turn.turn_usage,
+            content_blocks: turn.content_blocks.clone(),
+            tool_results: vec![],
+            messages_snapshot: state.messages.clone(),
+            wave_marker: Some(turn.wave_marker.clone()),
+            transition_reason: state.transition_reason.clone(),
+            error: Some(e.to_string()),
+        });
+        return Err(e);
+    }
 
     log_info!(
         "[Agent] LLM stream complete | turn={} | blocks={} | turn_usage={:?}",
@@ -437,6 +468,19 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
             "[Agent] run_one_turn end | no tool use | finish_reason={:?}",
             turn.finish_reason
         );
+        TurnLogger::global().log_turn(TurnLogEntry {
+            timestamp: chrono::Local::now().to_rfc3339(),
+            session_id: turn.session_id.clone(),
+            turn_index: state.turn_count,
+            finish_reason: turn.finish_reason.as_ref().map(|f| format!("{:?}", f)),
+            token_usage: turn.turn_usage,
+            content_blocks: turn.content_blocks.clone(),
+            tool_results: vec![],
+            messages_snapshot: state.messages.clone(),
+            wave_marker: Some(turn.wave_marker.clone()),
+            transition_reason: state.transition_reason.clone(),
+            error: None,
+        });
         return Ok(false);
     }
 
@@ -462,11 +506,27 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
             turn.content_blocks.clear();
             turn.finish_reason = None;
 
-            client
+            if let Err(e) = client
                 .stream_message(&system_prompt, &state.messages, &schema, &mut |chunk| {
                     turn.process_chunk(chunk);
                 })
-                .await?;
+                .await
+            {
+                TurnLogger::global().log_turn(TurnLogEntry {
+                    timestamp: chrono::Local::now().to_rfc3339(),
+                    session_id: turn.session_id.clone(),
+                    turn_index: state.turn_count,
+                    finish_reason: turn.finish_reason.as_ref().map(|f| format!("{:?}", f)),
+                    token_usage: turn.turn_usage,
+                    content_blocks: turn.content_blocks.clone(),
+                    tool_results: vec![],
+                    messages_snapshot: state.messages.clone(),
+                    wave_marker: Some(turn.wave_marker.clone()),
+                    transition_reason: state.transition_reason.clone(),
+                    error: Some(e.to_string()),
+                });
+                return Err(e);
+            }
 
             state.messages.push(Message::new(
                 session_id.clone(),
@@ -497,7 +557,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     }
 
     // 执行所有工具调用，并收集结果
-    let tool_results = execute_tool_calls(&turn.content_blocks, on_tool_event).await;
+    let tool_results = execute_tool_calls(&turn.content_blocks, AgentType::Build, on_tool_event).await;
     if tool_results.is_empty() {
         turn.update_wave_marker(
             &mut state.messages,
@@ -506,6 +566,19 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         );
         state.transition_reason = None;
         log_info!("[Agent] run_one_turn end | tool_use finish but no results");
+        TurnLogger::global().log_turn(TurnLogEntry {
+            timestamp: chrono::Local::now().to_rfc3339(),
+            session_id: turn.session_id.clone(),
+            turn_index: state.turn_count,
+            finish_reason: turn.finish_reason.as_ref().map(|f| format!("{:?}", f)),
+            token_usage: turn.turn_usage,
+            content_blocks: turn.content_blocks.clone(),
+            tool_results: vec![],
+            messages_snapshot: state.messages.clone(),
+            wave_marker: Some(turn.wave_marker.clone()),
+            transition_reason: state.transition_reason.clone(),
+            error: None,
+        });
         return Ok(false);
     }
 
@@ -519,9 +592,9 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
     // 客户端直出优化：如果所有工具都成功，且 Turn 1 已有前置文本说明，
     // 则跳过 Turn 2（不再请求 LLM 写总结），直接格式化输出工具结果。
-    let all_success = tool_results.iter().all(|p| {
-        matches!(p, Part::ToolResult { .. })
-    });
+    let all_success = tool_results
+        .iter()
+        .all(|p| matches!(p, Part::ToolResult { .. }));
     let has_preamble = turn
         .content_blocks
         .iter()
@@ -550,8 +623,42 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
 
         state.transition_reason = Some("direct_output".to_string());
         log_info!("[Agent] run_one_turn end | direct output, no turn 2");
+        TurnLogger::global().log_turn(TurnLogEntry {
+            timestamp: chrono::Local::now().to_rfc3339(),
+            session_id: turn.session_id.clone(),
+            turn_index: state.turn_count,
+            finish_reason: turn.finish_reason.as_ref().map(|f| format!("{:?}", f)),
+            token_usage: turn.turn_usage,
+            content_blocks: turn.content_blocks.clone(),
+            tool_results: crate::agent::turn_logger::build_tool_result_logs(
+                &turn.content_blocks,
+                &tool_results,
+            ),
+            messages_snapshot: state.messages.clone(),
+            wave_marker: Some(turn.wave_marker.clone()),
+            transition_reason: state.transition_reason.clone(),
+            error: None,
+        });
         return Ok(false);
     }
+
+    // 记录日志必须在 tool_results 被 move 进 messages 之前
+    TurnLogger::global().log_turn(TurnLogEntry {
+        timestamp: chrono::Local::now().to_rfc3339(),
+        session_id: turn.session_id.clone(),
+        turn_index: state.turn_count,
+        finish_reason: turn.finish_reason.as_ref().map(|f| format!("{:?}", f)),
+        token_usage: turn.turn_usage,
+        content_blocks: turn.content_blocks.clone(),
+        tool_results: crate::agent::turn_logger::build_tool_result_logs(
+            &turn.content_blocks,
+            &tool_results,
+        ),
+        messages_snapshot: state.messages.clone(),
+        wave_marker: Some(turn.wave_marker.clone()),
+        transition_reason: state.transition_reason.clone(),
+        error: None,
+    });
 
     // 将工具结果封装为 User 消息回传（符合 OpenAI / Anthropic API 的角色交替要求）
     state
@@ -561,11 +668,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     state.turn_count += 1;
     state.transition_reason = Some("tool_result".to_string());
 
-    turn.update_wave_marker(
-        &mut state.messages,
-        None,
-        &state.token_usage,
-    );
+    turn.update_wave_marker(&mut state.messages, None, &state.token_usage);
 
     log_info!(
         "[Agent] run_one_turn end | will continue next turn | next_turn={}",
@@ -671,7 +774,9 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
                     );
                     log_warn!(
                         "[Agent] run_one_turn failed with retryable error, retrying {}/{} | {}",
-                        retry_count, MAX_RUN_ONE_TURN_RETRIES, e
+                        retry_count,
+                        MAX_RUN_ONE_TURN_RETRIES,
+                        e
                     );
                     if let Some(ref mut cb) = on_text {
                         cb(&retry_msg);

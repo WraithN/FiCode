@@ -972,7 +972,10 @@ async fn execute_single_tool_call(
             Err(e) => {
                 log_trace!(
                     "execute_tool_call raw error | name={} | attempt={}/{} | err={}",
-                    name, attempt, MAX_TOOL_RETRIES, e
+                    name,
+                    attempt,
+                    MAX_TOOL_RETRIES,
+                    e
                 );
 
                 // 参数类错误：立即返回，不重试
@@ -1006,11 +1009,16 @@ async fn execute_single_tool_call(
         name,
         last_error
     );
-    (format!("Error: {} (已重试 {} 次)", last_error, MAX_TOOL_RETRIES), true, start.elapsed().as_millis() as u64)
+    (
+        format!("Error: {} (已重试 {} 次)", last_error, MAX_TOOL_RETRIES),
+        true,
+        start.elapsed().as_millis() as u64,
+    )
 }
 
 pub async fn execute_tool_calls(
     parts: &[Part],
+    _agent_type: fi_code_shared::dto::AgentType,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Vec<Part> {
     use crate::server::transport::sse::SseEvent;
@@ -1480,5 +1488,136 @@ mod tests {
         input.insert("command".to_string(), serde_json::json!("echo hello_local"));
         let result = tool_call("bash", &input).await.unwrap();
         assert!(result.contains("hello_local"));
+    }
+
+    /// 测试 web_fetch 工具成功获取网页内容
+    #[tokio::test]
+    async fn test_tool_call_web_fetch_success() {
+        use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("<html><body>Hello from wiremock</body></html>"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let mut input = HashMap::new();
+        input.insert("url".to_string(), serde_json::json!(mock_server.uri()));
+        let result = tool_call("web_fetch", &input).await;
+        assert!(
+            result.is_ok(),
+            "web_fetch should succeed, got: {:?}",
+            result
+        );
+        let output = result.unwrap();
+        assert!(
+            output.contains("Hello from wiremock"),
+            "web_fetch output should contain page content, got: {}",
+            output
+        );
+    }
+
+    /// 测试 git_diff 工具调用
+    #[tokio::test]
+    async fn test_tool_call_git_diff() {
+        let mut input = HashMap::new();
+        input.insert("path".to_string(), serde_json::json!("Cargo.toml"));
+        let result = tool_call("git_diff", &input).await;
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        // 输出可能是空（没有未提交的更改）或非空（有更改）
+        // 我们只检查没有错误即可
+        assert!(
+            !output.contains("fatal:"),
+            "git_diff should not contain fatal error"
+        );
+    }
+
+    /// 测试 git_add 工具调用
+    #[tokio::test]
+    async fn test_tool_call_git_add() {
+        let mut input = HashMap::new();
+        input.insert("files".to_string(), serde_json::json!(["Cargo.toml"]));
+        let result = tool_call("git_add", &input).await;
+        assert!(result.is_ok(), "git_add should succeed for tracked file");
+    }
+
+    /// 测试 git_commit 工具调用
+    #[tokio::test]
+    async fn test_tool_call_git_commit() {
+        let mut input = HashMap::new();
+        input.insert(
+            "message".to_string(),
+            serde_json::json!("test commit from unit test"),
+        );
+        let result = tool_call("git_commit", &input).await;
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        // git commit 在没有 staged 更改时可能返回提示信息，也可能因锁竞争返回错误
+        // 我们只验证返回了有效的输出（非空或包含提示信息）
+        assert!(
+            !output.is_empty(),
+            "git_commit should return some output, got empty"
+        );
+    }
+
+    /// 测试 git_worktree 工具调用
+    #[tokio::test]
+    async fn test_tool_call_git_worktree() {
+        let mut input = HashMap::new();
+        input.insert("command".to_string(), serde_json::json!("list"));
+        let result = tool_call("git_worktree", &input).await;
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(
+            !output.is_empty(),
+            "git_worktree should return non-empty output"
+        );
+    }
+
+    /// 测试 bash 工具执行包含空格的命令
+    #[tokio::test]
+    async fn test_tool_call_bash_with_spaces() {
+        let mut input = HashMap::new();
+        input.insert("command".to_string(), serde_json::json!("echo hello world"));
+        let result = tool_call("bash", &input).await;
+        assert!(result.is_ok(), "bash should succeed");
+        let output = result.unwrap();
+        assert!(
+            output.contains("hello world"),
+            "bash output should contain 'hello world', got: {}",
+            output
+        );
+    }
+
+    /// 测试 ask_for_question 工具缺少参数时返回错误
+    #[tokio::test]
+    async fn test_tool_call_ask_for_question_missing_params() {
+        let input = HashMap::new();
+        let result = tool_call("ask_for_question", &input).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Missing question parameter"),
+            "error should mention missing question, got: {}",
+            err
+        );
+    }
+
+    /// 测试 use_skill 工具缺少 name 参数
+    #[tokio::test]
+    async fn test_tool_call_use_skill_missing_name() {
+        let input = HashMap::new();
+        let result = tool_call("use_skill", &input).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Missing name parameter"),
+            "error should mention missing name, got: {}",
+            err
+        );
     }
 }
