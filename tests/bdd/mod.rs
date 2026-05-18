@@ -109,6 +109,11 @@ impl AgentWorld {
 
     /// 通过 HTTP API 发送消息并收集 SSE 事件
     pub async fn send_chat_message(&mut self, message: &str) {
+        self.send_chat_message_with_agent(message, None).await;
+    }
+
+    /// 通过 HTTP API 发送消息并收集 SSE 事件，支持指定 Agent 类型
+    pub async fn send_chat_message_with_agent(&mut self, message: &str, agent: Option<fi_code_core::agent::AgentType>) {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()
@@ -117,7 +122,8 @@ impl AgentWorld {
         let url = format!("http://127.0.0.1:{}/chat", self.port);
         let req_body = json!({
             "session_id": null,
-            "message": message
+            "message": message,
+            "agent": agent
         });
 
         let response = client

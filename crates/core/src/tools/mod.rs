@@ -1063,11 +1063,19 @@ pub async fn execute_tool_calls(
             Some(async move {
                 // 二次拦截：检查该工具是否被当前 Agent 允许
                 if !is_allowed {
-                    return Part::ToolError {
+                    let error_part = Part::ToolError {
                         tool_call_id: id.clone(),
                         content: format!("Tool '{}' is not allowed in {} Agent", name, agent_name),
                         error_message: "Permission denied by agent profile".to_string(),
                     };
+                    if let Ok(mut guard) = cb.lock() {
+                        if let Some(ref mut callback) = *guard {
+                            let _ = callback(SseEvent::Part {
+                                part: error_part.clone(),
+                            });
+                        }
+                    }
+                    return error_part;
                 }
 
                 log_info!("calling tool: ${}", name);
