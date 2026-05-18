@@ -121,4 +121,16 @@ mod e2e_cli {
         let _ = child.start_kill();
         let _ = child.wait().await;
     }
+
+    #[tokio::test]
+    async fn test_cli_web_flag_in_help() {
+        let output = run_cli(&["--help"]).await.expect("Failed to run CLI");
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("--web") || stdout.contains("-W"),
+            "Help output should contain --web or -W flag, got:\n{}",
+            stdout
+        );
+    }
 }
