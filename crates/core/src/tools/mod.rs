@@ -27,6 +27,7 @@ use crate::provider::Provider;
 use crate::session::message::Part;
 use crate::tui_event::{AppEvent, QuestionAnswer};
 use fi_code_shared::constants::*;
+use fi_code_shared::dto::AgentType;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use tokio::sync::mpsc;
@@ -760,6 +761,14 @@ pub async fn tool_schema() -> serde_json::Value {
     serde_json::Value::Array(schemas)
 }
 
+/// 获取指定 Agent 类型的工具 schema（已过滤）。
+pub async fn tool_schema_for_agent(agent_type: AgentType) -> serde_json::Value {
+    use crate::agent::profile::AgentProfile;
+    let all = tool_schema().await;
+    let profile = AgentProfile::for_type(agent_type);
+    profile.tool_filter.apply(&all)
+}
+
 // =============================================================================
 // 生成 Subagent 可用的工具 schema（不含 create_task_plan，避免递归拆分）
 // =============================================================================
@@ -1018,13 +1027,16 @@ async fn execute_single_tool_call(
 
 pub async fn execute_tool_calls(
     parts: &[Part],
-    _agent_type: fi_code_shared::dto::AgentType,
+    agent_type: fi_code_shared::dto::AgentType,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
 ) -> Vec<Part> {
+    use crate::agent::profile::AgentProfile;
     use crate::server::transport::sse::SseEvent;
     use colored::Colorize;
     use futures::future::join_all;
     use std::sync::{Arc, Mutex};
+
+    let profile = AgentProfile::for_type(agent_type);
 
     // 将回调提取到 Arc<Mutex<...>> 中，以便在并行的 async 块之间安全共享
     let callback = on_tool_event.take();
@@ -1046,7 +1058,18 @@ pub async fn execute_tool_calls(
             let name = name.clone();
             let arguments = arguments.clone();
             let cb = shared_cb.clone();
+            let is_allowed = profile.tool_filter.allows(&name);
+            let agent_name = profile.name;
             Some(async move {
+                // 二次拦截：检查该工具是否被当前 Agent 允许
+                if !is_allowed {
+                    return Part::ToolError {
+                        tool_call_id: id.clone(),
+                        content: format!("Tool '{}' is not allowed in {} Agent", name, agent_name),
+                        error_message: "Permission denied by agent profile".to_string(),
+                    };
+                }
+
                 log_info!("calling tool: ${}", name);
                 log_debug!("execute_tool_call | name={} | args={}", name, arguments);
                 let (content, is_error, duration_ms) = execute_single_tool_call(&id, &name, &arguments).await;
@@ -1619,5 +1642,48 @@ mod tests {
             "error should mention missing name, got: {}",
             err
         );
+    }
+
+    /// 测试 Plan Agent 会拦截不允许的工具调用
+    #[tokio::test]
+    async fn test_execute_tool_calls_plan_agent_blocks_write() {
+        use fi_code_shared::dto::AgentType;
+        let parts = vec![
+            Part::ToolUse {
+                id: "1".to_string(),
+                name: "write".to_string(),
+                arguments: serde_json::json!({"path": "/tmp/test.txt", "content": "hello"}),
+            },
+        ];
+        let results = execute_tool_calls(&parts, AgentType::Plan, &mut None).await;
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Part::ToolError { error_message, .. } => {
+                assert!(error_message.contains("Permission denied"));
+            }
+            _ => panic!("Expected ToolError for blocked tool"),
+        }
+    }
+
+    /// 测试 Build Agent 不会拦截 write 工具
+    #[tokio::test]
+    async fn test_execute_tool_calls_build_agent_allows_write() {
+        use fi_code_shared::dto::AgentType;
+        let parts = vec![
+            Part::ToolUse {
+                id: "1".to_string(),
+                name: "write".to_string(),
+                arguments: serde_json::json!({"path": "/tmp/test_fi_code_build.txt", "content": "hello"}),
+            },
+        ];
+        let results = execute_tool_calls(&parts, AgentType::Build, &mut None).await;
+        assert_eq!(results.len(), 1);
+        // Build Agent 应该尝试执行（结果可能是成功或失败，但不是因为被拦截）
+        match &results[0] {
+            Part::ToolError { error_message, .. } => {
+                assert!(!error_message.contains("Permission denied by agent profile"));
+            }
+            _ => {} // ToolResult 或其他结果都可以
+        }
     }
 }
