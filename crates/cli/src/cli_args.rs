@@ -57,6 +57,10 @@ pub struct Args {
     /// Workspace directory (default: home directory)
     #[arg(short = 'w', long = "workspace", value_name = "PATH")]
     pub workspace: Option<PathBuf>,
+
+    /// Specify the agent type (build or plan)
+    #[arg(long, default_value = "build")]
+    pub agent: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -66,5 +70,23 @@ pub enum Commands {
         /// Port to listen on
         #[arg(short, long)]
         port: Option<u16>,
+    },
+    /// View turn-level conversation logs
+    Logs {
+        /// Show last N turns
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+        /// Follow new logs in real-time
+        #[arg(short = 'f', long)]
+        follow: bool,
+        /// Filter by session ID prefix
+        #[arg(long, value_name = "ID")]
+        session: Option<String>,
+        /// Filter by tool name
+        #[arg(long, value_name = "NAME")]
+        tool: Option<String>,
+        /// Output raw JSON
+        #[arg(long)]
+        raw: bool,
     },
 }

@@ -29,7 +29,7 @@ use colored::Colorize;
 
 use crate::cli_args::{Args, Commands};
 use fi_code_core::agent::{agent_loop, LoopState};
-use fi_code_shared::dto::AgentType;
+use fi_code_core::agent::AgentType;
 use fi_code_core::commands::slash::{SlashCommand, SlashCommandHandler};
 use fi_code_core::config::Config;
 use fi_code_core::mcp::manager::McpManager;
@@ -182,6 +182,12 @@ pub async fn run() -> Result<EntryOutcome> {
     let provider = Arc::new(Provider::new(Arc::clone(&config))?);
     fi_code_core::tools::set_task_provider(Arc::new(RwLock::new((*provider).clone())));
 
+    // 解析 Agent 类型
+    let agent_type = match args.agent.as_str() {
+        "plan" => AgentType::Plan,
+        _ => AgentType::Build,
+    };
+
     // -c 单命令模式
     if let Some(cmd) = args.cmd {
         let cmd = cmd.trim();
@@ -194,6 +200,7 @@ pub async fn run() -> Result<EntryOutcome> {
                 &mut session,
                 cmd,
                 Arc::clone(&config),
+                agent_type,
             )
             .await?;
         }
@@ -206,6 +213,7 @@ pub async fn run() -> Result<EntryOutcome> {
         &session_manager,
         &sessions_dir,
         config,
+        agent_type,
     )
     .await?;
     Ok(EntryOutcome::Completed)
@@ -253,6 +261,7 @@ async fn run_single_command(
     session: &mut fi_code_core::session::Session,
     query: &str,
     config: Arc<RwLock<Config>>,
+    agent_type: AgentType,
 ) -> Result<()> {
     log_debug!("run_single_command | query_len={}", query.len());
 
@@ -277,7 +286,7 @@ async fn run_single_command(
 
     let mut state = LoopState::new(session.messages.clone());
     let client = provider.get_client()?;
-    agent_loop(client.as_ref(), &mut state, AgentType::Build, &mut None, &mut None).await?;
+    agent_loop(client.as_ref(), &mut state, agent_type, &mut None, &mut None).await?;
 
     handle_task_plan_and_save(
         provider,
@@ -329,6 +338,7 @@ async fn run_interactive(
     session_manager: &SessionManager,
     sessions_dir: &PathBuf,
     config: Arc<RwLock<Config>>,
+    agent_type: AgentType,
 ) -> Result<()> {
     fi_code_core::tools::set_task_provider(Arc::new(RwLock::new((*provider).clone())));
     let mut session = choose_or_create_session(session_manager, provider.model_name()?).await?;
@@ -369,7 +379,7 @@ async fn run_interactive(
 
                 let mut state = LoopState::new(session.messages.clone());
                 let client = provider.get_client()?;
-                agent_loop(client.as_ref(), &mut state, AgentType::Build, &mut None, &mut None).await?;
+                agent_loop(client.as_ref(), &mut state, agent_type, &mut None, &mut None).await?;
 
                 handle_task_plan_and_save(
                     Arc::clone(&provider),
