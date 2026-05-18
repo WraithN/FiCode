@@ -1,6 +1,7 @@
 import { SseEvent } from '../types/sse';
 import { AgentType } from '../types/agent';
 import { ApiResponse, FileTreeResult, LogEntry } from '../types/api';
+import { SkillItem } from '../types/skill';
 
 function detectBaseUrl(): string {
   // Tauri Desktop 环境使用本地 Sidecar 地址
@@ -65,6 +66,14 @@ export class ApiClient {
 
   async getLogs(limit: number = 200): Promise<LogEntry[]> {
     return this.get<LogEntry[]>(`/api/logs?limit=${limit}`);
+  }
+
+  async getSkills(): Promise<SkillItem[]> {
+    return this.get<SkillItem[]>('/api/skills');
+  }
+
+  async executeCommand(name: string, args?: string): Promise<unknown> {
+    return this.post<unknown>(`/api/commands/${name}/execute`, { args, session_id: null });
   }
 
   async *subscribeLogs(): AsyncGenerator<LogEntry, void, unknown> {

@@ -99,6 +99,7 @@ impl Server {
             })
             .unwrap_or(4040);
 
+
         let sessions = Arc::new(HttpSessionManager::new());
         let (commands, current_theme) = super::commands::build_command_registry(sessions.clone());
 
@@ -169,6 +170,7 @@ impl Server {
                 post(super::commands::handle_execute_command),
             )
             .route("/api/themes", get(handle_list_themes))
+            .route("/api/skills", get(super::api::skill_api::list_skills))
             .route("/api/config", get(super::api::chat_api::handle_get_config))
             .route(
                 "/api/models",

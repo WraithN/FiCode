@@ -19,8 +19,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-pub mod chat_api;
-pub mod file_api;
-pub mod log_api;
-pub mod session_api;
-pub mod skill_api;
+use axum::Json;
+
+use crate::server::models::ApiResponse;
+
+#[derive(Debug, serde::Serialize)]
+pub struct SkillItem {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+/// 列出所有可用的 Skills
+pub async fn list_skills() -> Json<ApiResponse<Vec<SkillItem>>> {
+    let registry = crate::skills::get_registry();
+    let items: Vec<SkillItem> = registry
+        .entries
+        .iter()
+        .map(|e| SkillItem {
+            id: e.id.clone(),
+            name: e.metadata.name.clone(),
+            description: e.metadata.description.clone(),
+        })
+        .collect();
+    Json(ApiResponse::success(items))
+}
