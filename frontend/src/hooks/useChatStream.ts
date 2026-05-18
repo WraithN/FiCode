@@ -1,79 +1,80 @@
 import { useCallback } from 'react';
-import { useAppStore } from '../stores/appStore';
-import { sendMessage } from '../services/chat';
-import { SseEvent } from '../types/api';
+import { apiClient } from '../services/apiClient';
+import { useChatStore } from '../stores/chatStore';
+import { useSessionStore } from '../stores/sessionStore';
+import { SseEvent } from '../types/sse';
+import { Part } from '../types/part';
 
 export function useChatStream() {
-  const currentSessionId = useAppStore(s => s.currentSessionId);
-  const setCurrentSessionId = useAppStore(s => s.setCurrentSessionId);
-  const setIsGenerating = useAppStore(s => s.setIsGenerating);
-  const addMessage = useAppStore(s => s.addMessage);
-  const appendToLastMessage = useAppStore(s => s.appendToLastMessage);
-  const addSystemMessage = useAppStore(s => s.addSystemMessage);
+  const { currentAgent } = useChatStore();
+  const { currentSessionId, setCurrentSessionId } = useSessionStore();
+  const { startTurn, appendPart, completeTurn, setAgent, setIsGenerating } = useChatStore();
 
-  const send = useCallback(
-    async (message: string) => {
-      if (!message.trim()) return;
+  const send = useCallback(async (message: string) => {
+    if (!message.trim()) return;
 
-      addMessage({
-        id: `user-${Date.now()}`,
-        role: 'user',
-        content: message,
-        timestamp: Date.now(),
-      });
+    const turnId = startTurn(message);
+    setIsGenerating(true);
 
-      addMessage({
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-      });
+    try {
+      const stream = apiClient.chatStream(currentSessionId, message, currentAgent);
 
-      setIsGenerating(true);
-
-      try {
-        const stream = await sendMessage(currentSessionId, message);
-        const reader = stream.getReader();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const event = value as SseEvent;
-
-          switch (event.type) {
-            case 'content':
-              appendToLastMessage(event.text);
-              break;
-            case 'done':
-              setCurrentSessionId(event.session_id);
-              setIsGenerating(false);
-              break;
-            case 'error':
-              addSystemMessage(`Error: ${event.message}`);
-              setIsGenerating(false);
-              break;
-          }
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        addSystemMessage(`Stream error: ${message}`);
-        setIsGenerating(false);
+      for await (const event of stream) {
+        handleSseEvent(event, turnId, setAgent, appendPart, completeTurn, setCurrentSessionId, setIsGenerating);
       }
-    },
-    [
-      currentSessionId,
-      setCurrentSessionId,
-      setIsGenerating,
-      addMessage,
-      appendToLastMessage,
-      addSystemMessage,
-    ]
-  );
+    } catch (err) {
+      setIsGenerating(false);
+      appendPart(turnId, {
+        type: 'tool_error',
+        tool_call_id: '',
+        content: err instanceof Error ? err.message : 'Unknown error',
+        error_message: 'Stream error',
+      });
+    }
+  }, [currentSessionId, currentAgent, startTurn, appendPart, completeTurn, setAgent, setIsGenerating, setCurrentSessionId]);
 
   const stop = useCallback(() => {
     setIsGenerating(false);
   }, [setIsGenerating]);
 
   return { send, stop };
+}
+
+function handleSseEvent(
+  event: SseEvent,
+  turnId: string,
+  setAgent: (agent: 'build' | 'plan') => void,
+  appendPart: (turnId: string, part: Part) => void,
+  completeTurn: (turnId: string) => void,
+  setCurrentSessionId: (id: string | null) => void,
+  setIsGenerating: (generating: boolean) => void
+) {
+  switch (event.type) {
+    case 'message':
+      appendPart(turnId, { type: 'text', text: event.content });
+      break;
+    case 'part':
+      appendPart(turnId, event.part);
+      break;
+    case 'agent_info':
+      setAgent(event.agent_type);
+      break;
+    case 'done':
+      completeTurn(turnId);
+      setCurrentSessionId(event.session_id);
+      setIsGenerating(false);
+      break;
+    case 'error':
+      appendPart(turnId, {
+        type: 'tool_error',
+        tool_call_id: '',
+        content: event.message,
+        error_message: 'Server error',
+      });
+      setIsGenerating(false);
+      break;
+    case 'task_progress':
+      // TODO: display task progress in UI
+      break;
+  }
 }

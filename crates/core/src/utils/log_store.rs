@@ -287,9 +287,7 @@ mod tests {
         assert!(agent_content.contains("fi_code_core::agent"));
 
         // 验证 tui.log
-        let tui_content = fs::read_to_string(temp_dir.join("tui.log"))
-            .await
-            .unwrap();
+        let tui_content = fs::read_to_string(temp_dir.join("tui.log")).await.unwrap();
         assert!(tui_content.contains("tui hello"));
         assert!(tui_content.contains("fi_code_tui::app"));
 

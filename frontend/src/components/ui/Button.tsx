@@ -12,10 +12,10 @@ export const Button: React.FC<ButtonProps> = ({
   children,
   ...props
 }) => {
-  const baseStyles = 'rounded font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed';
+  const baseStyles = 'rounded font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 focus:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed';
 
   const variantStyles = {
-    primary: 'bg-accent text-bg hover:bg-opacity-90',
+    primary: 'bg-brand text-bg hover:bg-opacity-90',
     secondary: 'bg-bg-secondary text-text border border-border hover:bg-opacity-80',
     danger: 'bg-error text-white hover:bg-opacity-90',
     ghost: 'bg-transparent text-text-muted hover:text-text hover:bg-bg-secondary',

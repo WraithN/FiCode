@@ -24,5 +24,7 @@
 pub mod message;
 pub mod session;
 
-pub use message::{current_timestamp_ms, ImageSource, Message, MessageBuilder, Part, Role, TokenUsage};
+pub use message::{
+    current_timestamp_ms, ImageSource, Message, MessageBuilder, Part, Role, TokenUsage,
+};
 pub use session::{Session, SessionManager, SessionMeta, SessionStatus};
