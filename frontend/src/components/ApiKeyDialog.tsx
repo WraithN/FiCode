@@ -45,7 +45,7 @@ export const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
             value={apiKey}
             onChange={e => setApiKey(e.target.value)}
             placeholder="sk-..."
-            className="w-full px-3 py-2 bg-bg border border-border rounded text-text placeholder-text-muted focus:outline-none focus:border-accent"
+            className="w-full px-3 py-2 bg-bg border border-border rounded text-text placeholder-text-muted focus:outline-none focus:border-brand"
             autoFocus
           />
         </div>

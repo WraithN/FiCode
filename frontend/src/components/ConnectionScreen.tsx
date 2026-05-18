@@ -44,7 +44,7 @@ export const ConnectionScreen: React.FC = () => {
                 onClick={() => setEditMode('standalone')}
                 className={`flex-1 py-2 px-4 rounded border ${
                   editMode === 'standalone'
-                    ? 'bg-accent text-bg border-accent'
+                    ? 'bg-brand text-bg border-brand'
                     : 'bg-bg border-border text-text-secondary hover:text-text'
                 }`}
               >
@@ -54,7 +54,7 @@ export const ConnectionScreen: React.FC = () => {
                 onClick={() => setEditMode('remote')}
                 className={`flex-1 py-2 px-4 rounded border ${
                   editMode === 'remote'
-                    ? 'bg-accent text-bg border-accent'
+                    ? 'bg-brand text-bg border-brand'
                     : 'bg-bg border-border text-text-secondary hover:text-text'
                 }`}
               >
@@ -71,7 +71,7 @@ export const ConnectionScreen: React.FC = () => {
                 value={editUrl}
                 onChange={e => setEditUrl(e.target.value)}
                 placeholder="http://localhost:4040"
-                className="w-full px-3 py-2 bg-bg border border-border rounded text-text placeholder-text-muted focus:outline-none focus:border-accent"
+                className="w-full px-3 py-2 bg-bg border border-border rounded text-text placeholder-text-muted focus:outline-none focus:border-brand"
               />
             </div>
           )}

@@ -51,7 +51,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
                   key={model.key}
                   onClick={() => onSelect(provider.key, model.key, provider.key !== 'custom')}
                   className={`w-full text-left pl-6 pr-3 py-1.5 text-sm hover:bg-bg transition-colors ${
-                    model.key === currentModel ? 'text-accent' : 'text-text-secondary'
+                    model.key === currentModel ? 'text-brand' : 'text-text-secondary'
                   }`}
                 >
                   <div className="flex items-center justify-between">

@@ -100,7 +100,7 @@ export const Sidebar: React.FC = () => {
       </div>
 
       <div
-        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent transition-colors"
+        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-brand transition-colors"
         onMouseDown={() => setIsResizing(true)}
       />
     </div>

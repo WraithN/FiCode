@@ -40,7 +40,7 @@ export const InputBox: React.FC = () => {
           placeholder="Type a message... (Shift+Enter for new line)"
           disabled={isGenerating}
           rows={1}
-          className="flex-1 resize-none bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text placeholder-text-muted focus:outline-none focus:border-accent disabled:opacity-50 min-h-[40px] max-h-[120px]"
+          className="flex-1 resize-none bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text placeholder-text-muted focus:outline-none focus:border-brand disabled:opacity-50 min-h-[40px] max-h-[120px]"
         />
         {isGenerating ? (
           <Button variant="danger" size="sm" onClick={stop} className="shrink-0">

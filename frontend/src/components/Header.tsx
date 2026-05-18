@@ -85,7 +85,7 @@ export const Header: React.FC = () => {
     <>
       <header className="h-12 flex items-center justify-between px-4 bg-bg-secondary border-b border-border select-none">
         <div className="flex items-center gap-2">
-          <span className="text-lg font-bold text-accent">fi-code</span>
+          <span className="text-lg font-bold text-brand">fi-code</span>
           {isGenerating && (
             <span className="text-xs text-text-muted animate-pulse">generating...</span>
           )}
@@ -99,7 +99,7 @@ export const Header: React.FC = () => {
                 loadModels();
               }
             }}
-            className="flex items-center gap-1 px-3 py-1.5 rounded bg-bg border border-border text-sm text-text hover:border-accent transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 rounded bg-bg border border-border text-sm text-text hover:border-brand transition-colors"
           >
             <span>{currentModel}</span>
             <span className="text-text-muted">▼</span>
@@ -145,7 +145,7 @@ export const Header: React.FC = () => {
                     key={name}
                     onClick={() => handleThemeChange(name)}
                     className={`w-full text-left px-4 py-2 text-sm ${
-                      themeName === name ? 'text-accent' : 'text-text-secondary'
+                      themeName === name ? 'text-brand' : 'text-text-secondary'
                     } hover:bg-bg transition-colors`}
                   >
                     {themeName === name && '✓ '}{name}

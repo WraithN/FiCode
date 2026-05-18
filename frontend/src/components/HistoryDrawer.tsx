@@ -59,7 +59,7 @@ export const HistoryDrawer: React.FC = () => {
                 key={session.id}
                 onClick={() => handleSwitchSession(session.id)}
                 className={`w-full text-left px-4 py-2 text-sm hover:bg-bg transition-colors ${
-                  session.id === currentSessionId ? 'text-accent bg-bg' : 'text-text-secondary'
+                  session.id === currentSessionId ? 'text-brand bg-bg' : 'text-text-secondary'
                 }`}
               >
                 <div className="font-medium truncate">{session.name}</div>

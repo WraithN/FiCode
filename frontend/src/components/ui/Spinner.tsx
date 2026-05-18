@@ -13,7 +13,7 @@ export const Spinner: React.FC<SpinnerProps> = ({ size = 'md' }) => {
 
   return (
     <div className={`animate-spin ${sizeClasses[size]}`}>
-      <svg viewBox="0 0 24 24" fill="none" className="text-accent">
+      <svg viewBox="0 0 24 24" fill="none" className="text-brand">
         <circle
           cx="12"
           cy="12"
