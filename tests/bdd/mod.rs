@@ -160,7 +160,11 @@ impl AgentWorld {
                             task_count: None,
                         },
                         Ev::Part { part } => match part {
-                            fi_code_core::session::message::Part::ToolUse { name, arguments, .. } => SseEvent {
+                            fi_code_core::session::message::Part::ToolUse {
+                                name,
+                                arguments,
+                                ..
+                            } => SseEvent {
                                 event_type: "ToolUse".to_string(),
                                 content: None,
                                 tool_name: Some(name.clone()),
@@ -168,7 +172,9 @@ impl AgentWorld {
                                 plan_id: None,
                                 task_count: None,
                             },
-                            fi_code_core::session::message::Part::ToolResult { content, .. } => SseEvent {
+                            fi_code_core::session::message::Part::ToolResult {
+                                content, ..
+                            } => SseEvent {
                                 event_type: "ToolResult".to_string(),
                                 content: Some(content.clone()),
                                 tool_name: None,
@@ -176,14 +182,16 @@ impl AgentWorld {
                                 plan_id: None,
                                 task_count: None,
                             },
-                            fi_code_core::session::message::Part::ToolError { content, .. } => SseEvent {
-                                event_type: "ToolError".to_string(),
-                                content: Some(content.clone()),
-                                tool_name: None,
-                                tool_args: None,
-                                plan_id: None,
-                                task_count: None,
-                            },
+                            fi_code_core::session::message::Part::ToolError { content, .. } => {
+                                SseEvent {
+                                    event_type: "ToolError".to_string(),
+                                    content: Some(content.clone()),
+                                    tool_name: None,
+                                    tool_args: None,
+                                    plan_id: None,
+                                    task_count: None,
+                                }
+                            }
                             _ => SseEvent {
                                 event_type: "Other".to_string(),
                                 content: None,
@@ -212,6 +220,14 @@ impl AgentWorld {
                         Ev::Error { message } => SseEvent {
                             event_type: "Error".to_string(),
                             content: Some(message.clone()),
+                            tool_name: None,
+                            tool_args: None,
+                            plan_id: None,
+                            task_count: None,
+                        },
+                        Ev::AgentInfo { .. } => SseEvent {
+                            event_type: "AgentInfo".to_string(),
+                            content: None,
                             tool_name: None,
                             tool_args: None,
                             plan_id: None,

@@ -150,7 +150,9 @@ async fn collect_sse_events(response: reqwest::Response) -> Vec<SseEvent> {
                             plan_id: None,
                             task_count: None,
                         },
-                        fi_code_core::session::message::Part::ToolResult { tool_call_id, .. } => SseEvent {
+                        fi_code_core::session::message::Part::ToolResult {
+                            tool_call_id, ..
+                        } => SseEvent {
                             event_type: "ToolResult".to_string(),
                             content: Some(tool_call_id.clone()),
                             tool_name: None,
@@ -189,6 +191,13 @@ async fn collect_sse_events(response: reqwest::Response) -> Vec<SseEvent> {
                     Ev::Error { message } => SseEvent {
                         event_type: "Error".to_string(),
                         content: Some(message.clone()),
+                        tool_name: None,
+                        plan_id: None,
+                        task_count: None,
+                    },
+                    Ev::AgentInfo { .. } => SseEvent {
+                        event_type: "AgentInfo".to_string(),
+                        content: None,
                         tool_name: None,
                         plan_id: None,
                         task_count: None,
