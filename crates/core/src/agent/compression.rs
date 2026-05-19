@@ -495,4 +495,56 @@ mod tests {
         let msgs = build_llm_messages(&state);
         assert_eq!(msgs.len(), 5); // summary + u2 + a2 + u3 + a3
     }
+
+    #[tokio::test]
+    async fn test_compress_history_sends_sse_events() {
+        set_context_limit(10_000);
+
+        // 构造足够长的消息列表以触发压缩
+        let long_text = "a".repeat(50_000);
+        let messages = vec![
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: long_text.clone() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a1".to_string() }]),
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: long_text.clone() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a2".to_string() }]),
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: long_text.clone() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a3".to_string() }]),
+        ];
+
+        let loop_state = LoopState::new(messages);
+        let client = crate::provider::mock_client::MockAIClient::new();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let sse_sender = crate::server::transport::sse::SseSender::new(tx);
+
+        let result = compress_history(&loop_state, &client, Some(&sse_sender)).await;
+        assert!(result.is_ok());
+
+        let summary_msg = result.unwrap();
+        assert_eq!(summary_msg.role, Role::User);
+
+        // 收集所有 SSE 事件
+        let mut events = vec![];
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
+
+        // 验证收到了 CompressionStatus 开始事件
+        let start_event = events.iter().find(|e| {
+            matches!(e, crate::server::transport::sse::SseEvent::CompressionStatus { is_compressing: true, .. })
+        });
+        assert!(start_event.is_some(), "Expected compression start event");
+
+        // 验证收到了 CompressionStatus 结束事件
+        let end_event = events.iter().find(|e| {
+            matches!(e, crate::server::transport::sse::SseEvent::CompressionStatus { is_compressing: false, .. })
+        });
+        assert!(end_event.is_some(), "Expected compression end event");
+
+        // 验证收到了 SystemNotice Part 事件
+        let notice_event = events.iter().find(|e| {
+            matches!(e, crate::server::transport::sse::SseEvent::Part { part: Part::SystemNotice { .. } })
+        });
+        assert!(notice_event.is_some(), "Expected system notice event");
+    }
 }
