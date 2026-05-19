@@ -159,3 +159,25 @@ pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", 
 
 /// read 工具默认读取的最大行数
 pub const DEFAULT_READ_MAX_LINES: usize = 10_000;
+
+// =============================================================================
+// 上下文压缩相关常量
+// =============================================================================
+
+/// 默认上下文限制（token 数）：128K
+pub const DEFAULT_CONTEXT_LIMIT: u32 = 128_000;
+
+/// 压缩触发阈值：上下文使用率达到 85% 时触发
+pub const COMPRESSION_THRESHOLD: f64 = 0.85;
+
+/// 工具结果正常压缩阈值（字符数）：超过此值进行头尾截断
+pub const TOOL_RESULT_COMPRESS_THRESHOLD_NORMAL: usize = 8_000;
+
+/// 工具结果激进压缩阈值（字符数）：上下文紧张时使用更激进的阈值
+pub const TOOL_RESULT_COMPRESS_THRESHOLD_AGGRESSIVE: usize = 3_000;
+
+/// 工具结果压缩后保留的头部字符数
+pub const TOOL_RESULT_COMPRESS_HEAD: usize = 1_000;
+
+/// 工具结果压缩后保留的尾部字符数
+pub const TOOL_RESULT_COMPRESS_TAIL: usize = 2_000;
