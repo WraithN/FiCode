@@ -1132,7 +1132,7 @@ pub async fn execute_tool_calls(
                         error_message: content,
                     }
                 } else {
-                    let compressed = crate::agent::compression::compress_tool_result(&content, is_aggressive);
+                    let compressed = crate::agent::compression::compress_tool_result(&content, is_aggressive, Some(&name));
                     Part::ToolResult {
                         tool_call_id: id,
                         content: compressed,

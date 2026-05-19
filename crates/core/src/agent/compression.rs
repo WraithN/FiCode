@@ -101,14 +101,54 @@ pub fn should_compress(messages: &[Message]) -> bool {
 // 工具结果动态压缩
 // ---------------------------------------------------------------------------
 
-/// 压缩工具结果内容。
-pub fn compress_tool_result(content: &str, is_aggressive: bool) -> String {
-    let threshold = if is_aggressive {
-        TOOL_RESULT_COMPRESS_THRESHOLD_AGGRESSIVE
-    } else {
-        TOOL_RESULT_COMPRESS_THRESHOLD_NORMAL
-    };
+const BASH_COMPRESS_THRESHOLD: usize = 30_000;
+const READ_COMPRESS_THRESHOLD: usize = 100 * 1024;
+const MCP_COMPRESS_THRESHOLD_TOKENS: u32 = 25_000;
+const DEFAULT_COMPRESS_THRESHOLD: usize = 100 * 1024;
 
+/// 根据工具名称获取压缩阈值（字节数或字符数）。
+fn get_tool_threshold(tool_name: Option<&str>, is_aggressive: bool) -> Option<usize> {
+    let base = match tool_name {
+        Some("bash") => BASH_COMPRESS_THRESHOLD,
+        Some("read") | Some("read_file") => READ_COMPRESS_THRESHOLD,
+        Some(name) if name.starts_with("mcp:") => {
+            // MCP 工具使用 token 估算判断是否需要压缩
+            return None;
+        }
+        _ => DEFAULT_COMPRESS_THRESHOLD,
+    };
+    Some(if is_aggressive { base / 3 } else { base })
+}
+
+/// 压缩工具结果内容。
+/// `tool_name` 用于根据工具类型选择不同的压缩阈值。
+pub fn compress_tool_result(content: &str, is_aggressive: bool, tool_name: Option<&str>) -> String {
+    // MCP 工具使用 token 数判断
+    if let Some(name) = tool_name {
+        if name.starts_with("mcp:") {
+            let token_threshold = if is_aggressive {
+                (MCP_COMPRESS_THRESHOLD_TOKENS as f64 / 3.0).ceil() as u32
+            } else {
+                MCP_COMPRESS_THRESHOLD_TOKENS
+            };
+            if estimate_tokens(content) <= token_threshold {
+                return content.to_string();
+            }
+            // 超过 token 限制后，按默认字节阈值进行 head/tail 截取
+            let byte_threshold = if is_aggressive {
+                DEFAULT_COMPRESS_THRESHOLD / 3
+            } else {
+                DEFAULT_COMPRESS_THRESHOLD
+            };
+            return do_compress(content, byte_threshold);
+        }
+    }
+
+    let threshold = get_tool_threshold(tool_name, is_aggressive).unwrap_or(DEFAULT_COMPRESS_THRESHOLD);
+    do_compress(content, threshold)
+}
+
+fn do_compress(content: &str, threshold: usize) -> String {
     if content.len() <= threshold {
         return content.to_string();
     }
@@ -118,13 +158,19 @@ pub fn compress_tool_result(content: &str, is_aggressive: bool) -> String {
         .nth(TOOL_RESULT_COMPRESS_HEAD)
         .map(|(i, _)| i)
         .unwrap_or(content.len());
-    let tail_start = content.len().saturating_sub(TOOL_RESULT_COMPRESS_TAIL);
-    let truncated = content.len() - head_end - (content.len() - tail_start);
+    // 从末尾查找字符边界，避免多字节字符切片 panic
+    let tail_start = content
+        .char_indices()
+        .rev()
+        .nth(TOOL_RESULT_COMPRESS_TAIL.saturating_sub(1))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let truncated_chars = content[head_end..tail_start].chars().count();
 
     format!(
         "{}\n\n... [{} chars truncated] ...\n\n{}",
         &content[..head_end],
-        truncated,
+        truncated_chars,
         &content[tail_start..]
     )
 }
@@ -407,22 +453,100 @@ mod tests {
     #[test]
     fn test_compress_tool_result_short() {
         let content = "short";
-        let result = compress_tool_result(content, false);
+        let result = compress_tool_result(content, false, None);
         assert_eq!(result, "short");
     }
 
     #[test]
     fn test_compress_tool_result_normal() {
-        let content = "a".repeat(10_000);
-        let result = compress_tool_result(&content, false);
+        // 默认阈值 100KB，超过才压缩
+        let content = "a".repeat(110_000);
+        let result = compress_tool_result(&content, false, None);
         assert!(result.contains("truncated"));
         assert!(result.starts_with("a"));
     }
 
     #[test]
     fn test_compress_tool_result_aggressive() {
-        let content = "b".repeat(5_000);
-        let result = compress_tool_result(&content, true);
+        // aggressive 默认阈值 100KB/3 ≈ 34KB
+        let content = "b".repeat(40_000);
+        let result = compress_tool_result(&content, true, None);
+        assert!(result.contains("truncated"));
+    }
+
+    #[test]
+    fn test_compress_tool_result_bash_threshold() {
+        // Bash 阈值 30_000，低于阈值不压缩
+        let content = "a".repeat(20_000);
+        let result = compress_tool_result(&content, false, Some("bash"));
+        assert!(!result.contains("truncated"));
+
+        // 超过 30_000 压缩
+        let content = "a".repeat(40_000);
+        let result = compress_tool_result(&content, false, Some("bash"));
+        assert!(result.contains("truncated"));
+    }
+
+    #[test]
+    fn test_compress_tool_result_read_threshold() {
+        // Read 阈值 100KB，低于阈值不压缩
+        let content = "a".repeat(80_000);
+        let result = compress_tool_result(&content, false, Some("read"));
+        assert!(!result.contains("truncated"));
+
+        // 超过 100KB 压缩
+        let content = "a".repeat(110_000);
+        let result = compress_tool_result(&content, false, Some("read"));
+        assert!(result.contains("truncated"));
+    }
+
+    #[test]
+    fn test_compress_tool_result_mcp_threshold() {
+        // MCP 阈值 25_000 tokens（按 ASCII 估算约 100_000 字符）
+        // 低于 token 阈值不压缩
+        let content = "a".repeat(50_000);
+        let result = compress_tool_result(&content, false, Some("mcp:filesystem"));
+        assert!(!result.contains("truncated"));
+
+        // 超过 token 阈值压缩
+        let content = "a".repeat(120_000);
+        let result = compress_tool_result(&content, false, Some("mcp:filesystem"));
+        assert!(result.contains("truncated"));
+    }
+
+    #[test]
+    fn test_compress_tool_result_mcp_aggressive() {
+        // aggressive 模式下 MCP token 阈值降低为约 8_333 tokens
+        let content = "a".repeat(2_000); // ~500 tokens，不压缩
+        let result = compress_tool_result(&content, true, Some("mcp:filesystem"));
+        assert!(!result.contains("truncated"));
+
+        let content = "a".repeat(40_000); // ~10_000 tokens，超过 aggressive 阈值，压缩
+        let result = compress_tool_result(&content, true, Some("mcp:filesystem"));
+        assert!(result.contains("truncated"));
+    }
+
+    #[test]
+    fn test_compress_tool_result_mcp_cjk() {
+        // CJK 字符权重更高（0.67 token/char），达到 25_000 tokens 需要更少字符
+        let content = "中".repeat(30_000); // ~20_100 tokens，不压缩
+        let result = compress_tool_result(&content, false, Some("mcp:filesystem"));
+        assert!(!result.contains("truncated"));
+
+        let content = "中".repeat(40_000); // ~26_800 tokens，超过阈值，压缩
+        let result = compress_tool_result(&content, false, Some("mcp:filesystem"));
+        assert!(result.contains("truncated"));
+    }
+
+    #[test]
+    fn test_compress_tool_result_default_threshold() {
+        // 其他工具阈值 100KB
+        let content = "a".repeat(80_000);
+        let result = compress_tool_result(&content, false, Some("write"));
+        assert!(!result.contains("truncated"));
+
+        let content = "a".repeat(110_000);
+        let result = compress_tool_result(&content, false, Some("write"));
         assert!(result.contains("truncated"));
     }
 
