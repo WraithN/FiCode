@@ -325,6 +325,7 @@ async fn run_agent_chat(
         agent_type,
         &mut on_text,
         &mut on_tool_event,
+        Some(&sse_sender),
     )
     .await
     {

@@ -312,6 +312,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     agent_type: AgentType,
     on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
+    sse_sender: Option<&crate::server::transport::sse::SseSender>,
 ) -> Result<bool> {
     // 从当前消息历史中继承 session_id，确保工具结果消息与对话属于同一会话
     let session_id = state
@@ -345,7 +346,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
                 state.turn_count
             );
 
-            match crate::agent::compression::compress_history(state, client).await {
+            match crate::agent::compression::compress_history(state, client, sse_sender).await {
                 Ok(summary) => {
                     state.compression_summary = Some(summary);
                     log_info!("[Compression] Completed successfully");
@@ -752,6 +753,7 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
     agent_type: AgentType,
     on_text: &mut Option<Box<dyn FnMut(&str) + Send>>,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
+    sse_sender: Option<&crate::server::transport::sse::SseSender>,
 ) -> Result<()> {
     let mut retry_count = 0u32;
 
@@ -768,7 +770,7 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
         let token_usage_before = state.token_usage;
         let transition_reason_before = state.transition_reason.clone();
 
-        match run_one_turn(client, state, agent_type, on_text, on_tool_event).await {
+        match run_one_turn(client, state, agent_type, on_text, on_tool_event, sse_sender).await {
             Ok(should_continue) => {
                 retry_count = 0;
                 if !should_continue {

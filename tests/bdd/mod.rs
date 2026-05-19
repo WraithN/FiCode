@@ -239,6 +239,14 @@ impl AgentWorld {
                             plan_id: None,
                             task_count: None,
                         },
+                        Ev::CompressionStatus { .. } => SseEvent {
+                            event_type: "CompressionStatus".to_string(),
+                            content: None,
+                            tool_name: None,
+                            tool_args: None,
+                            plan_id: None,
+                            task_count: None,
+                        },
                     };
                     let is_done = matches!(event, Ev::Done { .. });
                     self.events.push(sse_event);

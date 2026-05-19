@@ -75,6 +75,7 @@ impl PartRendererRegistry {
             Part::Reasoning { .. } => "reasoning",
             Part::WaveMarker { .. } => "wave_marker",
             Part::Usage { .. } => "usage",
+            Part::SystemNotice { .. } => "text",
         };
         self.renderers.get(key).map(|b| b.as_ref())
     }

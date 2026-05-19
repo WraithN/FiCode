@@ -245,6 +245,9 @@ impl TuiClient {
                             SseEvent::AgentInfo { agent_type, agent_name } => {
                                 format!("AgentInfo(type={:?} name={})", agent_type, agent_name)
                             }
+                            SseEvent::CompressionStatus { is_compressing, progress, context_ratio, .. } => {
+                                format!("CompressionStatus(compressing={} progress={}% ratio={}%)", is_compressing, progress, context_ratio)
+                            }
                         };
                         log_debug!("[Client] HTTP SSE event | {}", event_preview);
                         if let SseEvent::Done { session_id: sid } = &event {

@@ -929,6 +929,9 @@ impl TuiApp {
                     SseEvent::AgentInfo { agent_type, agent_name } => {
                         log_info!("[Client] SSE AgentInfo | type={:?} name={}", agent_type, agent_name);
                     }
+                    SseEvent::CompressionStatus { is_compressing, progress, context_ratio, .. } => {
+                        log_debug!("[Client] SSE CompressionStatus | compressing={} | progress={}% | ratio={}%", is_compressing, progress, context_ratio);
+                    }
                 }
                 self.chat.handle_sse_event(sse_event);
                 if let SseEvent::Done { session_id } = &sse_event {
