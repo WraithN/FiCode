@@ -1385,25 +1385,22 @@ impl TuiApp {
         let client = self.client.clone();
         let tx = self.event_tx.clone();
         tokio::spawn(async move {
-            match client.get_logs(200).await {
-                Ok(entries) => {
-                    let lines: Vec<LogLine> = entries
-                        .into_iter()
-                        .map(|e| LogLine {
-                            timestamp: e.timestamp,
-                            level: match e.level.as_str() {
-                                "DEBUG" => LogLevel::Debug,
-                                "TRACE" => LogLevel::Trace,
-                                "ERROR" => LogLevel::Error,
-                                _ => LogLevel::Info,
-                            },
-                            module: e.module,
-                            message: e.message,
-                        })
-                        .collect();
-                    let _ = tx.send(AppEvent::SetLogHistory(lines)).await;
-                }
-                Err(_) => {}
+            if let Ok(entries) = client.get_logs(200).await {
+                let lines: Vec<LogLine> = entries
+                    .into_iter()
+                    .map(|e| LogLine {
+                        timestamp: e.timestamp,
+                        level: match e.level.as_str() {
+                            "DEBUG" => LogLevel::Debug,
+                            "TRACE" => LogLevel::Trace,
+                            "ERROR" => LogLevel::Error,
+                            _ => LogLevel::Info,
+                        },
+                        module: e.module,
+                        message: e.message,
+                    })
+                    .collect();
+                let _ = tx.send(AppEvent::SetLogHistory(lines)).await;
             }
         });
     }
@@ -1424,11 +1421,8 @@ impl TuiApp {
         let client = self.client.clone();
         let tx = self.event_tx.clone();
         tokio::spawn(async move {
-            match client.list_themes().await {
-                Ok(presets) => {
-                    let _ = tx.send(AppEvent::SetThemes(presets)).await;
-                }
-                Err(_) => {}
+            if let Ok(presets) = client.list_themes().await {
+                let _ = tx.send(AppEvent::SetThemes(presets)).await;
             }
         });
     }

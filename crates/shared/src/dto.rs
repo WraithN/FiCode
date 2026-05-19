@@ -173,16 +173,13 @@ pub fn current_timestamp_ms() -> u64 {
 /// Agent 类型：Build（全功能）和 Plan（只读规划）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum AgentType {
+    #[default]
     Build,
     Plan,
 }
 
-impl Default for AgentType {
-    fn default() -> Self {
-        AgentType::Build
-    }
-}
 
 impl std::fmt::Display for AgentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

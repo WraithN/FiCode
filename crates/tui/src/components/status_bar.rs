@@ -428,9 +428,8 @@ impl Component for StatusBar {
     }
 
     fn update(&mut self, event: &AppEvent) {
-        match event {
-            AppEvent::Tick => self.on_tick(),
-            _ => {}
+        if let AppEvent::Tick = event {
+            self.on_tick();
         }
     }
 }

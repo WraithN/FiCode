@@ -202,6 +202,13 @@ async fn collect_sse_events(response: reqwest::Response) -> Vec<SseEvent> {
                         plan_id: None,
                         task_count: None,
                     },
+                    Ev::CompressionStatus { .. } => SseEvent {
+                        event_type: "CompressionStatus".to_string(),
+                        content: None,
+                        tool_name: None,
+                        plan_id: None,
+                        task_count: None,
+                    },
                 };
                 let is_done = matches!(event, Ev::Done { .. });
                 events.push(sse_event);

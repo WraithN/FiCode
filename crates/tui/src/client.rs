@@ -220,8 +220,8 @@ impl TuiClient {
                 let line = buffer.drain(..=pos).collect::<String>();
                 let line = line.trim_end();
 
-                if line.starts_with("data: ") {
-                    event_data.push(line[6..].to_string());
+                if let Some(data) = line.strip_prefix("data: ") {
+                    event_data.push(data.to_string());
                 } else if line.is_empty() && !event_data.is_empty() {
                     // SSE 事件结束（空行），合并所有 data: 行
                     let json_str = event_data.join("\n");

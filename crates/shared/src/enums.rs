@@ -52,16 +52,13 @@ pub enum Role {
 /// Provider API 类型
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ProviderType {
+    #[default]
     OpenAiCompatible,
     Anthropic,
 }
 
-impl Default for ProviderType {
-    fn default() -> Self {
-        ProviderType::OpenAiCompatible
-    }
-}
 
 // -----------------------------------------------------------------------------
 // MCP 服务器类型枚举
@@ -70,16 +67,13 @@ impl Default for ProviderType {
 /// MCP 服务器类型
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum McpServerType {
+    #[default]
     Local,
     Remote,
 }
 
-impl Default for McpServerType {
-    fn default() -> Self {
-        McpServerType::Local
-    }
-}
 
 // -----------------------------------------------------------------------------
 // 模型生成停止原因枚举
