@@ -115,6 +115,12 @@ pub enum Part {
         latency_ms: u32,
         cost: Option<f64>,
     },
+    /// 系统通知（如压缩完成、Agent 切换等）
+    #[serde(rename = "system_notice")]
+    SystemNotice {
+        kind: String,
+        content: String,
+    },
 }
 
 // -----------------------------------------------------------------------------
@@ -272,6 +278,14 @@ pub enum SseEvent {
     },
     #[serde(rename = "done")]
     Done { session_id: String },
+    /// 压缩状态更新事件
+    #[serde(rename = "compression_status")]
+    CompressionStatus {
+        is_compressing: bool,
+        progress: u8,
+        context_ratio: u8,
+        summary: Option<String>,
+    },
 }
 
 /// 任务计划中的单个任务项。
