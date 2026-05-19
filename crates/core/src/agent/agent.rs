@@ -333,6 +333,30 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         });
     }
 
+    // === 上下文压缩检查 ===
+    if crate::agent::compression::should_compress(&state.messages) {
+        let needs_compress = state.compression_summary.is_none()
+            || crate::agent::compression::find_compression_range(&state.messages).is_some();
+
+        if needs_compress {
+            log_info!(
+                "[Compression] Triggered | messages={} | turn={}",
+                state.messages.len(),
+                state.turn_count
+            );
+
+            match crate::agent::compression::compress_history(state, client).await {
+                Ok(summary) => {
+                    state.compression_summary = Some(summary);
+                    log_info!("[Compression] Completed successfully");
+                }
+                Err(e) => {
+                    log_error!("[Compression] Failed: {}", e);
+                }
+            }
+        }
+    }
+
     let registry = get_registry();
     let schema = tool_schema().await;
     let profile = AgentProfile::for_type(agent_type);
@@ -388,21 +412,15 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         serde_json::to_string_pretty(&schema).unwrap_or_default()
     );
 
-    // 消息历史截断：超过 30 条时只保留最近 30 条，防止长对话导致 Prompt 无限膨胀
-    let messages_for_llm: &[Message] = if state.messages.len() > MAX_CONTEXT_MESSAGES {
-        let start = state.messages.len().saturating_sub(MAX_CONTEXT_MESSAGES);
-        &state.messages[start..]
-    } else {
-        &state.messages[..]
-    };
+    let llm_messages = crate::agent::compression::build_llm_messages(state);
     log_debug!(
-        "[Agent] context truncated | total={} | sent={}",
+        "[Agent] context built | total={} | sent={}",
         state.messages.len(),
-        messages_for_llm.len()
+        llm_messages.len()
     );
 
     if let Err(e) = client
-        .stream_message(&system_prompt, messages_for_llm, &schema, &mut |chunk| {
+        .stream_message(&system_prompt, &llm_messages, &schema, &mut |chunk| {
             // 实时转发文本内容和系统通知，实现真流式
             match &chunk.content {
                 ChunkContent::Text(text) | ChunkContent::Think(text) => {
@@ -511,7 +529,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
             turn.finish_reason = None;
 
             if let Err(e) = client
-                .stream_message(&system_prompt, &state.messages, &schema, &mut |chunk| {
+                .stream_message(&system_prompt, &llm_messages, &schema, &mut |chunk| {
                     turn.process_chunk(chunk);
                 })
                 .await
@@ -560,8 +578,9 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         }
     }
 
+    let is_aggressive = crate::agent::compression::should_compress(&state.messages);
     // 执行所有工具调用，并收集结果
-    let tool_results = execute_tool_calls(&turn.content_blocks, agent_type, on_tool_event).await;
+    let tool_results = execute_tool_calls(&turn.content_blocks, agent_type, on_tool_event, is_aggressive).await;
     if tool_results.is_empty() {
         turn.update_wave_marker(
             &mut state.messages,

@@ -246,6 +246,15 @@ async fn run_agent_chat(
     // 设置全局 Provider，供 handle_task_plan 工具使用
     set_task_provider(Arc::clone(&state.provider));
 
+    // 设置全局上下文限制（供压缩模块使用）
+    if let Ok(provider) = state.provider.read() {
+        if let Ok(config) = state.config.read() {
+            let limit = provider.context_limit(&config);
+            crate::agent::compression::set_context_limit(limit);
+            log_info!("[Server] Context limit set to {}", limit);
+        }
+    }
+
     // 获取或创建 LoopState
     let mut loop_state = match state.sessions.get(&session_id) {
         Some(state) => state,

@@ -1029,6 +1029,7 @@ pub async fn execute_tool_calls(
     parts: &[Part],
     agent_type: fi_code_shared::dto::AgentType,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
+    is_aggressive: bool,
 ) -> Vec<Part> {
     use crate::agent::profile::AgentProfile;
     use crate::server::transport::sse::SseEvent;
@@ -1131,9 +1132,10 @@ pub async fn execute_tool_calls(
                         error_message: content,
                     }
                 } else {
+                    let compressed = crate::agent::compression::compress_tool_result(&content, is_aggressive);
                     Part::ToolResult {
                         tool_call_id: id,
-                        content,
+                        content: compressed,
                         duration_ms: Some(duration_ms),
                     }
                 }
@@ -1663,7 +1665,7 @@ mod tests {
                 arguments: serde_json::json!({"path": "/tmp/test.txt", "content": "hello"}),
             },
         ];
-        let results = execute_tool_calls(&parts, AgentType::Plan, &mut None).await;
+        let results = execute_tool_calls(&parts, AgentType::Plan, &mut None, false).await;
         assert_eq!(results.len(), 1);
         match &results[0] {
             Part::ToolError { error_message, .. } => {
@@ -1684,7 +1686,7 @@ mod tests {
                 arguments: serde_json::json!({"path": "/tmp/test_fi_code_build.txt", "content": "hello"}),
             },
         ];
-        let results = execute_tool_calls(&parts, AgentType::Build, &mut None).await;
+        let results = execute_tool_calls(&parts, AgentType::Build, &mut None, false).await;
         assert_eq!(results.len(), 1);
         // Build Agent 应该尝试执行（结果可能是成功或失败，但不是因为被拦截）
         match &results[0] {
