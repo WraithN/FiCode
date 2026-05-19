@@ -34,6 +34,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::agent::agent_loop;
 use crate::commands::registry::CommandRegistry;
@@ -199,6 +200,10 @@ impl Server {
         }
 
         let app = app
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+            ))
             .layer(cors_layer(self.state.config.clone()))
             .with_state(self.state.clone());
 
