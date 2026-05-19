@@ -308,3 +308,141 @@ pub fn build_llm_messages(loop_state: &LoopState) -> Vec<Message> {
         loop_state.messages.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_estimate_tokens_ascii() {
+        let text = "Hello world";
+        let tokens = estimate_tokens(text);
+        // 11 ASCII chars * 0.25 = 2.75 -> ceil = 3
+        assert_eq!(tokens, 3);
+    }
+
+    #[test]
+    fn test_estimate_tokens_mixed() {
+        let text = "Hello 世界";
+        let tokens = estimate_tokens(text);
+        // 6 ASCII * 0.25 + 2 CJK * 0.67 = 1.5 + 1.34 = 2.84 -> ceil = 3
+        assert_eq!(tokens, 3);
+    }
+
+    #[test]
+    fn test_should_compress_below_threshold() {
+        set_context_limit(100);
+        let messages = vec![Message::new(
+            "test".to_string(),
+            Role::User,
+            vec![Part::Text { text: "hi".to_string() }],
+        )];
+        assert!(!should_compress(&messages));
+    }
+
+    #[test]
+    fn test_should_compress_above_threshold() {
+        set_context_limit(100);
+        // threshold = 85, need >= 85 estimated tokens
+        // each char ~0.25 for ASCII, so ~400 chars = 100 tokens
+        let long_text = "a".repeat(400);
+        let messages = vec![Message::new(
+            "test".to_string(),
+            Role::User,
+            vec![Part::Text { text: long_text }],
+        )];
+        assert!(should_compress(&messages));
+    }
+
+    #[test]
+    fn test_compress_tool_result_short() {
+        let content = "short";
+        let result = compress_tool_result(content, false);
+        assert_eq!(result, "short");
+    }
+
+    #[test]
+    fn test_compress_tool_result_normal() {
+        let content = "a".repeat(10_000);
+        let result = compress_tool_result(&content, false);
+        assert!(result.contains("truncated"));
+        assert!(result.starts_with("a"));
+    }
+
+    #[test]
+    fn test_compress_tool_result_aggressive() {
+        let content = "b".repeat(5_000);
+        let result = compress_tool_result(&content, true);
+        assert!(result.contains("truncated"));
+    }
+
+    #[test]
+    fn test_find_compression_range_insufficient_messages() {
+        let messages = vec![
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u1".to_string() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a1".to_string() }]),
+        ];
+        assert!(find_compression_range(&messages).is_none());
+    }
+
+    #[test]
+    fn test_find_compression_range_basic() {
+        let messages = vec![
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u1".to_string() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a1".to_string() }]),
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u2".to_string() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a2".to_string() }]),
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u3".to_string() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a3".to_string() }]),
+        ];
+        let range = find_compression_range(&messages);
+        assert!(range.is_some());
+        let (start, end) = range.unwrap();
+        assert_eq!(start, 0);
+        assert_eq!(end, 1);
+    }
+
+    #[test]
+    fn test_find_safe_split_point_tool_pairing() {
+        let messages = vec![
+            Message::new("s".to_string(), Role::Assistant, vec![
+                Part::ToolUse { id: "t1".to_string(), name: "bash".to_string(), arguments: serde_json::Value::Null },
+            ]),
+            Message::new("s".to_string(), Role::User, vec![
+                Part::ToolResult { tool_call_id: "t1".to_string(), content: "result".to_string(), duration_ms: None },
+            ]),
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u2".to_string() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a2".to_string() }]),
+        ];
+        let safe = find_safe_split_point(&messages, 2);
+        assert_eq!(safe, 2);
+    }
+
+    #[test]
+    fn test_build_llm_messages_without_summary() {
+        let state = LoopState::new(vec![
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u1".to_string() }]),
+        ]);
+        let msgs = build_llm_messages(&state);
+        assert_eq!(msgs.len(), 1);
+    }
+
+    #[test]
+    fn test_build_llm_messages_with_summary() {
+        let mut state = LoopState::new(vec![
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u1".to_string() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a1".to_string() }]),
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u2".to_string() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a2".to_string() }]),
+            Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u3".to_string() }]),
+            Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a3".to_string() }]),
+        ]);
+        state.compression_summary = Some(Message::new(
+            "s".to_string(),
+            Role::User,
+            vec![Part::Text { text: "summary".to_string() }],
+        ));
+        let msgs = build_llm_messages(&state);
+        assert_eq!(msgs.len(), 5); // summary + u2 + a2 + u3 + a3
+    }
+}
