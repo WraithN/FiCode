@@ -65,6 +65,8 @@ pub struct LoopState {
     pub transition_reason: Option<String>,
     /// 累计 Token 使用量
     pub token_usage: TokenUsage,
+    /// 增量压缩摘要，仅在内存中存在，不持久化
+    pub compression_summary: Option<Message>,
 }
 
 impl LoopState {
@@ -74,6 +76,7 @@ impl LoopState {
             turn_count: 1,
             transition_reason: None,
             token_usage: TokenUsage::default(),
+            compression_summary: None,
         }
     }
 }

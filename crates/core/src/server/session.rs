@@ -61,6 +61,7 @@ impl HttpSessionManager {
                 turn_count: state.turn_count,
                 transition_reason: state.transition_reason.clone(),
                 token_usage: state.token_usage,
+                compression_summary: state.compression_summary.clone(),
             }
         })
     }

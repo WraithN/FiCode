@@ -1242,6 +1242,28 @@ impl TuiApp {
             AppEvent::SetFileTree(ref files) => {
                 self.left_drawer.set_files(files.clone());
             }
+            AppEvent::LoadFileTreeForPicker => {
+                let client = self.client.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    if let Ok(file_tree) = client.get_file_tree(".").await {
+                        let files: Vec<fi_code_shared::dto::FileNode> = file_tree
+                            .entries
+                            .into_iter()
+                            .map(|e| fi_code_shared::dto::FileNode {
+                                path: e.path,
+                                name: e.name,
+                                is_dir: e.is_dir,
+                                depth: e.depth,
+                            })
+                            .collect();
+                        let _ = tx.send(AppEvent::SetFileTreeForPicker(files)).await;
+                    }
+                });
+            }
+            AppEvent::SetFileTreeForPicker(ref files) => {
+                self.input.set_at_picker_files(files.clone());
+            }
             AppEvent::BrowseGitSnapshot(ref hash) => {
                 log_info!("[Client] BrowseGitSnapshot | hash={}", hash);
             }

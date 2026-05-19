@@ -1,8 +1,9 @@
 import presetJson from '../../../crates/shared/src/preset_themes.json';
 import { ThemePreset } from '../types/theme';
 
-function u32ToHex(u32: number): string {
-  return `#${u32.toString(16).padStart(6, '0')}`;
+function u32ToHex(u32: number | undefined, fallback: number = 0): string {
+  const val = u32 ?? fallback;
+  return `#${val.toString(16).padStart(6, '0')}`;
 }
 
 export const themePresets: ThemePreset[] = (presetJson as any[]).map(p => ({
@@ -12,8 +13,8 @@ export const themePresets: ThemePreset[] = (presetJson as any[]).map(p => ({
     bg: u32ToHex(p.bg_base),
     bgSecondary: u32ToHex(p.bg_surface),
     bgOverlay: u32ToHex(p.bg_overlay),
-    bgUserArea: u32ToHex(p.bg_user_area),
-    bgAiArea: u32ToHex(p.bg_ai_area),
+    bgUserArea: u32ToHex(p.bg_user_area, p.bg_base),
+    bgAiArea: u32ToHex(p.bg_ai_area, p.bg_surface),
     textPrimary: u32ToHex(p.text_primary),
     textSecondary: u32ToHex(p.text_secondary),
     textMuted: u32ToHex(p.text_muted),

@@ -143,6 +143,8 @@ pub enum AppEvent {
     AppendLog(LogLine),
     LogDisconnected,
     SetFileTree(Vec<FileNode>),
+    LoadFileTreeForPicker,
+    SetFileTreeForPicker(Vec<FileNode>),
     ShowQuestionDialog {
         question: String,
         options: Vec<QuestionOption>,

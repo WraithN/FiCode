@@ -60,6 +60,12 @@ pub struct Input {
     submenu_selected: usize,
     submenu_loaded: bool,
     submenu_context: Option<String>, // 用于 ModelList 存储当前 provider key
+    // @ 文件选择器状态
+    at_picker_visible: bool,
+    at_picker_files: Vec<fi_code_shared::dto::FileNode>,
+    at_picker_selected: usize,
+    at_picker_loaded: bool,
+    at_picker_filter: String,
     // 输入历史记录（循环缓存，最大 100 条）
     history: Vec<String>,
     history_index: Option<usize>, // None 表示当前在编辑新内容
@@ -83,6 +89,11 @@ impl Input {
             submenu_selected: 0,
             submenu_loaded: false,
             submenu_context: None,
+            at_picker_visible: false,
+            at_picker_files: Vec::new(),
+            at_picker_selected: 0,
+            at_picker_loaded: false,
+            at_picker_filter: String::new(),
             history: Vec::new(),
             history_index: None,
             history_draft: None,
@@ -136,16 +147,47 @@ impl Input {
         self.submenu_kind.is_some() && self.dropdown_visible
     }
 
+    pub fn is_at_picker_visible(&self) -> bool {
+        self.at_picker_visible
+    }
+
+    pub fn set_at_picker_files(&mut self, files: Vec<fi_code_shared::dto::FileNode>) {
+        self.at_picker_files = files;
+        self.at_picker_loaded = true;
+        self.at_picker_selected = 0;
+    }
+
+    pub fn close_at_picker(&mut self) {
+        self.at_picker_visible = false;
+        self.at_picker_files.clear();
+        self.at_picker_selected = 0;
+        self.at_picker_filter.clear();
+    }
+
+    fn filtered_at_files(&self) -> Vec<&fi_code_shared::dto::FileNode> {
+        if self.at_picker_filter.is_empty() {
+            self.at_picker_files.iter().filter(|f| !f.is_dir).collect()
+        } else {
+            let filter = self.at_picker_filter.to_lowercase();
+            self.at_picker_files
+                .iter()
+                .filter(|f| !f.is_dir && f.name.to_lowercase().contains(&filter))
+                .collect()
+        }
+    }
+
     pub fn set_last_drawn_area(&mut self, area: Rect) {
         self.last_drawn_area = Some(area);
     }
 
     pub fn update_dropdown_area(&mut self, input_area: Rect) {
-        if !self.dropdown_visible {
+        if !self.dropdown_visible && !self.at_picker_visible {
             self.dropdown_area = None;
             return;
         }
-        let items_len = if self.submenu_kind.is_some() {
+        let items_len = if self.at_picker_visible {
+            self.filtered_at_files().len() as u16
+        } else if self.submenu_kind.is_some() {
             self.submenu_items.len() as u16
         } else {
             self.dropdown_items.len() as u16
@@ -186,6 +228,7 @@ impl Input {
         self.content.clear();
         self.cursor_position = 0;
         self.dropdown_visible = false;
+        self.close_at_picker();
     }
 
     /// 输入框显示行数（固定 2 行）。
@@ -233,8 +276,19 @@ impl Input {
 }
 
 impl Component for Input {
-    fn update(&mut self, _event: &AppEvent) {
-        // 什么都不做，避免被 Header 组件的 InputChanged 事件清空
+    fn update(&mut self, event: &AppEvent) {
+        match event {
+            AppEvent::SetFileTreeForPicker(ref files) => {
+                self.set_at_picker_files(files.clone());
+                // 如果当前光标前是 @ 且 picker 未显示，自动显示
+                if self.content.ends_with('@') && !self.at_picker_visible {
+                    self.at_picker_visible = true;
+                    self.at_picker_selected = 0;
+                    self.at_picker_filter.clear();
+                }
+            }
+            _ => {}
+        }
     }
     /// 渲染输入框：包含可选的会话 ID 标签、带边框的输入区域、placeholder、光标位置，
     /// 以及斜杠命令下拉菜单。
@@ -297,7 +351,9 @@ impl Component for Input {
         let cursor_y = inner.y + cursor_row;
         frame.set_cursor_position((cursor_x, cursor_y));
 
-        if self.dropdown_visible && !self.dropdown_items.is_empty() {
+        if self.at_picker_visible && !self.at_picker_files.is_empty() {
+            self.draw_at_picker(frame, area, theme);
+        } else if self.dropdown_visible && !self.dropdown_items.is_empty() {
             self.draw_dropdown(frame, area, theme);
         }
     }
@@ -307,6 +363,56 @@ impl Component for Input {
         match event {
             Event::Key(key) => {
                 if key.kind != KeyEventKind::Press {
+                    return None;
+                }
+
+                if self.at_picker_visible {
+                    match key.code {
+                        KeyCode::Up => {
+                            if self.at_picker_selected > 0 {
+                                self.at_picker_selected -= 1;
+                            }
+                            return None;
+                        }
+                        KeyCode::Down => {
+                            let max = self.filtered_at_files().len().saturating_sub(1);
+                            if self.at_picker_selected < max {
+                                self.at_picker_selected += 1;
+                            }
+                            return None;
+                        }
+                        KeyCode::Enter => {
+                            let files = self.filtered_at_files();
+                            if self.at_picker_selected < files.len() {
+                                let path = files[self.at_picker_selected].path.clone();
+                                self.close_at_picker();
+                                self.insert_char('@');
+                                for c in path.chars() {
+                                    self.insert_char(c);
+                                }
+                                return Some(AppEvent::InputChanged(self.content.clone()));
+                            }
+                        }
+                        KeyCode::Esc => {
+                            self.close_at_picker();
+                            return None;
+                        }
+                        KeyCode::Backspace => {
+                            if !self.at_picker_filter.is_empty() {
+                                self.at_picker_filter.pop();
+                                self.at_picker_selected = 0;
+                                return None;
+                            }
+                            self.close_at_picker();
+                            return None;
+                        }
+                        KeyCode::Char(c) => {
+                            self.at_picker_filter.push(c);
+                            self.at_picker_selected = 0;
+                            return None;
+                        }
+                        _ => {}
+                    }
                     return None;
                 }
 
@@ -502,6 +608,17 @@ impl Component for Input {
                         }
                     }
                     (KeyModifiers::NONE, KeyCode::Char(c)) => {
+                        if c == '@' {
+                            self.insert_char(c);
+                            if self.at_picker_loaded {
+                                self.at_picker_visible = true;
+                                self.at_picker_selected = 0;
+                                self.at_picker_filter.clear();
+                                return Some(AppEvent::InputChanged(self.content.clone()));
+                            } else {
+                                return Some(AppEvent::LoadFileTreeForPicker);
+                            }
+                        }
                         self.insert_char(c);
                         let ev = self.check_slash_commands();
                         if ev.is_some() {
@@ -521,6 +638,53 @@ impl Component for Input {
                 None
             }
             Event::Mouse(mouse) => {
+                if self.at_picker_visible {
+                    match mouse.kind {
+                        crossterm::event::MouseEventKind::ScrollUp => {
+                            if self.at_picker_selected > 0 {
+                                self.at_picker_selected -= 1;
+                            }
+                            return None;
+                        }
+                        crossterm::event::MouseEventKind::ScrollDown => {
+                            let max = self.filtered_at_files().len().saturating_sub(1);
+                            if self.at_picker_selected < max {
+                                self.at_picker_selected += 1;
+                            }
+                            return None;
+                        }
+                        crossterm::event::MouseEventKind::Down(
+                            crossterm::event::MouseButton::Left,
+                        ) => {
+                            if let Some(area) = self.dropdown_area {
+                                let mx = mouse.column;
+                                let my = mouse.row;
+                                if mx >= area.x
+                                    && mx < area.x + area.width
+                                    && my >= area.y
+                                    && my < area.y + area.height
+                                {
+                                    let item_y = my.saturating_sub(area.y + 1);
+                                    let index = item_y as usize;
+                                    let files = self.filtered_at_files();
+                                    if index < files.len() {
+                                        let path = files[index].path.clone();
+                                        self.close_at_picker();
+                                        self.insert_char('@');
+                                        for c in path.chars() {
+                                            self.insert_char(c);
+                                        }
+                                        return Some(AppEvent::InputChanged(self.content.clone()));
+                                    }
+                                } else {
+                                    self.close_at_picker();
+                                }
+                            }
+                            return None;
+                        }
+                        _ => return None,
+                    }
+                }
                 if !self.dropdown_visible {
                     return None;
                 }
@@ -702,6 +866,28 @@ impl Input {
         }
     }
 
+    /// 渲染 @ 文件选择器：显示在输入框上方，列出工作区中的文件。
+    fn draw_at_picker(&self, frame: &mut Frame, input_area: Rect, theme: &Theme) {
+        let files = self.filtered_at_files();
+        let items: Vec<Line> = files
+            .iter()
+            .enumerate()
+            .map(|(i, file)| {
+                let style = if i == self.at_picker_selected {
+                    theme.style_selection()
+                } else {
+                    theme.style_primary()
+                };
+                let prefix = if file.is_dir { "📁 " } else { "📄 " };
+                Line::from(vec![Span::styled(
+                    format!("{}{}", prefix, file.name),
+                    style,
+                )])
+            })
+            .collect();
+        self.draw_scrollable_dropdown(frame, input_area, theme, items, self.at_picker_selected);
+    }
+
     /// 通用可滚动下拉菜单绘制：先清除背景防止文字穿透，限制最大高度，支持滚动条。
     fn draw_scrollable_dropdown(
         &self,
@@ -863,5 +1049,89 @@ mod tests {
             "Input should render content: got {}",
             text
         );
+    }
+
+    #[test]
+    fn test_at_picker_visibility() {
+        let mut input = Input::new();
+        assert!(!input.is_at_picker_visible());
+
+        input.set_at_picker_files(vec![
+            fi_code_shared::dto::FileNode {
+                path: "a.rs".into(),
+                name: "a.rs".into(),
+                is_dir: false,
+                depth: 0,
+            },
+        ]);
+        input.at_picker_visible = true;
+        assert!(input.is_at_picker_visible());
+
+        input.close_at_picker();
+        assert!(!input.is_at_picker_visible());
+        assert!(input.at_picker_files.is_empty());
+    }
+
+    #[test]
+    fn test_at_picker_filtered_files() {
+        let mut input = Input::new();
+        input.set_at_picker_files(vec![
+            fi_code_shared::dto::FileNode {
+                path: "src/main.rs".into(),
+                name: "main.rs".into(),
+                is_dir: false,
+                depth: 1,
+            },
+            fi_code_shared::dto::FileNode {
+                path: "src/lib.rs".into(),
+                name: "lib.rs".into(),
+                is_dir: false,
+                depth: 1,
+            },
+            fi_code_shared::dto::FileNode {
+                path: "src".into(),
+                name: "src".into(),
+                is_dir: true,
+                depth: 0,
+            },
+        ]);
+
+        // 默认过滤掉目录
+        let filtered = input.filtered_at_files();
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].name, "main.rs");
+        assert_eq!(filtered[1].name, "lib.rs");
+
+        // 设置过滤条件
+        input.at_picker_filter = "lib".into();
+        let filtered = input.filtered_at_files();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "lib.rs");
+    }
+
+    #[test]
+    fn test_at_picker_select_file_inserts_path() {
+        let mut input = Input::new();
+        input.set_at_picker_files(vec![
+            fi_code_shared::dto::FileNode {
+                path: "src/main.rs".into(),
+                name: "main.rs".into(),
+                is_dir: false,
+                depth: 1,
+            },
+        ]);
+        input.at_picker_visible = true;
+        input.at_picker_selected = 0;
+
+        // 模拟选择文件（直接调用内部逻辑）
+        let files = input.filtered_at_files();
+        let path = files[0].path.clone();
+        input.close_at_picker();
+        input.insert_char('@');
+        for c in path.chars() {
+            input.insert_char(c);
+        }
+
+        assert_eq!(input.content, "@src/main.rs");
     }
 }

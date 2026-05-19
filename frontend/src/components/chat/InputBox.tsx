@@ -3,7 +3,7 @@ import { useChatStream } from '../../hooks/useChatStream';
 import { useUIStore } from '../../stores/uiStore';
 import { apiClient } from '../../services/apiClient';
 import { CommandMeta } from '../../types/command';
-import { ProviderItem } from '../../types/api';
+import { ProviderItem, FileEntry } from '../../types/api';
 import { themePresets, getPresetByName, applyTheme } from '../../themes';
 
 type SubmenuKind = 'theme' | 'skill' | 'model_provider' | 'model_list' | null;
@@ -31,6 +31,13 @@ export const InputBox: React.FC = () => {
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [previewThemeBackup, setPreviewThemeBackup] = useState<string | null>(null);
   const [submenuLoading, setSubmenuLoading] = useState(false);
+
+  // @ 文件选择器状态
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [pickerPath, setPickerPath] = useState('');
+  const [pickerItems, setPickerItems] = useState<FileEntry[]>([]);
+  const [pickerIndex, setPickerIndex] = useState(0);
+  const [pickerLoading, setPickerLoading] = useState(false);
 
   // 计算一级菜单过滤列表
   const filterText = showMenu ? input.slice(1) : '';
@@ -117,12 +124,71 @@ export const InputBox: React.FC = () => {
     [providers]
   );
 
+  // @ 文件选择器：加载文件树
+  const loadFileTree = useCallback(async (path: string = '') => {
+    setPickerLoading(true);
+    try {
+      const res = await apiClient.getFileTree(path);
+      setPickerItems(res.entries);
+      setPickerIndex(0);
+    } catch (err) {
+      console.warn('[InputBox] Failed to load file tree:', err);
+      setPickerItems([]);
+    } finally {
+      setPickerLoading(false);
+    }
+  }, []);
+
+  // @ 文件选择器：选择文件
+  const selectFile = useCallback(
+    (entry: FileEntry) => {
+      const filePath = entry.path;
+      // 移除输入框末尾的触发式 @，替换为 @filePath
+      const newInput = input.replace(/@\s*$/, '') + `@${filePath} `;
+      setInput(newInput);
+      setShowFilePicker(false);
+      setPickerPath('');
+      setTimeout(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.selectionStart = el.selectionEnd = newInput.length;
+        }
+      }, 0);
+    },
+    [input]
+  );
+
+  // @ 文件选择器：进入目录
+  const enterDirectory = useCallback(
+    (entry: FileEntry) => {
+      const newPath = entry.path;
+      setPickerPath(newPath);
+      loadFileTree(newPath);
+    },
+    [loadFileTree]
+  );
+
+  // @ 文件选择器：返回上级
+  const goUp = useCallback(() => {
+    if (!pickerPath) {
+      setShowFilePicker(false);
+      return;
+    }
+    const parts = pickerPath.split('/').filter(Boolean);
+    parts.pop();
+    const newPath = parts.join('/');
+    setPickerPath(newPath);
+    loadFileTree(newPath);
+  }, [pickerPath, loadFileTree]);
+
   const handleSubmit = useCallback(() => {
     if (!input.trim()) return;
     send(input);
     setInput('');
     setShowMenu(false);
     closeSubmenu();
+    setShowFilePicker(false);
   }, [input, send]);
 
   const closeSubmenu = useCallback(() => {
@@ -137,7 +203,6 @@ export const InputBox: React.FC = () => {
   // 确认一级菜单命令
   const confirmCommand = useCallback(
     (cmd: CommandMeta) => {
-      // 有二级菜单的指令
       if (cmd.name === 'themes') {
         setPreviewThemeBackup(themeName);
         setSubmenuKind('theme');
@@ -161,7 +226,6 @@ export const InputBox: React.FC = () => {
         loadModelProvidersSubmenu();
         return;
       }
-      // 无二级菜单的指令：填充到输入框
       const filled = `/${cmd.name} `;
       setInput(filled);
       setShowMenu(false);
@@ -225,6 +289,51 @@ export const InputBox: React.FC = () => {
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 文件选择器打开时的键盘导航
+    if (showFilePicker) {
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          setPickerIndex((prev) => (prev + 1) % pickerItems.length);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setPickerIndex(
+            (prev) => (prev - 1 + pickerItems.length) % pickerItems.length
+          );
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          if (pickerItems.length > 0 && pickerItems[pickerIndex]?.is_dir) {
+            enterDirectory(pickerItems[pickerIndex]);
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          goUp();
+          break;
+        case 'Enter':
+          e.preventDefault();
+          if (pickerItems.length > 0) {
+            const entry = pickerItems[pickerIndex];
+            if (entry.is_dir) {
+              enterDirectory(entry);
+            } else {
+              selectFile(entry);
+            }
+          }
+          break;
+        case 'Escape':
+          e.preventDefault();
+          setShowFilePicker(false);
+          setPickerPath('');
+          break;
+        default:
+          break;
+      }
+      return;
+    }
+
     // 二级菜单打开时的键盘导航
     if (submenuKind) {
       switch (e.key) {
@@ -301,9 +410,21 @@ export const InputBox: React.FC = () => {
     const val = e.target.value;
     setInput(val);
 
+    // 检测 @ 触发文件选择器：独立 @ token（前面是空格或开头），后面无其他内容
+    const atTrigger = /(?:^|\s)@\s*$/.test(val);
+    if (atTrigger) {
+      setShowFilePicker(true);
+      setShowMenu(false);
+      closeSubmenu();
+      setPickerPath('');
+      loadFileTree('');
+      return;
+    }
+
     if (val.startsWith('/')) {
       setShowMenu(true);
       setHighlightIndex(0);
+      setShowFilePicker(false);
     } else {
       setShowMenu(false);
     }
@@ -323,6 +444,56 @@ export const InputBox: React.FC = () => {
 
   return (
     <div className="p-4 bg-bg-secondary border-t border-border relative">
+      {/* @ 文件选择器 */}
+      {showFilePicker && (
+        <div className="absolute bottom-full left-4 right-4 mb-2 max-h-60 overflow-y-auto bg-bg-secondary border border-border rounded shadow-lg z-50">
+          <div className="px-3 py-1.5 text-xs font-medium text-text-muted border-b border-border bg-bg flex items-center justify-between">
+            <span>Select File</span>
+            {pickerPath && (
+              <span className="text-text-muted font-mono truncate max-w-[200px]">{pickerPath}</span>
+            )}
+          </div>
+          {pickerLoading ? (
+            <div className="px-3 py-4 text-sm text-text-muted">Loading...</div>
+          ) : pickerItems.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-text-muted">No files</div>
+          ) : (
+            <>
+              {pickerPath && (
+                <div
+                  className="px-3 py-2 cursor-pointer text-sm text-text-muted hover:bg-bg-overlay flex items-center gap-2"
+                  onClick={goUp}
+                >
+                  <span>📁</span>
+                  <span>..</span>
+                </div>
+              )}
+              {pickerItems.map((entry, idx) => (
+                <div
+                  key={entry.path}
+                  className={`px-3 py-2 cursor-pointer text-sm flex items-center gap-2 ${
+                    idx === pickerIndex
+                      ? 'bg-bg-overlay text-brand'
+                      : 'text-text-primary hover:bg-bg-overlay'
+                  }`}
+                  onMouseEnter={() => setPickerIndex(idx)}
+                  onClick={() => {
+                    if (entry.is_dir) {
+                      enterDirectory(entry);
+                    } else {
+                      selectFile(entry);
+                    }
+                  }}
+                >
+                  <span className="text-text-muted">{entry.is_dir ? '📁' : '📄'}</span>
+                  <span className="truncate">{entry.name}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
       {/* 一级 Slash 指令菜单 */}
       {showMenu && filteredCommands.length > 0 && !submenuKind && (
         <div className="absolute bottom-full left-4 right-4 mb-2 max-h-48 overflow-y-auto bg-bg-secondary border border-border rounded shadow-lg z-50">

@@ -40,6 +40,7 @@ use crate::session::message::{current_timestamp_ms, Message, Part, Role};
 use crate::session::session::{Session, SessionStatus};
 use crate::tools::set_task_provider;
 use crate::utils::workspace::workspace_dir;
+use crate::tools::basic_tools::BasicTool;
 
 use super::super::server::{check_auth, AppState};
 use super::super::transport::rpc::JsonRpcResponse;
@@ -148,6 +149,76 @@ pub async fn handle_chat_endpoint(
     axum::response::Sse::new(stream).into_response()
 }
 
+/// 解析消息中的 @path 引用，将文件内容注入到消息中
+fn inject_file_contents(message: &str) -> String {
+    use regex::Regex;
+
+    let re = match Regex::new(r"@(\S+)") {
+        Ok(re) => re,
+        Err(_) => return message.to_string(),
+    };
+
+    let mut injections: Vec<String> = Vec::new();
+    let mut found_paths: Vec<String> = Vec::new();
+
+    for cap in re.captures_iter(message) {
+        let path_str = cap[1].to_string();
+        if found_paths.contains(&path_str) {
+            continue;
+        }
+        found_paths.push(path_str.clone());
+
+        let content = read_file_for_injection(&path_str);
+        match content {
+            Some(text) => {
+                let truncated = if text.len() > 10000 {
+                    format!("{}\n... (truncated)", &text[..10000])
+                } else {
+                    text
+                };
+                injections.push(format!("File: {}\n```\n{}\n```", path_str, truncated));
+            }
+            None => {
+                injections.push(format!("File: {}\n```\n[File not found or not accessible]\n```", path_str));
+            }
+        }
+    }
+
+    if injections.is_empty() {
+        return message.to_string();
+    }
+
+    // 移除所有 @path 标记，在消息开头注入文件内容
+    let cleaned = re.replace_all(message, "").trim().to_string();
+    format!("{}\n\n{}", injections.join("\n\n"), cleaned)
+}
+
+/// 安全读取文件内容用于 @引用注入
+fn read_file_for_injection(path_str: &str) -> Option<String> {
+    let workspace = workspace_dir();
+    let target = workspace.join(path_str);
+
+    // safe_path 检查：确保文件在工作目录内
+    let canonical = match std::fs::canonicalize(&target) {
+        Ok(p) => p,
+        Err(_) => return None,
+    };
+    let workspace_canonical = match std::fs::canonicalize(&workspace) {
+        Ok(p) => p,
+        Err(_) => return None,
+    };
+    if !canonical.starts_with(&workspace_canonical) {
+        return None;
+    }
+
+    // 检查是文件而非目录
+    if !canonical.is_file() {
+        return None;
+    }
+
+    std::fs::read_to_string(&canonical).ok()
+}
+
 /// 后台运行 Agent 对话
 async fn run_agent_chat(
     state: AppState,
@@ -187,6 +258,9 @@ async fn run_agent_chat(
             return Ok(());
         }
     };
+
+    // 解析 @path 并注入文件内容
+    let message = inject_file_contents(&message);
 
     // 添加用户消息
     let user_msg = Message::new(
@@ -505,6 +579,52 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert!(!json["success"].as_bool().unwrap());
         assert!(json["error"].as_str().unwrap().contains("nonexistent"));
+    }
+
+    #[test]
+    fn test_inject_file_contents_no_mention() {
+        let msg = "Hello world".to_string();
+        let result = inject_file_contents(&msg);
+        assert_eq!(result, "Hello world");
+    }
+
+    #[test]
+    fn test_inject_file_contents_single_mention() {
+        let msg = "@Cargo.toml explain this".to_string();
+        let result = inject_file_contents(&msg);
+        // 验证文件内容被注入，且 @Cargo.toml 被移除
+        assert!(result.contains("File: Cargo.toml"));
+        assert!(!result.contains("@Cargo.toml"));
+        assert!(result.contains("explain this"));
+    }
+
+    #[test]
+    fn test_inject_file_contents_multiple_mentions() {
+        let msg = "@Cargo.toml and @README.md compare".to_string();
+        let result = inject_file_contents(&msg);
+        // 验证两个文件都被注入
+        assert!(result.contains("File: Cargo.toml"));
+        assert!(result.contains("File: README.md"));
+        assert!(!result.contains("@Cargo.toml"));
+        assert!(!result.contains("@README.md"));
+        assert!(result.contains("compare"));
+    }
+
+    #[test]
+    fn test_inject_file_contents_duplicate_mentions() {
+        let msg = "@Cargo.toml and @Cargo.toml again".to_string();
+        let result = inject_file_contents(&msg);
+        // 验证只注入一次
+        let count = result.matches("File: Cargo.toml").count();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_inject_file_contents_not_found() {
+        let msg = "@nonexistent_file_xyz.txt hello".to_string();
+        let result = inject_file_contents(&msg);
+        assert!(result.contains("File: nonexistent_file_xyz.txt"));
+        assert!(result.contains("[File not found or not accessible]"));
     }
 }
 
