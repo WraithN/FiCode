@@ -27,6 +27,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use crate::config::{Config, ProviderConfig};
+use fi_code_shared::constants::DEFAULT_CONTEXT_LIMIT;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ModelType {
@@ -284,6 +285,24 @@ impl Provider {
             .as_ref()
             .map(|m| m.model_name.as_str())
             .ok_or_else(|| anyhow!("Model not set"))
+    }
+
+    /// 获取当前模型的上下文限制（token 数）。
+    ///
+    /// 从 Config 中查找当前模型对应的 `limit.context`，
+    /// 若未配置则返回 `DEFAULT_CONTEXT_LIMIT`（128K）。
+    pub fn context_limit(&self, config: &crate::config::Config) -> u32 {
+        let model_name = self.model_name().unwrap_or("unknown");
+
+        for (_, provider_cfg) in &config.provider {
+            if let Some(model_cfg) = provider_cfg.models.get(model_name) {
+                if let Some(ref limit) = model_cfg.limit {
+                    return limit.context;
+                }
+            }
+        }
+
+        DEFAULT_CONTEXT_LIMIT
     }
 
     /// 返回当前 Provider 的配置摘要信息
