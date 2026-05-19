@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { apiClient } from '../services/apiClient';
 import { useChatStore } from '../stores/chatStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useCompressionStore } from '../stores/compressionStore';
 import { SseEvent } from '../types/sse';
 import { Part } from '../types/part';
 
@@ -9,6 +10,7 @@ export function useChatStream() {
   const { currentAgent } = useChatStore();
   const { currentSessionId, setCurrentSessionId } = useSessionStore();
   const { startTurn, appendPart, completeTurn, setAgent, setIsGenerating } = useChatStore();
+  const { setCompressionStatus } = useCompressionStore();
 
   const send = useCallback(async (message: string) => {
     if (!message.trim()) return;
@@ -20,6 +22,21 @@ export function useChatStream() {
       const stream = apiClient.chatStream(currentSessionId, message, currentAgent);
 
       for await (const event of stream) {
+        if (event.type === 'compression_status') {
+          setCompressionStatus({
+            isCompressing: event.is_compressing,
+            progress: event.progress,
+            contextRatio: event.context_ratio,
+          });
+          if (!event.is_compressing && event.summary) {
+            appendPart(turnId, {
+              type: 'system_notice',
+              kind: 'compression_done',
+              content: event.summary,
+            });
+          }
+          continue;
+        }
         handleSseEvent(event, turnId, setAgent, appendPart, completeTurn, setCurrentSessionId, setIsGenerating);
       }
     } catch (err) {
@@ -31,7 +48,7 @@ export function useChatStream() {
         error_message: 'Stream error',
       });
     }
-  }, [currentSessionId, currentAgent, startTurn, appendPart, completeTurn, setAgent, setIsGenerating, setCurrentSessionId]);
+  }, [currentSessionId, currentAgent, startTurn, appendPart, completeTurn, setAgent, setIsGenerating, setCurrentSessionId, setCompressionStatus]);
 
   const stop = useCallback(() => {
     setIsGenerating(false);

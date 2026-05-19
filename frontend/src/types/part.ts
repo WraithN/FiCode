@@ -7,4 +7,5 @@ export type Part =
   | { type: 'code_block'; language: string; code: string }
   | { type: 'image'; url: string; alt?: string }
   | { type: 'usage'; prompt_tokens: number; completion_tokens: number }
-  | { type: 'wave_marker'; wave_id: string; turn: number };
+  | { type: 'wave_marker'; wave_id: string; turn: number }
+  | { type: 'system_notice'; kind: string; content: string };

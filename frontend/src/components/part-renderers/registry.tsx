@@ -9,6 +9,7 @@ import { ToolResultPart } from './ToolResultPart';
 import { ToolErrorPart } from './ToolErrorPart';
 import { CodeBlockPart } from './CodeBlockPart';
 import { ImagePart } from './ImagePart';
+import { SystemNoticePart } from './SystemNoticePart';
 
 const partRenderers: Record<string, React.FC<{ part: Part }>> = {
   text: TextPart as React.FC<{ part: Part }>,
@@ -20,6 +21,7 @@ const partRenderers: Record<string, React.FC<{ part: Part }>> = {
   image: ImagePart as React.FC<{ part: Part }>,
   usage: UsagePart as React.FC<{ part: Part }>,
   wave_marker: WaveMarkerPart as React.FC<{ part: Part }>,
+  system_notice: SystemNoticePart as React.FC<{ part: Part }>,
 };
 
 export function PartRenderer({ part }: { part: Part }) {
