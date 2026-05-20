@@ -24,12 +24,17 @@ use std::sync::LazyLock;
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
+    widgets::{Block, Borders, Paragraph},
 };
 use syntect::{
     easy::HighlightLines,
     highlighting::{Style as SyntectStyle, ThemeSet},
     parsing::SyntaxSet,
 };
+
+use fi_code_core::session::message::Part;
+use super::PartRenderer;
+use crate::theme::Theme;
 
 // 全局懒加载的 SyntaxSet 和 ThemeSet
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
@@ -47,64 +52,87 @@ fn syntect_to_ratatui(style: SyntectStyle) -> Style {
         ))
 }
 
-/// 代码块渲染器，支持语法高亮 + 行号
+/// 代码块渲染器，支持语法高亮 + diff 着色 + 行号
 pub struct CodeBlockRenderer;
 
-/// 创建默认的 CodeBlockRenderer 实例
-pub fn new() -> CodeBlockRenderer {
-    CodeBlockRenderer
-}
-
-impl CodeBlockRenderer {
-    /// 根据语言提示和代码内容，返回带语法高亮和行号的 `Line` 列表。
-    /// `content_width` 是可用内容宽度（不含行号列）。
-    pub fn render(
-        &self,
-        code: &str,
-        language_hint: Option<&str>,
-        _theme: &crate::theme::Theme,
-    ) -> Vec<Line<'static>> {
-        // 选择 syntect 语法主题（使用 "base16-ocean.dark" 作为暗色默认）
-        let syntect_theme = THEME_SET
-            .themes
-            .get("base16-ocean.dark")
-            .or_else(|| THEME_SET.themes.values().next())
-            .expect("至少存在一个默认主题");
-
-        // 根据语言提示查找语法定义
-        let syntax = language_hint
-            .and_then(|lang| SYNTAX_SET.find_syntax_by_token(lang))
-            .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
-
-        let mut highlighter = HighlightLines::new(syntax, syntect_theme);
-
-        let lines: Vec<&str> = code.lines().collect();
-        let line_num_width = lines.len().to_string().len().max(2);
-        let mut result = Vec::with_capacity(lines.len());
-
-        for (idx, line) in lines.iter().enumerate() {
-            // 行号 Span
-            let line_num = format!("{:>width$} ", idx + 1, width = line_num_width);
-            let line_num_span = Span::styled(line_num, Style::default().fg(Color::Rgb(80, 80, 80)));
-
-            // 语法高亮：逐行处理
-            let highlighted = highlighter
-                .highlight_line(line, &SYNTAX_SET)
-                .unwrap_or_default();
-            let mut spans: Vec<Span<'static>> = vec![line_num_span];
-            for (style, text) in highlighted {
-                spans.push(Span::styled(text.to_string(), syntect_to_ratatui(style)));
-            }
-
-            result.push(Line::from(spans));
+impl PartRenderer for CodeBlockRenderer {
+    fn height(&self, part: &Part, _width: u16) -> u16 {
+        if let Part::CodeBlock { code, .. } = part {
+            let lines = code.lines().count() as u16;
+            // +2 for borders
+            lines.max(1) + 2
+        } else {
+            3
         }
-
-        result
     }
 
-    /// 计算代码块在给定宽度下需要占用的行高
-    pub fn height(&self, code: &str, _width: u16) -> u16 {
-        let lines = code.lines().count() as u16;
-        lines.max(1)
+    fn draw(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect, part: &Part, theme: &Theme, skip_lines: u16) {
+        if let Part::CodeBlock { code, language } = part {
+            let syntect_theme = THEME_SET
+                .themes
+                .get("base16-ocean.dark")
+                .or_else(|| THEME_SET.themes.values().next())
+                .expect("至少存在一个默认主题");
+
+            let syntax = if language.is_empty() {
+                None
+            } else {
+                SYNTAX_SET.find_syntax_by_token(language)
+            };
+            let syntax = syntax.unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+
+            let mut highlighter = HighlightLines::new(syntax, syntect_theme);
+
+            let lines: Vec<&str> = code.lines().collect();
+            let line_num_width = lines.len().to_string().len().max(2);
+            let mut text_lines = Vec::with_capacity(lines.len());
+
+            for (idx, line) in lines.iter().enumerate() {
+                // 处理 diff 行着色：行首 + 绿色，- 红色
+                let diff_style = if line.starts_with('+') {
+                    Some(Style::default().fg(Color::Green))
+                } else if line.starts_with('-') {
+                    Some(Style::default().fg(Color::Red))
+                } else {
+                    None
+                };
+
+                // 行号 Span
+                let line_num = format!("{:>width$} ", idx + 1, width = line_num_width);
+                let line_num_span = Span::styled(line_num, Style::default().fg(Color::Rgb(80, 80, 80)));
+
+                let mut spans: Vec<Span<'static>> = vec![line_num_span];
+
+                if let Some(style) = diff_style {
+                    // diff 行：整行使用 diff 着色，不做语法高亮
+                    spans.push(Span::styled(line.to_string(), style));
+                } else {
+                    // 普通行：语法高亮
+                    let highlighted = highlighter
+                        .highlight_line(line, &SYNTAX_SET)
+                        .unwrap_or_default();
+                    for (style, text) in highlighted {
+                        spans.push(Span::styled(text.to_string(), syntect_to_ratatui(style)));
+                    }
+                }
+
+                text_lines.push(Line::from(spans));
+            }
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border))
+                .title(
+                    Line::from(if language.is_empty() { "code" } else { language }.to_string())
+                        .style(theme.style_primary()),
+                );
+
+            let paragraph = Paragraph::new(text_lines)
+                .style(theme.style_primary())
+                .block(block)
+                .scroll((skip_lines, 0));
+
+            frame.render_widget(paragraph, area);
+        }
     }
 }

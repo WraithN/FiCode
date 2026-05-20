@@ -58,6 +58,7 @@ impl PartRendererRegistry {
         registry.register("wave_marker", Box::new(wave_marker::WaveMarkerRenderer));
         registry.register("usage", Box::new(usage::UsageRenderer));
         registry.register("image", Box::new(image::ImageRenderer));
+        registry.register("code_block", Box::new(code_block::CodeBlockRenderer));
         registry
     }
 
@@ -75,6 +76,7 @@ impl PartRendererRegistry {
             Part::Reasoning { .. } => "reasoning",
             Part::WaveMarker { .. } => "wave_marker",
             Part::Usage { .. } => "usage",
+            Part::CodeBlock { .. } => "code_block",
             Part::SystemNotice { .. } => "text",
         };
         self.renderers.get(key).map(|b| b.as_ref())
@@ -95,3 +97,4 @@ mod tool_error;
 mod wave_marker;
 mod usage;
 mod image;
+mod code_block;
