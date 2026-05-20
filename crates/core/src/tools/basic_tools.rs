@@ -133,11 +133,7 @@ impl BasicTool {
             full_content.clone()
         };
 
-        let result_json = serde_json::json!({
-            "content": preview.chars().take(OUTPUT_TRUNCATE_LENGTH).collect::<String>(),
-            "full_content": full_content.chars().take(OUTPUT_TRUNCATE_LENGTH).collect::<String>(),
-        });
-        Ok(result_json.to_string())
+        Ok(preview.chars().take(OUTPUT_TRUNCATE_LENGTH).collect::<String>())
     }
 
     // =========================================================================
@@ -266,13 +262,13 @@ impl BasicTool {
             }
         });
 
-        let result_json = serde_json::json!({
-            "content": format!("Wrote {} bytes", content.len()),
-            "diff": diff_text,
-            "is_new_file": is_new_file,
-            "after_content": content,
-        });
-        Ok(result_json.to_string())
+        if let Some(diff) = diff_text {
+            Ok(diff)
+        } else if is_new_file {
+            Ok(format!("New file: {} ({} bytes)", path, content.len()))
+        } else {
+            Ok(format!("Wrote {} bytes to {}", content.len(), path))
+        }
     }
 
     // =========================================================================
@@ -317,13 +313,11 @@ impl BasicTool {
             Some(diff_text)
         };
 
-        let result_json = serde_json::json!({
-            "content": format!("Edited {}", path),
-            "diff": diff_opt,
-            "is_new_file": false,
-            "after_content": new_content,
-        });
-        Ok(result_json.to_string())
+        if let Some(diff) = diff_opt {
+            Ok(diff)
+        } else {
+            Ok(format!("Edited {} (no changes)", path))
+        }
     }
 
     // =========================================================================
@@ -591,8 +585,10 @@ mod tests {
     #[test]
     fn test_run_read() {
         ensure_workspace();
-        let lines = BasicTool::run_read("src/tools/basic_tools.rs", Some(DEFAULT_READ_MAX_LINES)).unwrap();
-        assert_ne!(lines, "");
+        let content = BasicTool::run_read("src/tools/basic_tools.rs", Some(DEFAULT_READ_MAX_LINES)).unwrap();
+        assert_ne!(content, "");
+        // 验证返回的是纯文本而非 JSON
+        assert!(!content.starts_with('{'), "run_read should return plain text, not JSON");
     }
 
     #[test]
@@ -608,6 +604,9 @@ mod tests {
         let path: &str = "target/test_write_file";
         let result = BasicTool::run_write(path, "test");
         assert!(result.is_ok());
+        let content = result.unwrap();
+        // 新文件应返回提示文本
+        assert!(content.contains("New file") || content.contains("Wrote"), "write result should be plain text, got: {}", content);
         BasicTool::run_bash(&format!("rm {}", path));
     }
 
@@ -619,6 +618,13 @@ mod tests {
         assert!(result.is_ok());
         let result = BasicTool::run_edit(path, "test file", "test edit file");
         assert!(result.is_ok());
+        let content = result.unwrap();
+        // diff 文本应包含 +/- 标记，或无变化提示
+        assert!(
+            content.contains('+') || content.contains("no changes"),
+            "edit result should contain diff markers or no-changes hint, got: {}",
+            content
+        );
         BasicTool::run_bash(&format!("rm {}", path));
     }
 
