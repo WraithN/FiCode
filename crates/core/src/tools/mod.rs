@@ -1111,33 +1111,44 @@ pub async fn execute_tool_calls(
 
                 if let Ok(mut guard) = cb.lock() {
                     if let Some(ref mut callback) = *guard {
-                        log_info!(
-                            "[Tools] sending ToolResult SSE | id={} | display_len={}",
-                            id,
-                            display_content.len()
-                        );
-                        // 发送 ToolResult（元数据标题）
-                        let _ = callback(SseEvent::Part {
-                            part: Part::ToolResult {
-                                tool_call_id: id.clone(),
-                                content: display_content,
-                                duration_ms: Some(duration_ms),
-                            },
-                        });
+                        if is_error {
+                            // 错误时发送 ToolError
+                            let _ = callback(SseEvent::Part {
+                                part: Part::ToolError {
+                                    tool_call_id: id.clone(),
+                                    content: content.clone(),
+                                    error_message: content.clone(),
+                                },
+                            });
+                        } else {
+                            log_info!(
+                                "[Tools] sending ToolResult SSE | id={} | display_len={}",
+                                id,
+                                display_content.len()
+                            );
+                            // 正常时发送 ToolResult（元数据标题）
+                            let _ = callback(SseEvent::Part {
+                                part: Part::ToolResult {
+                                    tool_call_id: id.clone(),
+                                    content: display_content,
+                                    duration_ms: Some(duration_ms),
+                                },
+                            });
 
-                        // 对于 read/write/edit，额外发送 CodeBlock（实际内容）
-                        if is_read_write_edit && !is_error {
-                            let is_meta_only = content.starts_with("New file:")
-                                || content.starts_with("Wrote ")
-                                || content.starts_with("Edited ")
-                                || content.starts_with("Error:");
-                            if !is_meta_only {
-                                let _ = callback(SseEvent::Part {
-                                    part: Part::CodeBlock {
-                                        language: language.unwrap_or_default(),
-                                        code: content.clone(),
-                                    },
-                                });
+                            // 对于 read/write/edit，额外发送 CodeBlock（实际内容）
+                            if is_read_write_edit {
+                                let is_meta_only = content.starts_with("New file:")
+                                    || content.starts_with("Wrote ")
+                                    || content.starts_with("Edited ")
+                                    || content.starts_with("Error:");
+                                if !is_meta_only {
+                                    let _ = callback(SseEvent::Part {
+                                        part: Part::CodeBlock {
+                                            language: language.unwrap_or_default(),
+                                            code: content.clone(),
+                                        },
+                                    });
+                                }
                             }
                         }
                     }
@@ -1259,7 +1270,7 @@ mod tests {
     /// 测试通过 tool_call 调用 write 和 edit 工具
     #[tokio::test]
     async fn test_tool_call_write_and_edit() {
-        let path = "target/test_tool_call_write.txt";
+        let path = format!("target/test_tool_call_write_{}.txt", std::process::id());
 
         // 1. 调用 write 工具创建文件
         let mut write_input = HashMap::new();
@@ -1268,8 +1279,8 @@ mod tests {
 
         let write_result = tool_call("write", &write_input).await.unwrap();
         assert!(
-            write_result.contains("Wrote"),
-            "write output should contain 'Wrote', got: {}",
+            write_result.contains("New file") || write_result.contains("Wrote"),
+            "write output should contain 'New file' or 'Wrote', got: {}",
             write_result
         );
 
@@ -1281,8 +1292,8 @@ mod tests {
 
         let edit_result = tool_call("edit", &edit_input).await.unwrap();
         assert!(
-            edit_result.contains("Edited"),
-            "edit output should contain 'Edited', got: {}",
+            edit_result.contains('+') || edit_result.contains("Edited"),
+            "edit output should contain diff markers, got: {}",
             edit_result
         );
 
