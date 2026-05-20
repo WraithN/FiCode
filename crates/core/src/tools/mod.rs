@@ -52,6 +52,7 @@ pub mod windows_compat;
 use basic_tools::BasicTool;
 use tools_registry::ToolsRegistry;
 use tools_type::{ToolHandler, ToolParameter, ToolParams};
+use crate::utils::file_type::file_type_from_path;
 
 // 全局事件发送器（TuiApp 初始化时设置）
 static EVENT_TX: RwLock<Option<mpsc::Sender<AppEvent>>> = RwLock::new(None);
@@ -1083,38 +1084,39 @@ pub async fn execute_tool_calls(
                 log_debug!("execute_tool_call | name={} | args={}", name, arguments);
                 let (content, is_error, duration_ms) = execute_single_tool_call(&id, &name, &arguments).await;
 
-                // Parse JSON content to extract diff if present
-                let (display_content, diff, is_new_file, full_content) =
-                    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if json_val.get("diff").is_some() {
-                            (
-                                json_val["content"].as_str().unwrap_or(&content).to_string(),
-                                json_val["diff"].as_str().map(|s| s.to_string()),
-                                json_val["is_new_file"].as_bool().unwrap_or(false),
-                                json_val["after_content"].as_str().map(|s| s.to_string()),
-                            )
-                        } else if json_val.get("full_content").is_some() {
-                            (
-                                json_val["content"].as_str().unwrap_or(&content).to_string(),
-                                None,
-                                false,
-                                json_val["full_content"].as_str().map(|s| s.to_string()),
-                            )
-                        } else {
-                            (content.clone(), None, false, None)
-                        }
+                // 从参数中提取路径（用于 read/write/edit）
+                let input: HashMap<String, serde_json::Value> = match &arguments {
+                    serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                    _ => HashMap::new(),
+                };
+                let file_path = input.get("path").and_then(|v| v.as_str());
+                let language = file_path.and_then(file_type_from_path);
+                let is_read_write_edit = name == "read" || name == "write" || name == "edit";
+
+                // 构造元数据标题文本
+                let display_content = if name == "read" {
+                    format!("✓ read: {} ({}ms)", file_path.unwrap_or("unknown"), duration_ms)
+                } else if name == "write" {
+                    let is_new = content.contains("New file:");
+                    if is_new {
+                        format!("✓ write: {} ({}ms) — 新增文件", file_path.unwrap_or("unknown"), duration_ms)
                     } else {
-                        (content.clone(), None, false, None)
-                    };
+                        format!("✓ write: {} ({}ms)", file_path.unwrap_or("unknown"), duration_ms)
+                    }
+                } else if name == "edit" {
+                    format!("✓ edit: {} ({}ms)", file_path.unwrap_or("unknown"), duration_ms)
+                } else {
+                    content.clone()
+                };
 
                 if let Ok(mut guard) = cb.lock() {
                     if let Some(ref mut callback) = *guard {
                         log_info!(
-                            "[Tools] sending ToolResult SSE | id={} | display_len={} | full_content_len={}",
+                            "[Tools] sending ToolResult SSE | id={} | display_len={}",
                             id,
-                            display_content.len(),
-                            full_content.as_ref().map(|s| s.len()).unwrap_or(0)
+                            display_content.len()
                         );
+                        // 发送 ToolResult（元数据标题）
                         let _ = callback(SseEvent::Part {
                             part: Part::ToolResult {
                                 tool_call_id: id.clone(),
@@ -1122,6 +1124,22 @@ pub async fn execute_tool_calls(
                                 duration_ms: Some(duration_ms),
                             },
                         });
+
+                        // 对于 read/write/edit，额外发送 CodeBlock（实际内容）
+                        if is_read_write_edit && !is_error {
+                            let is_meta_only = content.starts_with("New file:")
+                                || content.starts_with("Wrote ")
+                                || content.starts_with("Edited ")
+                                || content.starts_with("Error:");
+                            if !is_meta_only {
+                                let _ = callback(SseEvent::Part {
+                                    part: Part::CodeBlock {
+                                        language: language.unwrap_or_default(),
+                                        code: content.clone(),
+                                    },
+                                });
+                            }
+                        }
                     }
                 }
 
