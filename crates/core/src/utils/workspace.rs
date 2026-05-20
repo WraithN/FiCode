@@ -37,11 +37,11 @@ pub fn set_workspace(path: PathBuf) {
 
 /// 获取当前配置的工作目录。
 /// - 如果已调用 `set_workspace`，返回设置的目录
-/// - 否则默认返回用户主目录
+/// - 否则默认返回当前工作目录
 pub fn workspace_dir() -> PathBuf {
     WORKSPACE
         .lock()
         .unwrap()
         .clone()
-        .unwrap_or_else(|| dirs::home_dir().expect("无法获取用户主目录"))
+        .unwrap_or_else(|| std::env::current_dir().expect("无法获取当前工作目录"))
 }

@@ -48,18 +48,6 @@ pub enum EntryOutcome {
 }
 
 async fn start_web_mode(port: u16) -> anyhow::Result<EntryOutcome> {
-    use anyhow::Context;
-
-    // 设置工作目录
-    let workspace = dirs::home_dir().context("无法获取用户主目录")?;
-    if !workspace.exists() {
-        std::fs::create_dir_all(&workspace)
-            .with_context(|| format!("无法创建工作目录: {:?}", workspace))?;
-    }
-    let workspace = workspace
-        .canonicalize()
-        .with_context(|| format!("无法解析工作目录: {:?}", workspace))?;
-    fi_code_core::utils::workspace::set_workspace(workspace.clone());
     fi_code_core::skills::init_skills();
 
     let config = Arc::new(std::sync::RwLock::new(fi_code_core::config::Config::load()?));
@@ -155,11 +143,11 @@ pub async fn run() -> Result<EntryOutcome> {
         log_info!("fi-code starting | log_level={}", args.log_level);
     }
 
-    // 设置工作目录：命令行参数 > 默认用户主目录
+    // 设置工作目录：命令行参数 > 默认当前工作目录
     let workspace = args
         .workspace
-        .or_else(dirs::home_dir)
-        .context("无法获取用户主目录")?;
+        .or_else(|| std::env::current_dir().ok())
+        .context("无法获取当前工作目录")?;
     if !workspace.exists() {
         std::fs::create_dir_all(&workspace)
             .with_context(|| format!("无法创建工作目录: {:?}", workspace))?;
