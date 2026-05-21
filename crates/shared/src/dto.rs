@@ -288,6 +288,14 @@ pub enum SseEvent {
         context_ratio: u8,
         summary: Option<String>,
     },
+    /// 权限确认请求事件（Ask 级别操作需要用户确认）
+    #[serde(rename = "permission_ask")]
+    PermissionAsk {
+        tool_call_id: String,
+        tool_name: String,
+        risk: String,
+        reason: String,
+    },
 }
 
 /// 任务计划中的单个任务项。

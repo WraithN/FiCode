@@ -13,5 +13,6 @@ export type SseEvent =
   | { type: 'agent_info'; agent_type: AgentType; agent_name: string }
   | { type: 'task_progress'; plan_id: string; tasks: TaskProgressItem[] }
   | { type: 'compression_status'; is_compressing: boolean; progress: number; context_ratio: number; summary?: string }
+  | { type: 'permission_ask'; tool_call_id: string; tool_name: string; risk: string; reason: string }
   | { type: 'done'; session_id: string }
   | { type: 'error'; message: string };

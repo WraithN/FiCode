@@ -5,6 +5,7 @@ import { StatusBar } from './StatusBar';
 import { LogPanel } from './LogPanel';
 import { ChatPanel } from '../chat/ChatPanel';
 import { InputBox } from '../chat/InputBox';
+import { PermissionDialog } from '../PermissionDialog';
 import { useUIStore } from '../../stores/uiStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { getPresetByName, applyTheme } from '../../themes';
@@ -60,6 +61,7 @@ export const AppLayout: React.FC = () => {
 
       <StatusBar />
       <LogPanel />
+      <PermissionDialog />
     </div>
   );
 };

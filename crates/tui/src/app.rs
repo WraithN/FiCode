@@ -68,6 +68,15 @@ pub(crate) fn tui_log(msg: &str) {
 
 use super::client::TuiClient;
 
+/// 权限确认模态框状态。
+#[derive(Debug, Clone)]
+struct PermissionAskState {
+    tool_call_id: String,
+    tool_name: String,
+    risk: String,
+    reason: String,
+}
+
 /// API Key 输入模态对话框动作。
 #[derive(Debug, Clone)]
 enum DialogAction {
@@ -170,6 +179,7 @@ pub struct TuiApp {
     dirty: bool,                                  // 是否需要重绘
     api_key_dialog: Option<ApiKeyDialog>,         // API Key 输入模态框
     question_dialog: Option<QuestionDialog>,      // 问题询问模态框
+    permission_ask: Option<PermissionAskState>,   // 权限确认模态框状态
     generation_start: Option<std::time::Instant>, // 当前生成轮次的开始时间
     providers: Vec<ProviderItem>,                 // 模型提供商列表（从后端加载）
     current_agent: AgentType,                     // 当前 Agent 类型
@@ -242,6 +252,7 @@ impl TuiApp {
             dirty: true,
             api_key_dialog: None,
             question_dialog: None,
+            permission_ask: None,
             generation_start: None,
             providers: Vec::new(),
             current_agent: AgentType::Build,
@@ -446,6 +457,58 @@ impl TuiApp {
 
             frame.render_widget(ratatui::widgets::Clear, dialog_area);
             dialog.draw(frame, dialog_area);
+        }
+
+        // 渲染权限确认模态框
+        if let Some(ref state) = self.permission_ask {
+            let area = frame.area();
+            let dialog_w = 60u16.min(area.width.saturating_sub(4));
+            let dialog_h = 12u16.min(area.height.saturating_sub(4));
+            let x = area.x + (area.width.saturating_sub(dialog_w)) / 2;
+            let y = area.y + (area.height.saturating_sub(dialog_h)) / 2;
+            let dialog_area = ratatui::layout::Rect::new(x, y, dialog_w, dialog_h);
+
+            frame.render_widget(ratatui::widgets::Clear, dialog_area);
+            let block = ratatui::widgets::Block::default()
+                .title(" 权限确认 ")
+                .borders(ratatui::widgets::Borders::ALL)
+                .border_style(ratatui::style::Style::default().fg(self.theme.border))
+                .style(self.theme.drawer_style());
+            let inner = block.inner(dialog_area);
+            frame.render_widget(block, dialog_area);
+
+            let risk_color = match state.risk.as_str() {
+                "Critical" => ratatui::style::Color::Red,
+                "High" => ratatui::style::Color::Yellow,
+                _ => ratatui::style::Color::Cyan,
+            };
+
+            let lines = vec![
+                ratatui::text::Line::from(vec![
+                    ratatui::text::Span::raw("工具: "),
+                    ratatui::text::Span::styled(&state.tool_name, ratatui::style::Style::default().fg(self.theme.text_primary).add_modifier(ratatui::style::Modifier::BOLD)),
+                ]),
+                ratatui::text::Line::from(vec![
+                    ratatui::text::Span::raw("风险: "),
+                    ratatui::text::Span::styled(&state.risk, ratatui::style::Style::default().fg(risk_color).add_modifier(ratatui::style::Modifier::BOLD)),
+                ]),
+                ratatui::text::Line::from(""),
+                ratatui::text::Line::from(vec![
+                    ratatui::text::Span::raw(&state.reason),
+                ]),
+                ratatui::text::Line::from(""),
+                ratatui::text::Line::from(vec![
+                    ratatui::text::Span::styled("Y", ratatui::style::Style::default().fg(self.theme.text_primary).add_modifier(ratatui::style::Modifier::BOLD)),
+                    ratatui::text::Span::raw(" 确认执行  |  "),
+                    ratatui::text::Span::styled("N", ratatui::style::Style::default().fg(self.theme.text_primary).add_modifier(ratatui::style::Modifier::BOLD)),
+                    ratatui::text::Span::raw(" 拒绝  |  "),
+                    ratatui::text::Span::styled("Esc", ratatui::style::Style::default().fg(self.theme.text_primary).add_modifier(ratatui::style::Modifier::BOLD)),
+                    ratatui::text::Span::raw(" 拒绝"),
+                ]),
+            ];
+            let para = ratatui::widgets::Paragraph::new(lines)
+                .wrap(ratatui::widgets::Wrap { trim: true });
+            frame.render_widget(para, inner);
         }
 
         // 保存各组件区域，供鼠标 hit-test 使用
@@ -760,6 +823,26 @@ impl TuiApp {
                     return;
                 }
 
+                // 权限确认模态框处理键盘事件
+                if let Some(ref state) = self.permission_ask {
+                    let approved = match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => Some(true),
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Some(false),
+                        _ => None,
+                    };
+                    if let Some(approved) = approved {
+                        let tool_call_id = state.tool_call_id.clone();
+                        let client = self.client.clone();
+                        self.permission_ask = None;
+                        tokio::spawn(async move {
+                            if let Err(e) = client.respond_permission(&tool_call_id, approved).await {
+                                log_warn!("[Client] respond_permission failed: {}", e);
+                            }
+                        });
+                    }
+                    return;
+                }
+
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     self.handle_ctrl_key(&key).await;
                     return;
@@ -947,6 +1030,15 @@ impl TuiApp {
                             self.chat.add_system_message(summary.as_ref().unwrap());
                         }
                         log_debug!("[Client] SSE CompressionStatus | compressing={} | progress={}% | ratio={}%", is_compressing, progress, context_ratio);
+                    }
+                    SseEvent::PermissionAsk { tool_call_id, tool_name, risk, reason } => {
+                        log_info!("[Client] SSE PermissionAsk | tool={} | risk={} | reason={}", tool_name, risk, reason);
+                        self.permission_ask = Some(PermissionAskState {
+                            tool_call_id: tool_call_id.clone(),
+                            tool_name: tool_name.clone(),
+                            risk: risk.clone(),
+                            reason: reason.clone(),
+                        });
                     }
                 }
                 self.chat.handle_sse_event(sse_event);
@@ -1632,6 +1724,7 @@ mod tests {
             dirty: true,
             api_key_dialog: None,
             question_dialog: None,
+            permission_ask: None,
             generation_start: None,
             providers: Vec::new(),
             client: TuiClient::new(),

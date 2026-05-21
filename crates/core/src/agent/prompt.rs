@@ -267,11 +267,13 @@ mod tests {
         assert!(prompt.contains("## 2. Core Rules"));
         assert!(prompt.contains("CANNOT be overridden"));
         assert!(prompt.contains("handle_task_plan"));
-        assert!(prompt.contains("## 3. Git Status Awareness"));
+        assert!(prompt.contains("## 3. Interaction Rules"));
+        assert!(prompt.contains("ask_for_question"));
+        assert!(prompt.contains("## 4. Git Status Awareness"));
         assert!(prompt.contains("git status"));
-        assert!(!prompt.contains("## 4. Available Skills")); // registry is empty
-        assert!(!prompt.contains("## 5. Project Context")); // no AGENTS.md in test env
-        assert!(!prompt.contains("## 6. Project Rules")); // no .rules/ in test env
+        assert!(!prompt.contains("## 5. Available Skills")); // registry is empty
+        assert!(!prompt.contains("## 6. Project Context")); // no AGENTS.md in test env
+        assert!(!prompt.contains("## 7. Project Rules")); // no .rules/ in test env
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

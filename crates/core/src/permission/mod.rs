@@ -20,4 +20,7 @@
 // SOFTWARE.
 
 pub mod permission;
-pub use permission::{PermissionAction, PermissionChecker, RiskType};
+pub use permission::{
+    is_cli_dangerous, respond_permission, set_cli_dangerous, wait_permission_response,
+    PermissionAction, PermissionChecker, RiskType,
+};

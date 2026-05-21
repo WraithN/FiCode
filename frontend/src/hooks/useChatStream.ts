@@ -3,6 +3,7 @@ import { apiClient } from '../services/apiClient';
 import { useChatStore } from '../stores/chatStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useCompressionStore } from '../stores/compressionStore';
+import { usePermissionStore } from '../stores/permissionStore';
 import { SseEvent } from '../types/sse';
 import { Part } from '../types/part';
 
@@ -11,6 +12,7 @@ export function useChatStream() {
   const { currentSessionId, setCurrentSessionId } = useSessionStore();
   const { startTurn, appendPart, completeTurn, setAgent, setIsGenerating } = useChatStore();
   const { setCompressionStatus } = useCompressionStore();
+  const { setPending } = usePermissionStore();
 
   const send = useCallback(async (message: string) => {
     if (!message.trim()) return;
@@ -37,7 +39,7 @@ export function useChatStream() {
           }
           continue;
         }
-        handleSseEvent(event, turnId, setAgent, appendPart, completeTurn, setCurrentSessionId, setIsGenerating);
+        handleSseEvent(event, turnId, setAgent, appendPart, completeTurn, setCurrentSessionId, setIsGenerating, setPending);
       }
     } catch (err) {
       setIsGenerating(false);
@@ -64,7 +66,8 @@ function handleSseEvent(
   appendPart: (turnId: string, part: Part) => void,
   completeTurn: (turnId: string) => void,
   setCurrentSessionId: (id: string | null) => void,
-  setIsGenerating: (generating: boolean) => void
+  setIsGenerating: (generating: boolean) => void,
+  setPending: (item: { toolCallId: string; toolName: string; risk: string; reason: string } | null) => void
 ) {
   switch (event.type) {
     case 'message':
@@ -92,6 +95,14 @@ function handleSseEvent(
       break;
     case 'task_progress':
       // TODO: display task progress in UI
+      break;
+    case 'permission_ask':
+      setPending({
+        toolCallId: event.tool_call_id,
+        toolName: event.tool_name,
+        risk: event.risk,
+        reason: event.reason,
+      });
       break;
   }
 }

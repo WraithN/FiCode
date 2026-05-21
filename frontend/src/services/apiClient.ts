@@ -76,6 +76,10 @@ export class ApiClient {
     return this.post<unknown>(`/api/commands/${name}/execute`, { args, session_id: null });
   }
 
+  async respondPermission(toolCallId: string, approved: boolean): Promise<unknown> {
+    return this.post<unknown>('/api/permission/respond', { tool_call_id: toolCallId, approved });
+  }
+
   async *subscribeLogs(): AsyncGenerator<LogEntry, void, unknown> {
     const resp = await fetch(`${this.baseUrl}/api/logs/stream`);
     if (!resp.ok) throw new Error(`Log stream failed: ${resp.status}`);

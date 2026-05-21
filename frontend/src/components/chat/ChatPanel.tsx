@@ -29,7 +29,9 @@ export const ChatPanel: React.FC = () => {
       </div>
 
       {isGenerating && (
-        <div className="px-4 py-2 text-xs text-text-muted animate-pulse">Generating...</div>
+        <div className="h-0.5 w-full bg-bg-secondary overflow-hidden relative">
+          <div className="absolute h-full w-1/4 bg-brand animate-progress-slide rounded-full" />
+        </div>
       )}
     </div>
   );

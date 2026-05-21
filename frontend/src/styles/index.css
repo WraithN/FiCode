@@ -33,3 +33,17 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* 生成进度条动画 */
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.animate-progress-slide {
+  animation: progress-slide 1.2s ease-in-out infinite;
+}

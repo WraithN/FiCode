@@ -65,6 +65,10 @@ pub struct Args {
     /// Specify the agent type (build or plan)
     #[arg(long, default_value = "build")]
     pub agent: String,
+
+    /// Bypass permission checks in CLI mode (dangerous!)
+    #[arg(short = 'd', long = "dangerous")]
+    pub dangerous: bool,
 }
 
 #[derive(Subcommand, Debug)]

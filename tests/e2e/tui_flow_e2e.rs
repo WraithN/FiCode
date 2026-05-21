@@ -83,7 +83,7 @@ async fn chat_with_session(port: u16, session_id: &str, message: &str) -> Vec<Ss
 
     assert_eq!(response.status(), 200);
 
-    collect_sse_events(response).await
+    collect_sse_events(port, response).await
 }
 
 /// 发送对话消息并收集所有 SSE 事件（新会话）
@@ -108,14 +108,16 @@ async fn chat_and_collect_events(port: u16, message: &str) -> Vec<SseEvent> {
 
     assert_eq!(response.status(), 200);
 
-    collect_sse_events(response).await
+    collect_sse_events(port, response).await
 }
 
 /// 从 HTTP 响应中收集 SSE 事件
-async fn collect_sse_events(response: reqwest::Response) -> Vec<SseEvent> {
+/// 测试环境中自动确认权限请求（PermissionAsk），避免阻塞
+async fn collect_sse_events(port: u16, response: reqwest::Response) -> Vec<SseEvent> {
     let mut events = Vec::new();
     let mut buffer = String::new();
     let mut stream = response.bytes_stream();
+    let client = reqwest::Client::new();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.expect("SSE stream error");
@@ -209,6 +211,24 @@ async fn collect_sse_events(response: reqwest::Response) -> Vec<SseEvent> {
                         plan_id: None,
                         task_count: None,
                     },
+                    Ev::PermissionAsk { tool_call_id, .. } => {
+                        // 测试环境中自动确认权限请求
+                        let _ = client
+                            .post(format!("http://127.0.0.1:{}/api/permission/respond", port))
+                            .json(&serde_json::json!({
+                                "tool_call_id": tool_call_id,
+                                "approved": true
+                            }))
+                            .send()
+                            .await;
+                        SseEvent {
+                            event_type: "PermissionAsk".to_string(),
+                            content: None,
+                            tool_name: None,
+                            plan_id: None,
+                            task_count: None,
+                        }
+                    }
                 };
                 let is_done = matches!(event, Ev::Done { .. });
                 events.push(sse_event);

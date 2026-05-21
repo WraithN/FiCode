@@ -91,6 +91,9 @@ async fn start_web_mode(port: u16) -> anyhow::Result<EntryOutcome> {
 pub async fn run() -> Result<EntryOutcome> {
     let args = Args::parse();
 
+    // 设置 CLI 危险模式标志（影响权限检查行为）
+    fi_code_core::permission::set_cli_dangerous(args.dangerous);
+
     // -W / --web 模式优先级高于默认 TUI
     if let Some(port_opt) = args.web {
         let port = port_opt.unwrap_or(4040);

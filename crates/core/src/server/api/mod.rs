@@ -22,5 +22,6 @@
 pub mod chat_api;
 pub mod file_api;
 pub mod log_api;
+pub mod permission_api;
 pub mod session_api;
 pub mod skill_api;

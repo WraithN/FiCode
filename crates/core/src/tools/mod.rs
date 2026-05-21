@@ -657,8 +657,8 @@ static REGISTRY: LazyLock<ToolsRegistry> = LazyLock::new(|| {
     registry
         .register(
             "ask_for_question",
-            "Ask the user a question with predefined options",
-            r#"{"type":"object","properties":{"question":{"type":"string"},"options":{"type":"array","maxItems":3,"items":{"type":"object","properties":{"id":{"type":"string"},"label":{"type":"string"},"description":{"type":"string"}},"required":["id","label"]}},"recommended":{"type":"string"},"allow_custom":{"type":"boolean","default":true}},"required":["question","options"]}"#,
+            "Ask the user a question with predefined options. You MUST call this tool when you encounter any of the following situations instead of guessing on your own: (1) Path/file ambiguity: the file path provided by the user matches multiple files, or the path does not exist but there are multiple similar candidates; (2) Unclear intent: the user's instruction has multiple interpretations and the choice will affect subsequent implementation; (3) Destructive operations: before deleting files, modifying configuration files, or executing commands like rm/reset/drop; (4) Cross-module impact: modifying one file may affect 3+ other modules. Provide 2-5 most relevant options, mark the recommended one, and allow custom answers.",
+            r#"{"type":"object","properties":{"question":{"type":"string","description":"The question to ask the user. Be specific about the ambiguity or risk."},"options":{"type":"array","maxItems":5,"items":{"type":"object","properties":{"id":{"type":"string"},"label":{"type":"string"},"description":{"type":"string"}},"required":["id","label"]}},"recommended":{"type":"string","description":"The ID of the recommended option"},"allow_custom":{"type":"boolean","default":true,"description":"Whether to allow the user to enter a custom answer"}},"required":["question","options"]}"#,
             Box::new(AskForQuestionHandler),
         )
         .expect("register ask_for_question failed");
@@ -843,8 +843,8 @@ pub async fn tool_call(
             .filter_map(|v| serde_json::from_value(v.clone()).ok())
             .collect();
 
-        if options.is_empty() || options.len() > 3 {
-            return Err("Options count must be between 1 and 3".to_string());
+        if options.is_empty() || options.len() > 5 {
+            return Err("Options count must be between 1 and 5".to_string());
         }
 
         let recommended = input
@@ -1040,6 +1040,9 @@ pub async fn execute_tool_calls(
 
     let profile = AgentProfile::for_type(agent_type);
 
+    // 判断当前模式：有 SSE callback 为 Web/Server/TUI 模式，否则为 CLI 模式
+    let is_web_mode = on_tool_event.is_some();
+
     // 将回调提取到 Arc<Mutex<...>> 中，以便在并行的 async 块之间安全共享
     let callback = on_tool_event.take();
     let shared_cb = Arc::new(Mutex::new(callback));
@@ -1062,6 +1065,7 @@ pub async fn execute_tool_calls(
             let cb = shared_cb.clone();
             let is_allowed = profile.tool_filter.allows(&name);
             let agent_name = profile.name;
+            let is_web = is_web_mode;
             Some(async move {
                 // 二次拦截：检查该工具是否被当前 Agent 允许
                 if !is_allowed {
@@ -1080,6 +1084,104 @@ pub async fn execute_tool_calls(
                     return error_part;
                 }
 
+                // =============================================================================
+                // 权限检查：系统级权限校验（Allow / Ask / Deny）
+                // =============================================================================
+                let input: HashMap<String, serde_json::Value> = match &arguments {
+                    serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                    _ => HashMap::new(),
+                };
+                let (action, risk, reason) = crate::permission::PermissionAction::match_action(&name, &input);
+
+                match action {
+                    crate::permission::PermissionAction::Deny => {
+                        let error_msg = format!("Permission denied: {}", reason);
+                        log_debug!("execute_tool_call denied | name={} | reason={}", name, reason);
+                        let error_part = Part::ToolError {
+                            tool_call_id: id.clone(),
+                            content: error_msg.clone(),
+                            error_message: error_msg,
+                        };
+                        if let Ok(mut guard) = cb.lock() {
+                            if let Some(ref mut callback) = *guard {
+                                let _ = callback(SseEvent::Part {
+                                    part: error_part.clone(),
+                                });
+                            }
+                        }
+                        return error_part;
+                    }
+                    crate::permission::PermissionAction::Allow => {
+                        // Allow 级别直接放行，继续执行
+                    }
+                    crate::permission::PermissionAction::Ask => {
+                        if is_web {
+                            // Web/Server/TUI 模式：发送 PermissionAsk SSE 事件并等待用户确认
+                            log_debug!("execute_tool_call ask (web) | name={} | risk={:?} | reason={}", name, risk, reason);
+                            if let Ok(mut guard) = cb.lock() {
+                                if let Some(ref mut callback) = *guard {
+                                    let _ = callback(SseEvent::PermissionAsk {
+                                        tool_call_id: id.clone(),
+                                        tool_name: name.clone(),
+                                        risk: format!("{:?}", risk),
+                                        reason: reason.clone(),
+                                    });
+                                }
+                            }
+                            match crate::permission::wait_permission_response(&id, &name, risk, &reason).await {
+                                Ok(true) => {
+                                    log_debug!("execute_tool_call approved | name={} | id={}", name, id);
+                                }
+                                Ok(false) => {
+                                    let error_msg = "Permission denied: user rejected".to_string();
+                                    log_debug!("execute_tool_call rejected | name={} | id={}", name, id);
+                                    let error_part = Part::ToolError {
+                                        tool_call_id: id.clone(),
+                                        content: error_msg.clone(),
+                                        error_message: error_msg,
+                                    };
+                                    if let Ok(mut guard) = cb.lock() {
+                                        if let Some(ref mut callback) = *guard {
+                                            let _ = callback(SseEvent::Part {
+                                                part: error_part.clone(),
+                                            });
+                                        }
+                                    }
+                                    return error_part;
+                                }
+                                Err(e) => {
+                                    let error_msg = format!("Permission error: {}", e);
+                                    log_debug!("execute_tool_call permission error | name={} | err={}", name, e);
+                                    let error_part = Part::ToolError {
+                                        tool_call_id: id.clone(),
+                                        content: error_msg.clone(),
+                                        error_message: error_msg,
+                                    };
+                                    if let Ok(mut guard) = cb.lock() {
+                                        if let Some(ref mut callback) = *guard {
+                                            let _ = callback(SseEvent::Part {
+                                                part: error_part.clone(),
+                                            });
+                                        }
+                                    }
+                                    return error_part;
+                                }
+                            }
+                        } else {
+                            // CLI 模式：使用 check_cli（默认拒绝，--dangerous 时通过）
+                            if let Err(err) = crate::permission::PermissionChecker::check_cli(&name, &input) {
+                                log_debug!("execute_tool_call denied (cli) | name={} | err={}", name, err);
+                                let error_part = Part::ToolError {
+                                    tool_call_id: id.clone(),
+                                    content: err.clone(),
+                                    error_message: err,
+                                };
+                                return error_part;
+                            }
+                        }
+                    }
+                }
+
                 log_info!("calling tool: ${}", name);
                 log_debug!("execute_tool_call | name={} | args={}", name, arguments);
                 let (content, is_error, duration_ms) = execute_single_tool_call(&id, &name, &arguments).await;
@@ -1095,7 +1197,15 @@ pub async fn execute_tool_calls(
 
                 // 构造元数据标题文本
                 let display_content = if name == "read" {
-                    format!("✓ read: {} ({}ms)", file_path.unwrap_or("unknown"), duration_ms)
+                    let line_count = content.lines().count();
+                    let char_count = content.chars().count();
+                    format!(
+                        "✓ read: {} | {} lines | {} chars ({}ms)",
+                        file_path.unwrap_or("unknown"),
+                        line_count,
+                        char_count,
+                        duration_ms
+                    )
                 } else if name == "write" {
                     let is_new = content.contains("New file:");
                     if is_new {
@@ -1708,6 +1818,8 @@ mod tests {
     #[tokio::test]
     async fn test_execute_tool_calls_build_agent_allows_write() {
         use fi_code_shared::dto::AgentType;
+        // 开启 dangerous 模式以通过系统权限检查（CLI 模式下 Ask 默认拒绝）
+        crate::permission::set_cli_dangerous(true);
         let parts = vec![
             Part::ToolUse {
                 id: "1".to_string(),
@@ -1716,11 +1828,14 @@ mod tests {
             },
         ];
         let results = execute_tool_calls(&parts, AgentType::Build, &mut None, false).await;
+        // 恢复默认值
+        crate::permission::set_cli_dangerous(false);
         assert_eq!(results.len(), 1);
         // Build Agent 应该尝试执行（结果可能是成功或失败，但不是因为被拦截）
         match &results[0] {
             Part::ToolError { error_message, .. } => {
                 assert!(!error_message.contains("Permission denied by agent profile"));
+                assert!(!error_message.contains("Permission denied:"));
             }
             _ => {} // ToolResult 或其他结果都可以
         }

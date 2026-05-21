@@ -248,6 +248,9 @@ impl TuiClient {
                             SseEvent::CompressionStatus { is_compressing, progress, context_ratio, .. } => {
                                 format!("CompressionStatus(compressing={} progress={}% ratio={}%)", is_compressing, progress, context_ratio)
                             }
+                            SseEvent::PermissionAsk { tool_name, risk, .. } => {
+                                format!("PermissionAsk(tool={} risk={})", tool_name, risk)
+                            }
                         };
                         log_debug!("[Client] HTTP SSE event | {}", event_preview);
                         if let SseEvent::Done { session_id: sid } = &event {
@@ -360,6 +363,32 @@ impl TuiClient {
         match resp.data {
             Some(data) => Ok(data),
             None => Err(anyhow::anyhow!(resp.error.unwrap_or_default())),
+        }
+    }
+
+    /// 响应权限确认请求。
+    pub async fn respond_permission(&self, tool_call_id: &str, approved: bool) -> Result<()> {
+        let url = format!("{}/api/permission/respond", self.base_url);
+        let body = serde_json::json!({
+            "tool_call_id": tool_call_id,
+            "approved": approved
+        });
+        log_debug!("[Client] HTTP -> POST {} | tool_call_id={} | approved={}", url, tool_call_id, approved);
+
+        let resp = self.client.post(&url).json(&body).send().await?;
+        let status = resp.status();
+        let resp = resp.json::<ApiResponse<serde_json::Value>>().await?;
+        log_debug!(
+            "[Client] HTTP <- POST {} | status={} | success={}",
+            url,
+            status,
+            resp.success
+        );
+
+        if resp.success {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(resp.error.unwrap_or_default()))
         }
     }
 

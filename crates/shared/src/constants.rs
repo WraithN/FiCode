@@ -55,7 +55,8 @@ pub const TOOL_RETRY_DELAY_MS: u64 = 200;
 pub const BASH_TIMEOUT_SECS: u64 = 120;
 
 /// 工具输出内容截断长度（字符数）
-pub const OUTPUT_TRUNCATE_LENGTH: usize = 50_000;
+/// read 等大文件工具允许更长的输出，由 compress_tool_result 负责按需压缩
+pub const OUTPUT_TRUNCATE_LENGTH: usize = 200_000;
 
 /// grep 工具最大匹配结果数
 pub const MAX_GREP_MATCHES: usize = 500;
@@ -177,7 +178,7 @@ pub const TOOL_RESULT_COMPRESS_THRESHOLD_NORMAL: usize = 8_000;
 pub const TOOL_RESULT_COMPRESS_THRESHOLD_AGGRESSIVE: usize = 3_000;
 
 /// 工具结果压缩后保留的头部字符数
-pub const TOOL_RESULT_COMPRESS_HEAD: usize = 1_000;
+pub const TOOL_RESULT_COMPRESS_HEAD: usize = 5_000;
 
 /// 工具结果压缩后保留的尾部字符数
-pub const TOOL_RESULT_COMPRESS_TAIL: usize = 2_000;
+pub const TOOL_RESULT_COMPRESS_TAIL: usize = 10_000;

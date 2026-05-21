@@ -188,6 +188,10 @@ impl Server {
             .route(
                 "/api/logs/stream",
                 get(crate::server::api::log_api::handle_log_stream),
+            )
+            .route(
+                "/api/permission/respond",
+                post(crate::server::api::permission_api::handle_permission_respond),
             );
 
         // 如果找到 frontend/dist，挂载静态文件服务

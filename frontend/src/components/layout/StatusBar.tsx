@@ -52,7 +52,9 @@ export const StatusBar: React.FC = () => {
       {isGenerating && (
         <>
           <span className="mx-2 text-border flex-shrink-0">│</span>
-          <span className="text-brand animate-pulse flex-shrink-0">generating...</span>
+          <div className="h-1 w-16 bg-bg-secondary overflow-hidden relative rounded flex-shrink-0">
+            <div className="absolute h-full w-1/3 bg-brand animate-progress-slide rounded-full" />
+          </div>
         </>
       )}
     </div>

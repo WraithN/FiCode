@@ -247,6 +247,26 @@ impl AgentWorld {
                             plan_id: None,
                             task_count: None,
                         },
+                        Ev::PermissionAsk { tool_call_id, .. } => {
+                            // BDD 测试中自动确认权限请求
+                            let client = reqwest::Client::new();
+                            let _ = client
+                                .post(format!("http://127.0.0.1:{}/api/permission/respond", self.port))
+                                .json(&json!({
+                                    "tool_call_id": tool_call_id,
+                                    "approved": true
+                                }))
+                                .send()
+                                .await;
+                            SseEvent {
+                                event_type: "PermissionAsk".to_string(),
+                                content: None,
+                                tool_name: None,
+                                tool_args: None,
+                                plan_id: None,
+                                task_count: None,
+                            }
+                        }
                     };
                     let is_done = matches!(event, Ev::Done { .. });
                     self.events.push(sse_event);
