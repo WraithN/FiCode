@@ -1031,6 +1031,8 @@ pub async fn execute_tool_calls(
     agent_type: fi_code_shared::dto::AgentType,
     on_tool_event: &mut Option<Box<dyn FnMut(crate::server::transport::sse::SseEvent) + Send>>,
     is_aggressive: bool,
+    // 父级 trace context（通常来自 TurnSpan）：每个 ToolSpan 以此为父
+    parent_cx: Option<&opentelemetry::Context>,
 ) -> Vec<Part> {
     use crate::agent::profile::AgentProfile;
     use crate::server::transport::sse::SseEvent;
@@ -1040,7 +1042,7 @@ pub async fn execute_tool_calls(
 
     let profile = AgentProfile::for_type(agent_type);
 
-    // 判断当前模式：有 SSE callback 为 Web/Server/TUI 模式，否则为 CLI 模式
+    // 判断当前模式：有 SSE 回调为 Web/Server/TUI 模式，否则为 CLI 模式
     let is_web_mode = on_tool_event.is_some();
 
     // 将回调提取到 Arc<Mutex<...>> 中，以便在并行的 async 块之间安全共享
@@ -1066,6 +1068,8 @@ pub async fn execute_tool_calls(
             let is_allowed = profile.tool_filter.allows(&name);
             let agent_name = profile.name;
             let is_web = is_web_mode;
+            // 为每个工具调用复制父 context（Context 是 Clone-friendly）
+            let parent_cx_cloned: Option<opentelemetry::Context> = parent_cx.cloned();
             Some(async move {
                 // 二次拦截：检查该工具是否被当前 Agent 允许
                 if !is_allowed {
@@ -1073,6 +1077,7 @@ pub async fn execute_tool_calls(
                         tool_call_id: id.clone(),
                         content: format!("Tool '{}' is not allowed in {} Agent", name, agent_name),
                         error_message: "Permission denied by agent profile".to_string(),
+                        for_context_only: false,
                     };
                     if let Ok(mut guard) = cb.lock() {
                         if let Some(ref mut callback) = *guard {
@@ -1081,7 +1086,7 @@ pub async fn execute_tool_calls(
                             });
                         }
                     }
-                    return error_part;
+                    return vec![error_part];
                 }
 
                 // =============================================================================
@@ -1101,6 +1106,7 @@ pub async fn execute_tool_calls(
                             tool_call_id: id.clone(),
                             content: error_msg.clone(),
                             error_message: error_msg,
+                            for_context_only: false,
                         };
                         if let Ok(mut guard) = cb.lock() {
                             if let Some(ref mut callback) = *guard {
@@ -1109,7 +1115,7 @@ pub async fn execute_tool_calls(
                                 });
                             }
                         }
-                        return error_part;
+                        return vec![error_part];
                     }
                     crate::permission::PermissionAction::Allow => {
                         // Allow 级别直接放行，继续执行
@@ -1139,6 +1145,7 @@ pub async fn execute_tool_calls(
                                         tool_call_id: id.clone(),
                                         content: error_msg.clone(),
                                         error_message: error_msg,
+                                        for_context_only: false,
                                     };
                                     if let Ok(mut guard) = cb.lock() {
                                         if let Some(ref mut callback) = *guard {
@@ -1147,7 +1154,7 @@ pub async fn execute_tool_calls(
                                             });
                                         }
                                     }
-                                    return error_part;
+                                    return vec![error_part];
                                 }
                                 Err(e) => {
                                     let error_msg = format!("Permission error: {}", e);
@@ -1156,6 +1163,7 @@ pub async fn execute_tool_calls(
                                         tool_call_id: id.clone(),
                                         content: error_msg.clone(),
                                         error_message: error_msg,
+                                        for_context_only: false,
                                     };
                                     if let Ok(mut guard) = cb.lock() {
                                         if let Some(ref mut callback) = *guard {
@@ -1164,7 +1172,7 @@ pub async fn execute_tool_calls(
                                             });
                                         }
                                     }
-                                    return error_part;
+                                    return vec![error_part];
                                 }
                             }
                         } else {
@@ -1175,8 +1183,9 @@ pub async fn execute_tool_calls(
                                     tool_call_id: id.clone(),
                                     content: err.clone(),
                                     error_message: err,
+                                    for_context_only: false,
                                 };
-                                return error_part;
+                                return vec![error_part];
                             }
                         }
                     }
@@ -1184,7 +1193,16 @@ pub async fn execute_tool_calls(
 
                 log_info!("calling tool: ${}", name);
                 log_debug!("execute_tool_call | name={} | args={}", name, arguments);
+                // 启动 ToolSpan：以 Turn 为父，记录 tool_name / id / args
+                let tool_span = crate::observability::otel::start_tool_span(
+                    parent_cx_cloned.as_ref(),
+                    &name,
+                    &id,
+                    &serde_json::to_string(&arguments).unwrap_or_default(),
+                );
                 let (content, is_error, duration_ms) = execute_single_tool_call(&id, &name, &arguments).await;
+                // 记录工具执行结果到 ToolSpan（drop 时自动结束 span）
+                tool_span.record_result(&content, is_error);
 
                 // 从参数中提取路径（用于 read/write/edit）
                 let input: HashMap<String, serde_json::Value> = match &arguments {
@@ -1228,6 +1246,7 @@ pub async fn execute_tool_calls(
                                     tool_call_id: id.clone(),
                                     content: content.clone(),
                                     error_message: content.clone(),
+                                    for_context_only: false,
                                 },
                             });
                         } else {
@@ -1236,12 +1255,37 @@ pub async fn execute_tool_calls(
                                 id,
                                 display_content.len()
                             );
-                            // 正常时发送 ToolResult（元数据标题）
+                            
+                            // 构建工具结果元数据
+                            let line_count = content.lines().count();
+                            let byte_count = content.len();
+                            
+                            // 快速判断是否会被压缩，而不是真正调用 compress_tool_result（性能问题！）
+                            let threshold = match name.as_str() {
+                                "bash" => fi_code_shared::constants::BASH_COMPRESS_THRESHOLD,
+                                "read" => fi_code_shared::constants::READ_COMPRESS_THRESHOLD,
+                                _ => fi_code_shared::constants::DEFAULT_COMPRESS_THRESHOLD,
+                            };
+                            let is_compressed = byte_count > threshold as usize;
+                            
+                            let metadata = serde_json::json!({
+                                "tool_name": name,
+                                "tool_call_id": id,
+                                "line_count": line_count,
+                                "byte_count": byte_count,
+                                "compressed": is_compressed,
+                                "truncated": content.len() > 50000,
+                                "content_type": if is_read_write_edit { "file" } else { "text" },
+                            });
+                            
+                             // 正常时发送 ToolResult（元数据标题）
                             let _ = callback(SseEvent::Part {
                                 part: Part::ToolResult {
                                     tool_call_id: id.clone(),
-                                    content: display_content,
+                                    content: display_content.clone(),
                                     duration_ms: Some(duration_ms),
+                                    metadata: Some(metadata),
+                                    for_context_only: false,
                                 },
                             });
 
@@ -1254,8 +1298,9 @@ pub async fn execute_tool_calls(
                                 if !is_meta_only {
                                     let _ = callback(SseEvent::Part {
                                         part: Part::CodeBlock {
-                                            language: language.unwrap_or_default(),
+                                            language: language.clone().unwrap_or_default(),
                                             code: content.clone(),
+                                            for_context_only: false,
                                         },
                                     });
                                 }
@@ -1264,25 +1309,85 @@ pub async fn execute_tool_calls(
                     }
                 }
 
+                let mut parts = Vec::new();
+                
                 if is_error {
-                    Part::ToolError {
+                    parts.push(Part::ToolError {
                         tool_call_id: id,
                         content: content.clone(),
                         error_message: content,
-                    }
+                        for_context_only: true,
+                    });
                 } else {
                     let compressed = crate::agent::compression::compress_tool_result(&content, is_aggressive, Some(&name));
-                    Part::ToolResult {
-                        tool_call_id: id,
-                        content: compressed,
+                    
+                    // 构建工具结果元数据
+                    let line_count = content.lines().count();
+                    let byte_count = content.len();
+                    let is_compressed = compressed != content;
+                    
+                    let metadata = serde_json::json!({
+                        "tool_name": name,
+                        "tool_call_id": id,
+                        "line_count": line_count,
+                        "byte_count": byte_count,
+                        "compressed": is_compressed,
+                        "truncated": content.len() > 50000,
+                        "content_type": if is_read_write_edit { "file" } else { "text" },
+                    });
+                    
+                    parts.push(Part::ToolResult {
+                        tool_call_id: id.clone(),
+                        content: display_content,
                         duration_ms: Some(duration_ms),
+                        metadata: Some(metadata),
+                        for_context_only: true,
+                    });
+                    
+                    // 对于 read/write/edit，额外返回 CodeBlock（用于保存到会话历史）
+                    if is_read_write_edit {
+                        let is_meta_only = content.starts_with("New file:")
+                            || content.starts_with("Wrote ")
+                            || content.starts_with("Edited ")
+                            || content.starts_with("Error:");
+                        if !is_meta_only {
+                            parts.push(Part::CodeBlock {
+                                language: language.unwrap_or_default(),
+                                code: content.clone(),
+                                for_context_only: true,
+                            });
+                        }
                     }
                 }
+                
+                parts
             })
         })
         .collect();
 
-    join_all(futures).await
+    let results = join_all(futures).await.into_iter().flatten().collect();
+
+    // 恢复 on_tool_event 回调，以便调用方可以继续使用它进行后续的 SSE 发送
+    // 安全地将回调恢复到原位置，避免 Poison 错误
+    match Arc::try_unwrap(shared_cb) {
+        Ok(mutex) => {
+            match mutex.into_inner() {
+                Ok(mut callback) => {
+                    if let Some(cb) = callback.take() {
+                        *on_tool_event = Some(cb);
+                    }
+                }
+                Err(_) => {
+                    log_debug!("Failed to restore SSE callback due to lock poisoning");
+                }
+            }
+        }
+        Err(_) => {
+            log_debug!("Could not restore SSE callback, references still held");
+        }
+    }
+
+    results
 }
 
 // =============================================================================
@@ -1804,7 +1909,7 @@ mod tests {
                 arguments: serde_json::json!({"path": "/tmp/test.txt", "content": "hello"}),
             },
         ];
-        let results = execute_tool_calls(&parts, AgentType::Plan, &mut None, false).await;
+        let results = execute_tool_calls(&parts, AgentType::Plan, &mut None, false, None).await;
         assert_eq!(results.len(), 1);
         match &results[0] {
             Part::ToolError { error_message, .. } => {
@@ -1827,7 +1932,7 @@ mod tests {
                 arguments: serde_json::json!({"path": "/tmp/test_fi_code_build.txt", "content": "hello"}),
             },
         ];
-        let results = execute_tool_calls(&parts, AgentType::Build, &mut None, false).await;
+        let results = execute_tool_calls(&parts, AgentType::Build, &mut None, false, None).await;
         // 恢复默认值
         crate::permission::set_cli_dangerous(false);
         assert_eq!(results.len(), 1);

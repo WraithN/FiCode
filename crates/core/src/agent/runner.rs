@@ -229,8 +229,8 @@ impl AgentRunner {
         }
 
         let is_aggressive = crate::agent::compression::should_compress(messages);
-        // 执行所有工具调用并收集结果
-        let tool_results = execute_tool_calls(&turn.content_blocks, self.agent_type, on_tool_event, is_aggressive).await;
+        // 执行所有工具调用并收集结果（runner 暂无 chat 父 span，传 None）
+        let tool_results = execute_tool_calls(&turn.content_blocks, self.agent_type, on_tool_event, is_aggressive, None).await;
         if tool_results.is_empty() {
             log_debug!("AgentRunner::run_one_turn | tool_use but no results, stopping");
             let assistant_count = messages
