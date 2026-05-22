@@ -112,18 +112,16 @@ pub async fn run() -> Result<EntryOutcome> {
         }
         Some(Commands::Logs {
             limit,
-            follow,
+            follow: _,
             session,
-            tool,
-            raw,
+            tool: _,
+            raw: _,
         }) => {
-            use fi_code_core::utils::turn_log_cli::{run_logs_cli, LogsOptions};
+            use fi_code_core::observability::cli_view::{run_logs_cli, LogsOptions};
             let options = LogsOptions {
-                limit,
-                follow,
-                session_filter: session,
-                tool_filter: tool,
-                raw,
+                file: None,
+                session,
+                limit: Some(limit),
             };
             run_logs_cli(options)?;
             return Ok(EntryOutcome::Completed);
@@ -336,7 +334,7 @@ async fn run_single_command(
 
     let mut state = LoopState::new(session.messages.clone());
     let client = provider.get_client()?;
-    agent_loop(client.as_ref(), &mut state, agent_type, &mut None, &mut None, None).await?;
+    agent_loop(client.as_ref(), &mut state, agent_type, &mut None, &mut None, None, None).await?;
 
     handle_task_plan_and_save(
         provider,
@@ -429,7 +427,7 @@ async fn run_interactive(
 
                 let mut state = LoopState::new(session.messages.clone());
                 let client = provider.get_client()?;
-                agent_loop(client.as_ref(), &mut state, agent_type, &mut None, &mut None, None).await?;
+                agent_loop(client.as_ref(), &mut state, agent_type, &mut None, &mut None, None, None).await?;
 
                 handle_task_plan_and_save(
                     Arc::clone(&provider),
