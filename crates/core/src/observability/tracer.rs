@@ -19,19 +19,5 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#![allow(warnings)]
-
-pub mod agent;
-pub mod commands;
-pub mod config;
-pub mod mcp;
-pub mod permission;
-pub mod provider;
-pub mod server;
-pub mod session;
-pub mod skills;
-pub mod theme_preset;
-pub mod tools;
-pub mod tui_event;
-pub mod utils;
-pub mod observability;
+// Tracer 初始化占位实现
+pub fn placeholder() {}
