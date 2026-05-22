@@ -58,11 +58,11 @@ pub const GEN_AI_RESPONSE_FINISH_REASONS: &str = "gen_ai.response.finish_reasons
 pub const FI_TURN_INDEX: &str = "fi_code.turn.index";
 pub const FI_TOOL_NAME: &str = "fi_code.tool.name";
 pub const FI_TOOL_CALL_ID: &str = "fi_code.tool.call_id";
-pub const FI_MESSAGES_SNAPSHOT: &str = "fi_code.messages.snapshot";
+pub const FI_MESSAGES_SNAPSHOT: &str = "fi_code.messages_snapshot";
 pub const FI_AGENT_TYPE: &str = "fi_code.agent.type";
-pub const FI_TRANSITION_REASON: &str = "fi_code.transition.reason";
-pub const FI_COMPRESSION_BEFORE: &str = "fi_code.compression.before";
-pub const FI_COMPRESSION_AFTER: &str = "fi_code.compression.after";
+pub const FI_TRANSITION_REASON: &str = "fi_code.transition_reason";
+pub const FI_COMPRESSION_BEFORE: &str = "fi_code.compression.before_tokens";
+pub const FI_COMPRESSION_AFTER: &str = "fi_code.compression.after_tokens";
 
 // ===== Observation type 取值 =====
 pub const OBS_TYPE_SPAN: &str = "span";
