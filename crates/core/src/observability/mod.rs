@@ -69,9 +69,10 @@ pub fn init(config: &crate::config::Config) -> anyhow::Result<()> {
     }
 }
 
-/// 关闭可观测性子系统：转发到 tracer::shutdown 以 flush 残留 span。
+/// 关闭可观测性子系统：转发到 tracer::shutdown 以 flush 残留 span，并重置 ENABLED，避免关闭后 span 调用经过失效 provider。
 pub fn shutdown() {
     tracer::shutdown();
+    ENABLED.store(false, Ordering::SeqCst);
 }
 
 /// 查询当前是否启用可观测性

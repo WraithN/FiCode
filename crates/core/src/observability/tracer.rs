@@ -98,6 +98,12 @@ fn logs_dir() -> anyhow::Result<PathBuf> {
 /// - 装配 CompositeSpanExporter → BatchSpanProcessor → TracerProvider。
 /// - 将 provider 设为全局并存入 `PROVIDER`。
 pub fn install(cfg: &ObservabilityConfig) -> anyhow::Result<()> {
+    // 0. 幂等性保护：若 PROVIDER 已设置，直接返回 Ok，避免重复创建导致句柄泄漏与 provider 不可达。
+    if PROVIDER.get().is_some() {
+        crate::log_warn!("[observability] install() 被重复调用，已跳过");
+        return Ok(());
+    }
+
     // 1. 日志目录（硬错误）。
     let dir = logs_dir()?;
 
@@ -149,16 +155,10 @@ pub fn install(cfg: &ObservabilityConfig) -> anyhow::Result<()> {
     let resource = Resource::new(vec![
         KeyValue::new(SERVICE_NAME_KEY, SERVICE_NAME),
         KeyValue::new(SERVICE_VERSION_KEY, SERVICE_VERSION),
-        KeyValue::new(DEPLOYMENT_ENVIRONMENT_KEY, environment),
+        KeyValue::new(DEPLOYMENT_ENVIRONMENT_KEY, environment.clone()),
         KeyValue::new(LANGFUSE_RELEASE, release),
-        // langfuse.environment 同步写入 Resource，便于 Langfuse UI 过滤。
-        KeyValue::new(
-            LANGFUSE_ENVIRONMENT,
-            cfg.langfuse
-                .environment
-                .clone()
-                .unwrap_or_else(|| DEFAULT_ENVIRONMENT.to_string()),
-        ),
+        // langfuse.environment 同步写入 Resource，便于 Langfuse UI 过滤；复用上方 environment 局部变量避免重复计算。
+        KeyValue::new(LANGFUSE_ENVIRONMENT, environment),
     ]);
 
     // 7. 装配 provider 并注册到全局。
@@ -240,5 +240,20 @@ mod tests {
         }
         let res = install(&cfg);
         assert!(res.is_ok(), "禁用态 install 必须 Ok: {:?}", res.err());
+    }
+
+    /// install() 必须幂等：重复调用不 panic、不重复创建 provider。
+    /// 注意：与上面的测试共享同一全局 PROVIDER，但 OnceLock 的语义保证了第二次 install 直接跳过。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_install_is_idempotent() {
+        let cfg = ObservabilityConfig::default();
+        if logs_dir().is_err() {
+            eprintln!("跳过 install 幂等性测试：logs_dir 不可用");
+            return;
+        }
+        let r1 = install(&cfg);
+        let r2 = install(&cfg);
+        assert!(r1.is_ok(), "第一次 install 应 Ok：{:?}", r1.err());
+        assert!(r2.is_ok(), "重复 install 应 Ok（幂等）：{:?}", r2.err());
     }
 }
