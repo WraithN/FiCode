@@ -154,8 +154,8 @@ base64 = "0.22"
     "langfuse": {
       "enabled": true,
       "host": "https://cloud.langfuse.com",
-      "public_key": "{env:LANGFUSE_PUBLIC_KEY}",
-      "secret_key": "{env:LANGFUSE_SECRET_KEY}",
+      "publicKey": "{env:LANGFUSE_PUBLIC_KEY}",
+      "secretKey": "{env:LANGFUSE_SECRET_KEY}",
       "environment": "dev",
       "release": "0.1.0"
     }
@@ -163,18 +163,20 @@ base64 = "0.22"
 }
 ```
 
+> **注**：`publicKey` / `secretKey` 使用 camelCase 与项目现有 Provider 配置（`apiKey`、`baseURL` 等）保持一致；环境变量则保持 SNAKE_UPPER 风格。
+
 **环境变量优先级**（与现有 Provider 一致）：
 
 | 字段 | 环境变量 |
 |---|---|
 | `enabled` | 若 `LANGFUSE_PUBLIC_KEY` 与 `LANGFUSE_SECRET_KEY` 都存在则视为 `true` |
 | `host` | `LANGFUSE_HOST`（默认 `https://cloud.langfuse.com`）|
-| `public_key` | `LANGFUSE_PUBLIC_KEY` |
-| `secret_key` | `LANGFUSE_SECRET_KEY` |
+| `publicKey` | `LANGFUSE_PUBLIC_KEY` |
+| `secretKey` | `LANGFUSE_SECRET_KEY` |
 | `environment` | `LANGFUSE_ENVIRONMENT` |
 | `release` | `LANGFUSE_RELEASE` |
 
-若环境变量与 config.json 同时存在，**环境变量胜出**。若 `public_key` 或 `secret_key` 缺失，整个 OTLP exporter 不装载，仅 LocalJsonl 工作。
+若环境变量与 config.json 同时存在，**环境变量胜出**。若 `publicKey` 或 `secretKey` 缺失，整个 OTLP exporter 不装载，仅 LocalJsonl 工作。
 
 ---
 
