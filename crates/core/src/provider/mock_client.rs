@@ -153,6 +153,14 @@ fn send_finish(on_chunk: &mut (dyn FnMut(Chunk) + Send), reason: FinishReason) {
 
 #[async_trait]
 impl AIClient for MockAIClient {
+    fn model_name(&self) -> &str {
+        "mock-model"
+    }
+
+    fn provider_kind(&self) -> &'static str {
+        "mock"
+    }
+
     async fn stream_message(
         &self,
         _system_prompt: &str,

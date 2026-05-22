@@ -243,6 +243,12 @@ pub async fn send_with_retry(
 
 #[async_trait]
 pub trait AIClient: Send + Sync {
+    /// 当前客户端使用的模型名（用于可观测追踪 attribute，例如 Langfuse 按模型聚合）
+    fn model_name(&self) -> &str;
+
+    /// 当前客户端归属的 provider 类型，固定字符串："openai" / "anthropic" / "mock"
+    fn provider_kind(&self) -> &'static str;
+
     /// 发起流式对话请求。
     /// 具体实现负责解析厂商原生的 SSE 事件：
     /// - 普通文本/思考增量直接通过 `on_chunk` 回传；

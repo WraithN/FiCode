@@ -74,6 +74,14 @@ impl OpenAiClient {
 
 #[async_trait::async_trait]
 impl AIClient for OpenAiClient {
+    fn model_name(&self) -> &str {
+        &self.model_name
+    }
+
+    fn provider_kind(&self) -> &'static str {
+        "openai"
+    }
+
     async fn stream_message(
         &self,
         system_prompt: &str,
@@ -518,6 +526,7 @@ fn build_user_messages(msg: &Message) -> Vec<OpenAiMessage> {
                 tool_call_id,
                 content: c,
                 duration_ms: _,
+                ..
             } => {
                 tool_results.push(OpenAiMessage {
                     role: "tool".to_string(),

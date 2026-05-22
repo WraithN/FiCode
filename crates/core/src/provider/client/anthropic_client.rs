@@ -68,6 +68,14 @@ impl AnthropicClient {
 
 #[async_trait::async_trait]
 impl AIClient for AnthropicClient {
+    fn model_name(&self) -> &str {
+        &self.model_name
+    }
+
+    fn provider_kind(&self) -> &'static str {
+        "anthropic"
+    }
+
     async fn stream_message(
         &self,
         system_prompt: &str,
@@ -253,6 +261,7 @@ fn convert_part_to_anthropic(part: &Part) -> serde_json::Value {
             tool_call_id,
             content: c,
             duration_ms: _,
+            ..
         } => json!({
             "type": "tool_result",
             "tool_use_id": tool_call_id,

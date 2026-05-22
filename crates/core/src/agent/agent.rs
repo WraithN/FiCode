@@ -428,12 +428,12 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     );
 
     // 启动 LlmGeneration span：以 turn_cx 为父，作为 Langfuse generation observation
-    // TODO Phase 4 polish：model_name / provider_name 通过 AIClient trait 透传，目前用占位符
+    // 通过 AIClient trait 上报真实 model_name / provider_kind，支撑 Langfuse 按模型/厂商聚合
     let llm_messages_json = serde_json::to_string(&llm_messages).unwrap_or_default();
     let llm_gen = otel::start_llm_generation(
         Some(&turn_cx),
-        "unknown",
-        "unknown",
+        client.model_name(),
+        client.provider_kind(),
         &llm_messages_json,
     );
 
