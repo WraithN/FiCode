@@ -60,6 +60,14 @@ pub fn init(config: &crate::config::Config) -> anyhow::Result<()> {
     match tracer::install(&obs_cfg) {
         Ok(()) => {
             ENABLED.store(true, Ordering::SeqCst);
+            // v1 重发 daemon：仅在启用 Langfuse 上报时启动；后台扫描一次后退出
+            if obs_cfg.langfuse_enabled() {
+                tokio::spawn(async move {
+                    if let Err(e) = resend::run_once().await {
+                        log_warn!("[observability] resend daemon failed: {}", e);
+                    }
+                });
+            }
             Ok(())
         }
         Err(e) => {
