@@ -37,6 +37,13 @@ use std::sync::Mutex;
 
 use crate::log_error;
 
+/// Langfuse 上报状态：尚未上报。
+pub(crate) const LF_STATUS_PENDING: &str = "pending";
+/// Langfuse 上报状态：已成功上报。
+pub(crate) const LF_STATUS_SENT: &str = "sent";
+/// JSONL 行的 type 字段值：status_patch（区别于完整 span 行）。
+const PATCH_TYPE_STATUS: &str = "status";
+
 /// 本地 JSONL 落盘导出器：每个 span 写一行 JSON，lf_status 永远为 "pending"。
 #[derive(Debug)]
 pub struct LocalJsonlExporter {
@@ -65,7 +72,7 @@ impl LocalJsonlExporter {
     /// 追加 status_patch 行，标记一组 span_id 的 Langfuse 上报状态。
     pub fn append_status_patch(&self, span_ids: &[String], status: &str) {
         let patch = json!({
-            "type": "status",
+            "type": PATCH_TYPE_STATUS,
             "span_ids": span_ids,
             "lf_status": status,
             "patched_at_unix_nano": now_unix_nano(),
@@ -76,12 +83,19 @@ impl LocalJsonlExporter {
         }
     }
 
-    /// 用同一文件路径再开一个独立句柄（用于 CompositeExporter 的 fan-out）。
-    /// 多句柄同时 O_APPEND 写在 POSIX 上单次 write < PIPE_BUF 是原子的，
-    /// 但我们各自持独立 Mutex，不依赖此特性。
-    pub fn clone_handle(arc: &std::sync::Arc<Self>) -> LocalJsonlExporter {
-        let path = arc.path().clone();
-        LocalJsonlExporter::new(path).expect("reopen spans.jsonl must succeed")
+    /// 通过共享 `Arc<Self>` 也可调用的批量导出入口。
+    ///
+    /// 关键设计：与 `SpanExporter::export(&mut self, ...)` 不同，本方法只需要 `&self`，
+    /// 因为底层文件句柄通过 `Mutex<File>` 自带内部可变性。
+    /// CompositeSpanExporter 持有 `Arc<LocalJsonlExporter>`，无法借出 `&mut`，
+    /// 故组合导出器走这条路径，避免再开第二个文件句柄导致写入交错。
+    pub fn export_batch(&self, batch: Vec<SpanData>) -> ExportResult {
+        for span in &batch {
+            let line = span_to_jsonl(span);
+            self.write_line(&line)
+                .map_err(|e| TraceError::from(format!("local jsonl write: {}", e)))?;
+        }
+        Ok(())
     }
 
     /// 写入一行（加换行符），通过 Mutex 保证互斥。
@@ -98,14 +112,8 @@ impl SpanExporter for LocalJsonlExporter {
         &mut self,
         batch: Vec<SpanData>,
     ) -> futures::future::BoxFuture<'static, ExportResult> {
-        let result: ExportResult = (|| {
-            for span in &batch {
-                let line = span_to_jsonl(span);
-                self.write_line(&line)
-                    .map_err(|e| TraceError::from(format!("local jsonl write: {}", e)))?;
-            }
-            Ok(())
-        })();
+        // 直接复用 &self 版本：trait 要求 &mut，但内部互斥靠 Mutex<File>。
+        let result = self.export_batch(batch);
         Box::pin(async move { result })
     }
 }
@@ -129,7 +137,7 @@ fn span_to_jsonl(span: &SpanData) -> String {
         },
         "attributes": Value::Object(attrs),
         "events": [],
-        "lf_status": "pending",
+        "lf_status": LF_STATUS_PENDING,
     });
     serde_json::to_string(&obj).unwrap_or_default()
 }

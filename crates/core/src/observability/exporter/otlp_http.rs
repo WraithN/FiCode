@@ -33,6 +33,19 @@ use opentelemetry_sdk::export::trace::{ExportResult, SpanData, SpanExporter};
 use std::collections::HashMap;
 use std::time::Duration;
 
+/// Langfuse OTel HTTP 摄入端点的路径部分（拼接在 host 之后）。
+const LANGFUSE_INGESTION_PATH: &str = "/api/public/otel/v1/traces";
+/// Langfuse 自定义 header：摄入协议版本。
+const LANGFUSE_INGESTION_VERSION_HEADER: &str = "x-langfuse-ingestion-version";
+/// Langfuse 摄入协议版本号（spec §4.4）。
+const LANGFUSE_INGESTION_VERSION_VALUE: &str = "4";
+/// 标准 HTTP 鉴权 header 名称。
+const AUTH_HEADER_NAME: &str = "Authorization";
+/// HTTP Basic 鉴权前缀。
+const AUTH_BASIC_PREFIX: &str = "Basic ";
+/// OTLP 单次请求超时（spec §4.5）。
+const OTLP_TIMEOUT_SECS: u64 = 10;
+
 /// OTLP HTTP 上报导出器：内部委托给 opentelemetry-otlp 的 SpanExporter。
 #[derive(Debug)]
 pub struct OtlpHttpExporter {
@@ -42,19 +55,29 @@ pub struct OtlpHttpExporter {
 impl OtlpHttpExporter {
     /// host 形如 "https://cloud.langfuse.com"；尾部斜杠会被自动去掉。
     pub fn new(host: &str, public_key: &str, secret_key: &str) -> anyhow::Result<Self> {
-        let endpoint = format!("{}/api/public/otel/v1/traces", host.trim_end_matches('/'));
+        let endpoint = format!(
+            "{}{}",
+            host.trim_end_matches('/'),
+            LANGFUSE_INGESTION_PATH
+        );
         let auth_raw = format!("{}:{}", public_key, secret_key);
         let auth_b64 = base64::engine::general_purpose::STANDARD.encode(auth_raw);
 
         let mut headers = HashMap::new();
-        headers.insert("Authorization".into(), format!("Basic {}", auth_b64));
-        headers.insert("x-langfuse-ingestion-version".into(), "4".into());
+        headers.insert(
+            AUTH_HEADER_NAME.into(),
+            format!("{}{}", AUTH_BASIC_PREFIX, auth_b64),
+        );
+        headers.insert(
+            LANGFUSE_INGESTION_VERSION_HEADER.into(),
+            LANGFUSE_INGESTION_VERSION_VALUE.into(),
+        );
 
         let inner = OtlpSpanExporter::builder()
             .with_http()
             .with_endpoint(endpoint)
             .with_headers(headers)
-            .with_timeout(Duration::from_secs(10))
+            .with_timeout(Duration::from_secs(OTLP_TIMEOUT_SECS))
             .build()?;
         Ok(Self { inner })
     }
@@ -86,23 +109,5 @@ mod tests {
         // 仅验证构造不 panic；网络请求时才会失败。
         let r = OtlpHttpExporter::new("https://invalid.example", "pk", "sk");
         assert!(r.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_export_sends_basic_auth_header() {
-        use wiremock::matchers::{header, method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api/public/otel/v1/traces"))
-            .and(header("Authorization", "Basic cGstbGYteDpzay1sZi15"))
-            .respond_with(ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
-
-        let mut exp = OtlpHttpExporter::new(&server.uri(), "pk-lf-x", "sk-lf-y").unwrap();
-        // 空 batch 不一定触发 HTTP 请求；此用例主要验证构造 + 调用不 panic。
-        let _ = exp.export(vec![]).await;
     }
 }

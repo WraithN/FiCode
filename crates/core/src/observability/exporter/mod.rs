@@ -36,7 +36,7 @@ use std::sync::Arc;
 
 use crate::log_warn;
 
-use local_jsonl::LocalJsonlExporter;
+use local_jsonl::{LocalJsonlExporter, LF_STATUS_SENT};
 use otlp_http::OtlpHttpExporter;
 
 /// 组合导出器：fan-out 到 LocalJsonl + 可选 OTLP。
@@ -62,19 +62,19 @@ impl SpanExporter for CompositeSpanExporter {
             .map(|s| s.span_context.span_id().to_string())
             .collect();
 
-        // 第一步：LocalJsonl 同步写（通过 bridge 包一层独立 handle 即可调用 export）。
-        let mut local_exp = LocalJsonlBridge(Arc::clone(&local));
-        let local_fut = local_exp.export(batch.clone());
+        // 第一步：LocalJsonl 同步写。
+        // 直接走 export_batch(&self)，避免再开第二个文件句柄；
+        // 单一 Mutex<File> 保证多 batch 并发时行不会交错。
+        // local 失败仅记日志，不冒泡到上层（避免 BatchSpanProcessor 重试整批）。
+        let _ = self.local.export_batch(batch.clone());
 
         // 第二步：可选 OTLP（注意此时已 clone batch 给 local，OTLP 拿原 batch）。
         let otlp_fut = self.otlp.as_mut().map(|o| o.export(batch));
 
         Box::pin(async move {
-            // local 失败已在内部 log_error，这里只 await 不冒泡。
-            let _ = local_fut.await;
             if let Some(fut) = otlp_fut {
                 match fut.await {
-                    Ok(_) => local.append_status_patch(&span_ids, "sent"),
+                    Ok(_) => local.append_status_patch(&span_ids, LF_STATUS_SENT),
                     Err(_) => {
                         // OTLP 失败不冒泡，等启动期 daemon 补；
                         // log_warn! 宏含 #[cfg(debug_assertions)] 块表达式，
@@ -84,23 +84,6 @@ impl SpanExporter for CompositeSpanExporter {
                 }
             }
             Ok(())
-        })
-    }
-}
-
-/// 把 Arc<LocalJsonlExporter> 包成可调用 SpanExporter::export 的临时桥。
-/// 由于 LocalJsonlExporter::export 要求 &mut self，而我们持有的是 Arc<...>，
-/// 故通过 clone_handle 重新打开同一文件路径，得到独立的可变 handle。
-/// 写入仍走各自 Mutex<File>，O_APPEND 模式下不会交错。
-#[derive(Debug)]
-struct LocalJsonlBridge(Arc<LocalJsonlExporter>);
-
-impl SpanExporter for LocalJsonlBridge {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
-        let arc = Arc::clone(&self.0);
-        Box::pin(async move {
-            let mut exp = LocalJsonlExporter::clone_handle(&arc);
-            exp.export(batch).await
         })
     }
 }
