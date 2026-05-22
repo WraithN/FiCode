@@ -804,10 +804,13 @@ pub async fn agent_loop<C: AIClient + ?Sized>(
     );
 
     // 在 ChatSpan 上记录最终消息快照，便于 Langfuse 检视完整对话
+    // 必须经 redact_and_truncate 处理：清洗敏感字段（API Key / Bearer Token）并截断至 50KB，
+    // 避免泄露密钥或撑爆 OTel 后端
     if crate::observability::is_enabled() {
         if let Some(cx) = parent_cx {
             use opentelemetry::trace::{Span, TraceContextExt};
-            let snapshot = serde_json::to_string(&state.messages).unwrap_or_default();
+            let raw = serde_json::to_string(&state.messages).unwrap_or_default();
+            let snapshot = crate::observability::redact::redact_and_truncate(&raw);
             cx.span().set_attribute(opentelemetry::KeyValue::new(
                 crate::observability::attrs::FI_MESSAGES_SNAPSHOT,
                 snapshot,
