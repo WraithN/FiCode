@@ -57,7 +57,11 @@ pub struct CodeBlockRenderer;
 
 impl PartRenderer for CodeBlockRenderer {
     fn height(&self, part: &Part, _width: u16) -> u16 {
-        if let Part::CodeBlock { code, .. } = part {
+        if let Part::CodeBlock { code, for_context_only, .. } = part {
+            // 如果标记为仅用于上下文，不占用空间
+            if *for_context_only {
+                return 0;
+            }
             let lines = code.lines().count() as u16;
             // +2 for borders
             lines.max(1) + 2
@@ -67,7 +71,11 @@ impl PartRenderer for CodeBlockRenderer {
     }
 
     fn draw(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect, part: &Part, theme: &Theme, skip_lines: u16) {
-        if let Part::CodeBlock { code, language } = part {
+        if let Part::CodeBlock { code, language, for_context_only } = part {
+            // 如果标记为仅用于上下文，不渲染
+            if *for_context_only {
+                return;
+            }
             let syntect_theme = THEME_SET
                 .themes
                 .get("base16-ocean.dark")

@@ -87,12 +87,21 @@ pub enum Part {
         /// 工具执行耗时（毫秒），用于 TUI 展示性能信息
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration_ms: Option<u64>,
+        /// 工具结果元数据，用于前端展示额外信息（压缩状态、行数等）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<serde_json::Value>,
+        /// 仅用于上下文，不展示给用户（避免重复显示）
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        for_context_only: bool,
     },
     /// 工具执行错误（由 User 角色消息携带，回传给模型）
     ToolError {
         tool_call_id: String,
         content: String,
         error_message: String,
+        /// 仅用于上下文，不展示给用户（避免重复显示）
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        for_context_only: bool,
     },
     /// 推理/思考过程（如 Claude Extended Thinking）
     Reasoning {
@@ -119,6 +128,9 @@ pub enum Part {
     CodeBlock {
         language: String,
         code: String,
+        /// 仅用于上下文，不展示给用户（避免重复显示）
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        for_context_only: bool,
     },
     /// 系统通知（如压缩完成、Agent 切换等）
     #[serde(rename = "system_notice")]

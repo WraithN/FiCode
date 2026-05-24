@@ -802,6 +802,8 @@ mod tests {
                 tool_call_id: "tool_1".to_string(),
                 content: "file.txt".to_string(),
                 duration_ms: Some(120),
+                metadata: None,
+                for_context_only: false,
             },
         });
         assert_eq!(chat.turns[0].parts.len(), 2);

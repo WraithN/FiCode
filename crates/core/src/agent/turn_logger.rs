@@ -138,6 +138,7 @@ pub fn build_tool_result_logs(
                 tool_call_id,
                 content,
                 duration_ms,
+                ..
             } => (tool_call_id, content, duration_ms.unwrap_or(0), false),
             Part::ToolError {
                 tool_call_id,
@@ -232,6 +233,8 @@ mod tests {
             tool_call_id: "call_1".to_string(),
             content: "file.txt".to_string(),
             duration_ms: Some(42),
+            metadata: None,
+            for_context_only: false,
         }];
 
         let logs = build_tool_result_logs(&content_blocks, &tool_results);
@@ -253,6 +256,7 @@ mod tests {
             tool_call_id: "call_2".to_string(),
             content: "failed".to_string(),
             error_message: "not found".to_string(),
+            for_context_only: false,
         }];
 
         let logs = build_tool_result_logs(&content_blocks, &tool_results);

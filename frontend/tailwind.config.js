@@ -21,6 +21,18 @@ export default {
         warning: 'var(--color-warning)',
         'selection-bg': 'var(--color-selection-bg)',
         'selection-fg': 'var(--color-selection-fg)',
+        tauri: {
+          primary: '#24C8DB',
+          secondary: '#C084FC',
+          dark: '#020617',
+          darker: '#01030C',
+          card: '#0F172A',
+          border: '#1E293B',
+        },
+      },
+      fontFamily: {
+        inter: ['Inter', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
       },
     },
   },

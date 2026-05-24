@@ -4,10 +4,10 @@ import { apiClient } from '../../services/apiClient';
 import { LogEntry } from '../../types/api';
 
 const LEVEL_COLORS: Record<string, string> = {
-  INFO: 'text-success',
-  DEBUG: 'text-text-muted',
-  ERROR: 'text-error',
-  WARN: 'text-warning',
+  INFO: 'text-green-400',
+  DEBUG: 'text-gray-500',
+  ERROR: 'text-red-400',
+  WARN: 'text-yellow-400',
 };
 
 export const LogPanel: React.FC = () => {
@@ -65,27 +65,43 @@ export const LogPanel: React.FC = () => {
   if (!logOpen) return null;
 
   return (
-    <div className="absolute bottom-8 right-4 w-96 h-64 bg-bg-secondary border border-border rounded shadow-lg flex flex-col z-50">
-      <div className="h-8 flex items-center justify-between px-3 border-b border-border">
-        <span className="text-sm font-medium text-text-primary">Logs</span>
-        <button onClick={toggleLog} className="text-text-muted hover:text-text-primary">
-          ✕
+    <div className="absolute bottom-24 right-6 w-[450px] h-72 glass border border-tauri-border rounded-2xl shadow-2xl flex flex-col z-50">
+      <div className="h-12 flex items-center justify-between px-5 border-b border-tauri-border bg-tauri-card/30">
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4 text-tauri-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <span className="text-sm font-semibold gradient-text">Logs</span>
+        </div>
+        <button 
+          onClick={toggleLog} 
+          className="p-1.5 hover:bg-tauri-card rounded-lg transition-colors text-gray-400 hover:text-white"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
         </button>
       </div>
-      <div ref={scrollRef} className="flex-1 p-2 overflow-y-auto text-xs font-mono space-y-0.5">
+      <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto text-xs font-mono space-y-1.5 scrollbar-tauri">
         {error ? (
-          <p className="text-error">{error}</p>
+          <div className="p-3 bg-red-900/20 border border-red-800/30 rounded-lg text-red-400">
+            {error}
+          </div>
         ) : logs.length === 0 ? (
-          <p className="text-text-muted">No logs yet...</p>
+          <div className="flex items-center justify-center h-full text-gray-600">
+            No logs yet...
+          </div>
         ) : (
           logs.map((log, idx) => (
-            <div key={idx} className="flex gap-2">
-              <span className="text-text-muted shrink-0">{log.timestamp.split('T')[1]?.replace('Z', '') || log.timestamp}</span>
-              <span className={`shrink-0 font-bold ${LEVEL_COLORS[log.level] || 'text-text-secondary'}`}>
+            <div key={idx} className="flex gap-3 items-start p-2 rounded-lg hover:bg-tauri-card/20 transition-colors">
+              <span className="text-gray-600 shrink-0 select-none">
+                {log.timestamp.split('T')[1]?.replace('Z', '') || log.timestamp}
+              </span>
+              <span className={`shrink-0 font-bold ${LEVEL_COLORS[log.level] || 'text-gray-400'}`}>
                 {log.level}
               </span>
-              <span className="text-text-muted shrink-0">[{log.module}]</span>
-              <span className="text-text-secondary break-all">{log.message}</span>
+              <span className="text-gray-600 shrink-0">[{log.module}]</span>
+              <span className="text-gray-300 break-all">{log.message}</span>
             </div>
           ))
         )}

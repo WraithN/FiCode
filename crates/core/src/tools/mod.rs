@@ -1073,6 +1073,7 @@ pub async fn execute_tool_calls(
                         tool_call_id: id.clone(),
                         content: format!("Tool '{}' is not allowed in {} Agent", name, agent_name),
                         error_message: "Permission denied by agent profile".to_string(),
+                        for_context_only: false,
                     };
                     if let Ok(mut guard) = cb.lock() {
                         if let Some(ref mut callback) = *guard {
@@ -1101,6 +1102,7 @@ pub async fn execute_tool_calls(
                             tool_call_id: id.clone(),
                             content: error_msg.clone(),
                             error_message: error_msg,
+                            for_context_only: false,
                         };
                         if let Ok(mut guard) = cb.lock() {
                             if let Some(ref mut callback) = *guard {
@@ -1139,6 +1141,7 @@ pub async fn execute_tool_calls(
                                         tool_call_id: id.clone(),
                                         content: error_msg.clone(),
                                         error_message: error_msg,
+                                        for_context_only: false,
                                     };
                                     if let Ok(mut guard) = cb.lock() {
                                         if let Some(ref mut callback) = *guard {
@@ -1156,6 +1159,7 @@ pub async fn execute_tool_calls(
                                         tool_call_id: id.clone(),
                                         content: error_msg.clone(),
                                         error_message: error_msg,
+                                        for_context_only: false,
                                     };
                                     if let Ok(mut guard) = cb.lock() {
                                         if let Some(ref mut callback) = *guard {
@@ -1175,6 +1179,7 @@ pub async fn execute_tool_calls(
                                     tool_call_id: id.clone(),
                                     content: err.clone(),
                                     error_message: err,
+                                    for_context_only: false,
                                 };
                                 return error_part;
                             }
@@ -1228,6 +1233,7 @@ pub async fn execute_tool_calls(
                                     tool_call_id: id.clone(),
                                     content: content.clone(),
                                     error_message: content.clone(),
+                                    for_context_only: false,
                                 },
                             });
                         } else {
@@ -1242,6 +1248,8 @@ pub async fn execute_tool_calls(
                                     tool_call_id: id.clone(),
                                     content: display_content,
                                     duration_ms: Some(duration_ms),
+                                    metadata: None,
+                                    for_context_only: false,
                                 },
                             });
 
@@ -1256,6 +1264,7 @@ pub async fn execute_tool_calls(
                                         part: Part::CodeBlock {
                                             language: language.unwrap_or_default(),
                                             code: content.clone(),
+                                            for_context_only: false,
                                         },
                                     });
                                 }
@@ -1269,6 +1278,7 @@ pub async fn execute_tool_calls(
                         tool_call_id: id,
                         content: content.clone(),
                         error_message: content,
+                        for_context_only: false,
                     }
                 } else {
                     let compressed = crate::agent::compression::compress_tool_result(&content, is_aggressive, Some(&name));
@@ -1276,6 +1286,8 @@ pub async fn execute_tool_calls(
                         tool_call_id: id,
                         content: compressed,
                         duration_ms: Some(duration_ms),
+                        metadata: None,
+                        for_context_only: false,
                     }
                 }
             })

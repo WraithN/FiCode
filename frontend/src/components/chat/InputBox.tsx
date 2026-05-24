@@ -443,38 +443,48 @@ export const InputBox: React.FC = () => {
       : '';
 
   return (
-    <div className="p-4 bg-bg-secondary border-t border-border relative">
+    <div className="p-6 glass border-t border-tauri-border relative">
       {/* @ 文件选择器 */}
       {showFilePicker && (
-        <div className="absolute bottom-full left-4 right-4 mb-2 max-h-60 overflow-y-auto bg-bg-secondary border border-border rounded shadow-lg z-50">
-          <div className="px-3 py-1.5 text-xs font-medium text-text-muted border-b border-border bg-bg flex items-center justify-between">
-            <span>Select File</span>
+        <div className="absolute bottom-full left-6 right-6 mb-3 max-h-60 overflow-y-auto glass border border-tauri-border rounded-2xl shadow-2xl z-50">
+          <div className="px-4 py-3 text-sm font-semibold text-gray-300 border-b border-tauri-border bg-tauri-card/50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-tauri-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+              </svg>
+              <span>Select File</span>
+            </div>
             {pickerPath && (
-              <span className="text-text-muted font-mono truncate max-w-[200px]">{pickerPath}</span>
+              <span className="text-gray-500 font-mono truncate max-w-[200px] text-xs">{pickerPath}</span>
             )}
           </div>
           {pickerLoading ? (
-            <div className="px-3 py-4 text-sm text-text-muted">Loading...</div>
+            <div className="px-4 py-6 text-sm text-gray-500 flex items-center justify-center gap-2">
+              <div className="w-4 h-4 border-2 border-tauri-primary border-t-transparent rounded-full animate-spin"></div>
+              Loading...
+            </div>
           ) : pickerItems.length === 0 ? (
-            <div className="px-3 py-4 text-sm text-text-muted">No files</div>
+            <div className="px-4 py-6 text-sm text-gray-500 text-center">No files</div>
           ) : (
-            <>
+            <div className="scrollbar-tauri">
               {pickerPath && (
                 <div
-                  className="px-3 py-2 cursor-pointer text-sm text-text-muted hover:bg-bg-overlay flex items-center gap-2"
+                  className="px-4 py-3 cursor-pointer text-sm text-gray-400 hover:bg-tauri-card/50 flex items-center gap-3 transition-colors"
                   onClick={goUp}
                 >
-                  <span>📁</span>
+                  <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/>
+                  </svg>
                   <span>..</span>
                 </div>
               )}
               {pickerItems.map((entry, idx) => (
                 <div
                   key={entry.path}
-                  className={`px-3 py-2 cursor-pointer text-sm flex items-center gap-2 ${
+                  className={`px-4 py-3 cursor-pointer text-sm flex items-center gap-3 transition-all ${
                     idx === pickerIndex
-                      ? 'bg-bg-overlay text-brand'
-                      : 'text-text-primary hover:bg-bg-overlay'
+                      ? 'bg-tauri-card/70 text-tauri-primary border-l-2 border-tauri-primary'
+                      : 'text-gray-200 hover:bg-tauri-card/30'
                   }`}
                   onMouseEnter={() => setPickerIndex(idx)}
                   onClick={() => {
@@ -485,91 +495,116 @@ export const InputBox: React.FC = () => {
                     }
                   }}
                 >
-                  <span className="text-text-muted">{entry.is_dir ? '📁' : '📄'}</span>
+                  {entry.is_dir ? (
+                    <svg className="w-4 h-4 text-tauri-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                  )}
                   <span className="truncate">{entry.name}</span>
                 </div>
               ))}
-            </>
+            </div>
           )}
         </div>
       )}
 
       {/* 一级 Slash 指令菜单 */}
       {showMenu && filteredCommands.length > 0 && !submenuKind && (
-        <div className="absolute bottom-full left-4 right-4 mb-2 max-h-48 overflow-y-auto bg-bg-secondary border border-border rounded shadow-lg z-50">
-          {filteredCommands.map((cmd, idx) => (
-            <div
-              key={cmd.name}
-              className={`px-3 py-2 cursor-pointer text-sm flex items-center justify-between ${
-                idx === highlightIndex
-                  ? 'bg-bg-overlay text-brand'
-                  : 'text-text-primary hover:bg-bg-overlay'
-              }`}
-              onMouseEnter={() => setHighlightIndex(idx)}
-              onClick={() => confirmCommand(cmd)}
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-bold">/{cmd.name}</span>
-                <span className="text-text-muted text-xs">{cmd.description}</span>
+        <div className="absolute bottom-full left-6 right-6 mb-3 max-h-48 overflow-y-auto glass border border-tauri-border rounded-2xl shadow-2xl z-50">
+          <div className="scrollbar-tauri">
+            {filteredCommands.map((cmd, idx) => (
+              <div
+                key={cmd.name}
+                className={`px-4 py-3 cursor-pointer text-sm flex items-center justify-between transition-all ${
+                  idx === highlightIndex
+                    ? 'bg-tauri-card/70 gradient-text border-l-2 border-tauri-primary'
+                    : 'text-gray-200 hover:bg-tauri-card/30'
+                }`}
+                onMouseEnter={() => setHighlightIndex(idx)}
+                onClick={() => confirmCommand(cmd)}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="font-bold">/{cmd.name}</span>
+                  <span className="text-gray-500 text-xs">{cmd.description}</span>
+                </div>
+                {cmd.args_hint && (
+                  <span className="text-gray-500 text-xs font-mono bg-tauri-dark/50 px-2 py-1 rounded">
+                    {cmd.args_hint}
+                  </span>
+                )}
               </div>
-              {cmd.args_hint && (
-                <span className="text-text-muted text-xs font-mono">{cmd.args_hint}</span>
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 
       {/* 二级菜单 */}
       {submenuKind && (
-        <div className="absolute bottom-full left-4 right-4 mb-2 max-h-60 overflow-y-auto bg-bg-secondary border border-border rounded shadow-lg z-50">
-          <div className="px-3 py-1.5 text-xs font-medium text-text-muted border-b border-border bg-bg">
+        <div className="absolute bottom-full left-6 right-6 mb-3 max-h-60 overflow-y-auto glass border border-tauri-border rounded-2xl shadow-2xl z-50">
+          <div className="px-4 py-3 text-sm font-semibold gradient-text border-b border-tauri-border bg-tauri-card/50">
             {submenuTitle}
           </div>
-          {submenuLoading ? (
-            <div className="px-3 py-4 text-sm text-text-muted">Loading...</div>
-          ) : submenuItems.length === 0 ? (
-            <div className="px-3 py-4 text-sm text-text-muted">No items</div>
-          ) : (
-            submenuItems.map((item, idx) => (
-              <div
-                key={item.key}
-                className={`px-3 py-2 cursor-pointer text-sm flex items-center justify-between ${
-                  idx === submenuIndex
-                    ? 'bg-bg-overlay text-brand'
-                    : 'text-text-primary hover:bg-bg-overlay'
-                }`}
-                onMouseEnter={() => {
-                  setSubmenuIndex(idx);
-                  if (submenuKind === 'theme') previewTheme(idx);
-                }}
-                onClick={() => confirmSubmenuItem(item)}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-bold">{item.display}</span>
-                  <span className="text-text-muted text-xs">{item.desc}</span>
-                </div>
+          <div className="scrollbar-tauri">
+            {submenuLoading ? (
+              <div className="px-4 py-6 text-sm text-gray-500 flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-tauri-primary border-t-transparent rounded-full animate-spin"></div>
+                Loading...
               </div>
-            ))
-          )}
+            ) : submenuItems.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-gray-500 text-center">No items</div>
+            ) : (
+              submenuItems.map((item, idx) => (
+                <div
+                  key={item.key}
+                  className={`px-4 py-3 cursor-pointer text-sm flex items-center justify-between transition-all ${
+                    idx === submenuIndex
+                      ? 'bg-tauri-card/70 gradient-text border-l-2 border-tauri-primary'
+                      : 'text-gray-200 hover:bg-tauri-card/30'
+                  }`}
+                  onMouseEnter={() => {
+                    setSubmenuIndex(idx);
+                    if (submenuKind === 'theme') previewTheme(idx);
+                  }}
+                  onClick={() => confirmSubmenuItem(item)}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">{item.display}</span>
+                    <span className="text-gray-500 text-xs">{item.desc}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
-      <div className="flex gap-2">
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          placeholder="Type a message..."
-          rows={2}
-          className="flex-1 bg-bg text-text-primary border border-border rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-brand"
-        />
+      <div className="flex gap-3">
+        <div className="flex-1 relative">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            placeholder="Type a message... or / for commands, @ for files"
+            rows={2}
+            className="w-full bg-tauri-dark/50 text-gray-100 border border-tauri-border rounded-2xl px-5 py-4 text-sm resize-none focus:outline-none focus:border-tauri-primary focus:ring-1 focus:ring-tauri-primary/30 scrollbar-tauri placeholder-gray-600"
+          />
+          <div className="absolute right-4 bottom-4 text-xs text-gray-600 font-mono">
+            ⇧⏎ for newline
+          </div>
+        </div>
         <button
           onClick={handleSubmit}
-          className="px-4 py-2 bg-brand text-bg rounded text-sm font-medium hover:bg-accent-hover transition-colors"
+          disabled={!input.trim()}
+          className="px-6 py-4 gradient-bg text-white rounded-2xl text-sm font-semibold hover:shadow-lg hover:shadow-tauri-primary/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
         >
-          Send
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
         </button>
       </div>
     </div>

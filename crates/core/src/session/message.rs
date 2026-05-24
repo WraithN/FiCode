@@ -86,6 +86,7 @@ mod tests {
             tool_call_id: "call_123".to_string(),
             content: "some output".to_string(),
             error_message: "something went wrong".to_string(),
+            for_context_only: false,
         };
         let json = serde_json::to_string(&part).unwrap();
         assert!(json.contains("\"type\":\"tool_error\""));
@@ -99,6 +100,7 @@ mod tests {
                 tool_call_id,
                 content,
                 error_message,
+                ..
             } => {
                 assert_eq!(tool_call_id, "call_123");
                 assert_eq!(content, "some output");

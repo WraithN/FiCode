@@ -518,6 +518,7 @@ fn build_user_messages(msg: &Message) -> Vec<OpenAiMessage> {
                 tool_call_id,
                 content: c,
                 duration_ms: _,
+                ..
             } => {
                 tool_results.push(OpenAiMessage {
                     role: "tool".to_string(),

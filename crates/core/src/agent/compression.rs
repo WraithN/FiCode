@@ -585,7 +585,7 @@ mod tests {
                 Part::ToolUse { id: "t1".to_string(), name: "bash".to_string(), arguments: serde_json::Value::Null },
             ]),
             Message::new("s".to_string(), Role::User, vec![
-                Part::ToolResult { tool_call_id: "t1".to_string(), content: "result".to_string(), duration_ms: None },
+                Part::ToolResult { tool_call_id: "t1".to_string(), content: "result".to_string(), duration_ms: None, metadata: None, for_context_only: false },
             ]),
             Message::new("s".to_string(), Role::User, vec![Part::Text { text: "u2".to_string() }]),
             Message::new("s".to_string(), Role::Assistant, vec![Part::Text { text: "a2".to_string() }]),

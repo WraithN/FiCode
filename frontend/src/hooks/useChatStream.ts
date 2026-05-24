@@ -22,6 +22,7 @@ export function useChatStream() {
 
     try {
       const stream = apiClient.chatStream(currentSessionId, message, currentAgent);
+      let receivedDone = false;
 
       for await (const event of stream) {
         if (event.type === 'compression_status') {
@@ -39,9 +40,26 @@ export function useChatStream() {
           }
           continue;
         }
+        
+        if (event.type === 'done') {
+          receivedDone = true;
+        }
+        
         handleSseEvent(event, turnId, setAgent, appendPart, completeTurn, setCurrentSessionId, setIsGenerating, setPending);
       }
+
+      // 如果没有收到 Done 事件，我们手动完成这个回合
+      if (!receivedDone) {
+        console.warn('[ChatStream] Stream ended without Done event, manually completing turn');
+        // 检查是否有当前 sessionId
+        if (currentSessionId) {
+          setCurrentSessionId(currentSessionId);
+        }
+        completeTurn(turnId);
+        setIsGenerating(false);
+      }
     } catch (err) {
+      console.error('[ChatStream] Error:', err);
       setIsGenerating(false);
       appendPart(turnId, {
         type: 'tool_error',
