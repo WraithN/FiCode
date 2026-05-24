@@ -7,19 +7,30 @@ edition = "2021"
 name = "fi_code_tests"
 path = "lib.rs"
 
-[[test]]
-name = "e2e_cli"
-path = "e2e/cli_e2e.rs"
+# ============================================
+# E2E 测试 - TUI 相关
+# ============================================
 
 [[test]]
-name = "e2e_tui"
-path = "e2e/tui_e2e.rs"
-
-
+name = "e2e_tui_cli"
+path = "e2e-tui/cli_e2e.rs"
 
 [[test]]
-name = "tui_flow_e2e"
-path = "e2e/tui_flow_e2e.rs"
+name = "e2e_tui_basic"
+path = "e2e-tui/tui_e2e.rs"
+
+[[test]]
+name = "e2e_tui_flow"
+path = "e2e-tui/tui_flow_e2e.rs"
+
+# ============================================
+# E2E 测试 - Web 相关 (Rust)
+# ============================================
+# (待添加，使用 reqwest 测试 HTTP API)
+
+# ============================================
+# BDD 测试
+# ============================================
 
 [[test]]
 name = "bdd"
