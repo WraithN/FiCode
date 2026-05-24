@@ -182,3 +182,12 @@ pub const TOOL_RESULT_COMPRESS_HEAD: usize = 5_000;
 
 /// 工具结果压缩后保留的尾部字符数
 pub const TOOL_RESULT_COMPRESS_TAIL: usize = 10_000;
+
+/// Bash 命令结果压缩阈值（字节数）
+pub const BASH_COMPRESS_THRESHOLD: usize = 30_000;
+
+/// Read 工具结果压缩阈值（字节数）
+pub const READ_COMPRESS_THRESHOLD: usize = 500 * 1024;
+
+/// 默认工具结果压缩阈值（字节数）
+pub const DEFAULT_COMPRESS_THRESHOLD: usize = 500 * 1024;

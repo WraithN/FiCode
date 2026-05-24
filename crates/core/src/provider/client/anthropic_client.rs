@@ -253,6 +253,7 @@ fn convert_part_to_anthropic(part: &Part) -> serde_json::Value {
             tool_call_id,
             content: c,
             duration_ms: _,
+            ..
         } => json!({
             "type": "tool_result",
             "tool_use_id": tool_call_id,

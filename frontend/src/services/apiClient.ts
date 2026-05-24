@@ -135,6 +135,8 @@ export class ApiClient {
     let buffer = '';
     let eventLines: string[] = [];
 
+    let lastSessionId: string | null = null;
+    
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -156,6 +158,10 @@ export class ApiClient {
             if (event.type === 'done') {
               return event.session_id;
             }
+            // 保存最后一个带 session_id 的消息
+            if ('session_id' in event && typeof event.session_id === 'string') {
+              lastSessionId = event.session_id;
+            }
           } catch {
             console.warn('[SSE] Invalid JSON:', jsonStr.slice(0, 200));
           }
@@ -163,6 +169,12 @@ export class ApiClient {
       }
     }
 
+    // 如果没有收到 Done 事件，但有之前保存的 session_id，返回它
+    if (lastSessionId) {
+      console.warn('[SSE] Stream ended without Done event, using last known session_id');
+      return lastSessionId;
+    }
+    
     throw new Error('SSE stream ended without Done event');
   }
 }
