@@ -270,6 +270,8 @@ async fn run_agent_chat(
 
     // 解析 @path 并注入文件内容
     let message = inject_file_contents(&message);
+    // 缓存原始用户文本：后续 ChatSpan input/output 需要原文（user_msg 会将 message move 进去）
+    let original_message = message.clone();
 
     // 添加用户消息
     let user_msg = Message::new(
@@ -339,17 +341,45 @@ async fn run_agent_chat(
         "[Server] agent_loop starting | messages={}",
         loop_state.messages.len()
     );
-    if let Err(e) = agent_loop(
+
+    // Task 4.1：在 agent_loop 之前打开 ChatSpan，作为本次请求的根 trace
+    use crate::observability::otel;
+    let chat_span = otel::start_chat_span(&session_id, &original_message, agent_type);
+    let chat_cx = chat_span.context();
+
+    let agent_loop_result = agent_loop(
         client.as_ref(),
         &mut loop_state,
         agent_type,
         &mut on_text,
         &mut on_tool_event,
         Some(&sse_sender),
+        Some(&chat_cx),
     )
-    .await
-    {
+    .await;
+
+    // 提取最后一条 Assistant 消息的文本作为 ChatSpan output
+    let final_assistant_text: String = loop_state
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == Role::Assistant)
+        .map(|m| {
+            m.parts
+                .iter()
+                .filter_map(|p| match p {
+                    crate::session::message::Part::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    chat_span.set_output(&final_assistant_text);
+
+    if let Err(e) = agent_loop_result {
         log_error!("[Server] agent_loop error | {}", e);
+        chat_span.record_error(&e.to_string());
         let _ = sse_sender
             .send(SseEvent::Error {
                 message: format!("Agent loop error: {}", e),
@@ -358,6 +388,7 @@ async fn run_agent_chat(
     } else {
         log_info!("[Server] agent_loop completed successfully");
     }
+    // chat_span 在作用域结束时 drop，自动 end
 
     log_info!(
         "[Server] run_agent_chat end | prompt_tokens={} | completion_tokens={}",

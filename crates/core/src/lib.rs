@@ -34,3 +34,4 @@ pub mod theme_preset;
 pub mod tools;
 pub mod tui_event;
 pub mod utils;
+pub mod observability;

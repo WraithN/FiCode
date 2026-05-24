@@ -22,5 +22,4 @@
 pub mod file_type;
 pub mod log;
 pub mod log_store;
-pub mod turn_log_cli;
 pub mod workspace;

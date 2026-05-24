@@ -414,6 +414,35 @@ cargo run --bin bdd
 
 ---
 
+## 6.5 可观测体系（Langfuse via OpenTelemetry）
+
+接入 [Langfuse](https://langfuse.com/) 作为外部 LLM 可观测后端，全链路 trace（chat → turn → llm.generation → tool / compression）。
+
+- **模块**：`crates/core/src/observability/`
+- **数据流**：业务调用 → `otel::*` facade → `opentelemetry_sdk::TracerProvider` + `BatchSpanProcessor` → `CompositeSpanExporter` 同时 fan-out 到：
+  - `LocalJsonlExporter`（必成功；写 `~/.config/fi-code/logs/spans.jsonl`，append-only + status_patch 行）
+  - `OtlpHttpExporter`（可失败；POST 到 Langfuse `/api/public/otel/v1/traces`，HTTP/protobuf + Basic Auth）
+- **配置优先级**：环境变量 > `config.json`：
+  - `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（必填，缺一则降级仅写本地）
+  - `LANGFUSE_HOST`（默认 `https://cloud.langfuse.com`，支持自部署 URL）
+  - `LANGFUSE_ENVIRONMENT` / `LANGFUSE_RELEASE`
+  - `config.json` 节点：`observability.langfuse.{publicKey,secretKey,host,environment,release,enabled}`（camelCase 与项目其他配置一致）
+- **失败降级**：
+  - 缺凭证或 OTLP 不可达：`init()` 静默降级（仅本地写），不阻塞业务
+  - `LocalJsonl` 写失败：`log_error!`；OTel SDK 会重试一次
+  - OTLP 失败：`log_warn!`；保留 pending 状态；启动期 daemon 重新识别
+- **重发 daemon**：进程启动时扫描 spans.jsonl 末尾 10000 行，识别 `lf_status="pending"` 且 7 天内的 span，v1 仅标记为 `skipped` 防止重复扫描；真重发交给 v2
+- **凭证脱敏**：所有 attribute 内容经 `redact::redact_and_truncate()` 处理，先按 UTF-8 char 边界截断到 50KB，再用 9 种正则打码（`sk-*` / `sk-ant-*` / `sk-lf-*` / `pk-lf-*` / `Bearer xxx` / `Basic xxx` / `password=xxx` 等）
+- **接入范围**：仅 `fi-code-core`；CLI / TUI / Server / Desktop 通过依赖自动继承。在各 `main.rs` 启动期调 `observability::init(&config)`，退出时调 `observability::shutdown()`
+- **业务侧 facade**（`observability::otel`）：`start_chat_span()` / `start_turn_span()` / `start_llm_generation()` / `start_tool_span()` / `start_compression_span()`，所有 guard struct 实现 Drop 自动 end span；子 span 通过 `Option<&Context>` 接收 parent
+- **AIClient trait** 新增 `fn model_name()` 与 `fn provider_kind()`，用于 LLM generation span 的 `gen_ai.request.model` 与 `gen_ai.system` 属性
+- **详见 spec**：`docs/superpowers/specs/2026-05-22-langfuse-observability-design.md`
+- **实施计划**：`docs/superpowers/plans/2026-05-22-langfuse-observability.md`
+
+> **重要变更**：废弃了原有的 `TurnLogger`（`crates/core/src/agent/turn_logger.rs`）与 `turn_log_cli`（`crates/core/src/utils/turn_log_cli.rs`），统一改用 OTel pipeline。`~/.config/fi-code/logs/turns.jsonl` 不再被写入；`fi-code-cli logs` 现在读取 `spans.jsonl`。检测到旧 `turns.jsonl` 会打印 warn 提示用户备份后删除。
+
+---
+
 ## 7. 安全注意事项
 
 在修改或扩展以下逻辑时，必须保持现有的安全防线：
@@ -482,7 +511,28 @@ docs/
 
 ---
 
-## 10. MIT 许可证头模板
+## 10. 前端设计规范
+
+在开发或修改web端界面时，请遵循 `DESIGN.md` 中的设计规范：
+
+### 10.1 快速参考
+
+- **色彩系统**：使用Tauri青蓝紫渐变为主色调，深暗色背景
+- **玻璃拟态**：使用`.glass`类配合backdrop-filter
+- **布局约束**：三栏布局，Header高度固定64px，边栏宽度256px
+- **组件规范**：详见 `DESIGN.md` 中的完整设计文档
+
+### 10.2 设计原则
+
+1. 保持现代感 - 使用玻璃拟态效果和渐变
+2. 突出专业性 - 代码优先展示
+3. 提供流畅交互 - 实时反馈和状态切换动画
+
+详细规范请参考项目根目录的 `DESIGN.md` 文件。
+
+---
+
+## 11. MIT 许可证头模板
 
 所有新建或修改的 Rust 源文件（`.rs`）均须在文件最顶部粘贴以下许可证头：
 

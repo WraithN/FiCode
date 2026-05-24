@@ -74,6 +74,14 @@ impl OpenAiClient {
 
 #[async_trait::async_trait]
 impl AIClient for OpenAiClient {
+    fn model_name(&self) -> &str {
+        &self.model_name
+    }
+
+    fn provider_kind(&self) -> &'static str {
+        "openai"
+    }
+
     async fn stream_message(
         &self,
         system_prompt: &str,
