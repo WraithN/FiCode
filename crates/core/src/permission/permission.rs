@@ -117,11 +117,17 @@ impl PermissionAction {
                 RiskType::Low,
                 "tool ask_for_question does not require permission check".to_string(),
             )
-        } else {
+        } else if tool_name == "write" || tool_name == "edit" {
             (
                 Self::Ask,
+                RiskType::High,
+                format!("tool {} may modify files, requires confirmation", tool_name),
+            )
+        } else {
+            (
+                Self::Allow,
                 RiskType::Low,
-                format!("tool {} requires user confirmation", tool_name),
+                format!("tool {} auto-approved (low risk)", tool_name),
             )
         };
 
@@ -337,11 +343,26 @@ mod tests {
     }
 
     #[test]
-    fn test_other_tool_ask() {
+    fn test_write_edit_high_risk_ask() {
         let params = HashMap::new();
-        let (action, risk, _) = PermissionAction::match_action("write", &params);
+        let (action, risk, reason) = PermissionAction::match_action("write", &params);
         assert_eq!(action, PermissionAction::Ask);
+        assert_eq!(risk, RiskType::High);
+        assert!(reason.contains("modify files"));
+
+        let (action, risk, reason) = PermissionAction::match_action("edit", &params);
+        assert_eq!(action, PermissionAction::Ask);
+        assert_eq!(risk, RiskType::High);
+        assert!(reason.contains("modify files"));
+    }
+
+    #[test]
+    fn test_other_tools_auto_allow() {
+        let params = HashMap::new();
+        let (action, risk, reason) = PermissionAction::match_action("some_unknown_tool", &params);
+        assert_eq!(action, PermissionAction::Allow);
         assert_eq!(risk, RiskType::Low);
+        assert!(reason.contains("auto-approved"));
     }
 
     #[test]
