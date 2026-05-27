@@ -267,6 +267,33 @@ impl AgentWorld {
                                 task_count: None,
                             }
                         }
+                        Ev::QuestionAsk { tool_call_id, options, recommended, .. } => {
+                            // BDD 测试中自动回答 question_ask：选择推荐选项或第一个选项
+                            let answer = if let Some(rec_id) = recommended {
+                                options.iter().find(|o| o.id == *rec_id).map(|o| json!({"type": "option", "id": o.id.clone(), "label": o.label.clone()}))
+                            } else {
+                                options.first().map(|o| json!({"type": "option", "id": o.id.clone(), "label": o.label.clone()}))
+                            };
+                            if let Some(ans) = answer {
+                                let client = reqwest::Client::new();
+                                let _ = client
+                                    .post(format!("http://127.0.0.1:{}/api/question/respond", self.port))
+                                    .json(&json!({
+                                        "tool_call_id": tool_call_id,
+                                        "answer": ans
+                                    }))
+                                    .send()
+                                    .await;
+                            }
+                            SseEvent {
+                                event_type: "QuestionAsk".to_string(),
+                                content: None,
+                                tool_name: None,
+                                tool_args: None,
+                                plan_id: None,
+                                task_count: None,
+                            }
+                        }
                     };
                     let is_done = matches!(event, Ev::Done { .. });
                     self.events.push(sse_event);

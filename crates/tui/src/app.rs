@@ -1040,6 +1040,10 @@ impl TuiApp {
                             reason: reason.clone(),
                         });
                     }
+                    SseEvent::QuestionAsk { question, .. } => {
+                        log_info!("[Client] SSE QuestionAsk | question={}", question);
+                        // TUI 模式下暂不支持 question_ask，记录日志即可
+                    }
                 }
                 self.chat.handle_sse_event(sse_event);
                 if let SseEvent::Done { session_id } = &sse_event {

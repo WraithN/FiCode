@@ -251,6 +251,9 @@ impl TuiClient {
                             SseEvent::PermissionAsk { tool_name, risk, .. } => {
                                 format!("PermissionAsk(tool={} risk={})", tool_name, risk)
                             }
+                            SseEvent::QuestionAsk { question, .. } => {
+                                format!("QuestionAsk(question={})", question)
+                            }
                         };
                         log_debug!("[Client] HTTP SSE event | {}", event_preview);
                         if let SseEvent::Done { session_id: sid } = &event {

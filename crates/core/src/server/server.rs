@@ -192,6 +192,10 @@ impl Server {
             .route(
                 "/api/permission/respond",
                 post(crate::server::api::permission_api::handle_permission_respond),
+            )
+            .route(
+                "/api/question/respond",
+                post(crate::server::api::permission_api::handle_question_respond),
             );
 
         // 如果找到 frontend/dist，挂载静态文件服务

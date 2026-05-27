@@ -308,6 +308,15 @@ pub enum SseEvent {
         risk: String,
         reason: String,
     },
+    /// 用户问题询问事件（ask_for_question 工具触发）
+    #[serde(rename = "question_ask")]
+    QuestionAsk {
+        tool_call_id: String,
+        question: String,
+        options: Vec<crate::tui_event::QuestionOption>,
+        recommended: Option<String>,
+        allow_custom: bool,
+    },
 }
 
 /// 任务计划中的单个任务项。

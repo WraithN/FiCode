@@ -80,6 +80,13 @@ export class ApiClient {
     return this.post<unknown>('/api/permission/respond', { tool_call_id: toolCallId, approved });
   }
 
+  async respondQuestion(
+    toolCallId: string,
+    answer: { type: 'option'; id: string; label: string } | { type: 'custom'; value: string }
+  ): Promise<unknown> {
+    return this.post<unknown>('/api/question/respond', { tool_call_id: toolCallId, answer });
+  }
+
   async *subscribeLogs(): AsyncGenerator<LogEntry, void, unknown> {
     const resp = await fetch(`${this.baseUrl}/api/logs/stream`);
     if (!resp.ok) throw new Error(`Log stream failed: ${resp.status}`);

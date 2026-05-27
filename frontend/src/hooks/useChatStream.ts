@@ -12,7 +12,7 @@ export function useChatStream() {
   const { currentSessionId, setCurrentSessionId } = useSessionStore();
   const { startTurn, appendPart, completeTurn, setAgent, setIsGenerating } = useChatStore();
   const { setCompressionStatus } = useCompressionStore();
-  const { setPending } = usePermissionStore();
+  const { setPendingPermission, setPendingQuestion } = usePermissionStore();
 
   const send = useCallback(async (message: string) => {
     if (!message.trim()) return;
@@ -45,7 +45,7 @@ export function useChatStream() {
           receivedDone = true;
         }
         
-        handleSseEvent(event, turnId, setAgent, appendPart, completeTurn, setCurrentSessionId, setIsGenerating, setPending);
+        handleSseEvent(event, turnId, setAgent, appendPart, completeTurn, setCurrentSessionId, setIsGenerating, setPendingPermission, setPendingQuestion);
       }
 
       // 如果没有收到 Done 事件，我们手动完成这个回合
@@ -68,7 +68,7 @@ export function useChatStream() {
         error_message: 'Stream error',
       });
     }
-  }, [currentSessionId, currentAgent, startTurn, appendPart, completeTurn, setAgent, setIsGenerating, setCurrentSessionId, setCompressionStatus]);
+  }, [currentSessionId, currentAgent, startTurn, appendPart, completeTurn, setAgent, setIsGenerating, setCurrentSessionId, setCompressionStatus, setPendingPermission, setPendingQuestion]);
 
   const stop = useCallback(() => {
     setIsGenerating(false);
@@ -85,7 +85,8 @@ function handleSseEvent(
   completeTurn: (turnId: string) => void,
   setCurrentSessionId: (id: string | null) => void,
   setIsGenerating: (generating: boolean) => void,
-  setPending: (item: { toolCallId: string; toolName: string; risk: string; reason: string } | null) => void
+  setPendingPermission: (item: { toolCallId: string; toolName: string; risk: string; reason: string } | null) => void,
+  setPendingQuestion: (item: { toolCallId: string; question: string; options: { id: string; label: string; description?: string }[]; recommended?: string; allowCustom: boolean } | null) => void
 ) {
   switch (event.type) {
     case 'message':
@@ -115,11 +116,20 @@ function handleSseEvent(
       // TODO: display task progress in UI
       break;
     case 'permission_ask':
-      setPending({
+      setPendingPermission({
         toolCallId: event.tool_call_id,
         toolName: event.tool_name,
         risk: event.risk,
         reason: event.reason,
+      });
+      break;
+    case 'question_ask':
+      setPendingQuestion({
+        toolCallId: event.tool_call_id,
+        question: event.question,
+        options: event.options,
+        recommended: event.recommended,
+        allowCustom: event.allow_custom,
       });
       break;
   }

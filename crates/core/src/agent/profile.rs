@@ -136,6 +136,7 @@ impl AgentProfile {
                 "web_fetch",
                 "create_task_plan",
                 "handle_task_plan",
+                "ask_for_question",
             ]
             .iter()
             .map(|&s| s.to_string())
@@ -269,7 +270,7 @@ mod tests {
         assert!(!profile.tool_filter.allows("edit"));
         assert!(!profile.tool_filter.allows("git_add"));
         assert!(!profile.tool_filter.allows("git_commit"));
-        assert!(!profile.tool_filter.allows("ask_for_question"));
+        assert!(profile.tool_filter.allows("ask_for_question"));
         assert!(!profile.tool_filter.allows("use_skill"));
     }
 }

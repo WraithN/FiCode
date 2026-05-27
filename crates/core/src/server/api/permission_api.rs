@@ -24,6 +24,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::log_debug;
+use crate::tui_event::QuestionAnswer;
 
 /// 权限确认请求体
 #[derive(Deserialize, Debug)]
@@ -61,6 +62,31 @@ impl<T> ApiResponse<T> {
     }
 }
 
+/// 问题回答请求体
+#[derive(Deserialize, Debug)]
+pub struct QuestionRespondRequest {
+    pub tool_call_id: String,
+    pub answer: QuestionAnswerJson,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type")]
+pub enum QuestionAnswerJson {
+    #[serde(rename = "option")]
+    Option { id: String, label: String },
+    #[serde(rename = "custom")]
+    Custom { value: String },
+}
+
+impl From<QuestionAnswerJson> for QuestionAnswer {
+    fn from(val: QuestionAnswerJson) -> Self {
+        match val {
+            QuestionAnswerJson::Option { id, label } => QuestionAnswer::Option { id, label },
+            QuestionAnswerJson::Custom { value } => QuestionAnswer::Custom(value),
+        }
+    }
+}
+
 /// 处理权限确认响应
 /// 前端/TUI 用户在收到 PermissionAsk SSE 事件后，通过此端点回复确认或拒绝
 pub async fn handle_permission_respond(
@@ -75,5 +101,23 @@ pub async fn handle_permission_respond(
     match crate::permission::respond_permission(&req.tool_call_id, req.approved).await {
         Ok(()) => Json(ApiResponse::success(Value::Null)),
         Err(e) => Json(ApiResponse::error(e, "PERMISSION_NOT_FOUND")),
+    }
+}
+
+/// 处理问题回答响应
+/// 前端用户在收到 QuestionAsk SSE 事件后，通过此端点返回答案
+pub async fn handle_question_respond(
+    Json(req): Json<QuestionRespondRequest>,
+) -> Json<ApiResponse<Value>> {
+    log_debug!(
+        "[API] question/respond | tool_call_id={} | answer={:?}",
+        req.tool_call_id,
+        req.answer
+    );
+
+    let answer: QuestionAnswer = req.answer.into();
+    match crate::tools::respond_question(&req.tool_call_id, answer).await {
+        Ok(()) => Json(ApiResponse::success(Value::Null)),
+        Err(e) => Json(ApiResponse::error(e, "QUESTION_NOT_FOUND")),
     }
 }

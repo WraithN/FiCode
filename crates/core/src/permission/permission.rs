@@ -111,6 +111,12 @@ impl PermissionAction {
                 RiskType::Low,
                 format!("tool {} is in allowlist", tool_name),
             )
+        } else if tool_name == "ask_for_question" {
+            (
+                Self::Allow,
+                RiskType::Low,
+                "tool ask_for_question does not require permission check".to_string(),
+            )
         } else {
             (
                 Self::Ask,

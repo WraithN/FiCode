@@ -82,16 +82,15 @@ export const AppLayout: React.FC = () => {
         <LeftDrawer />
 
         {/* 主内容区 */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 relative">
           <ChatPanel />
+          <PermissionDialog />
           <InputBox />
         </div>
       </div>
 
       {/* 日志面板 */}
       <LogPanel />
-      {/* 权限对话框 */}
-      <PermissionDialog />
     </div>
   );
 };

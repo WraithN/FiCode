@@ -7,12 +7,24 @@ export interface PermissionAskItem {
   reason: string;
 }
 
+export interface QuestionAskItem {
+  toolCallId: string;
+  question: string;
+  options: { id: string; label: string; description?: string }[];
+  recommended?: string;
+  allowCustom: boolean;
+}
+
 interface PermissionState {
-  pending: PermissionAskItem | null;
-  setPending: (item: PermissionAskItem | null) => void;
+  pendingPermission: PermissionAskItem | null;
+  setPendingPermission: (item: PermissionAskItem | null) => void;
+  pendingQuestion: QuestionAskItem | null;
+  setPendingQuestion: (item: QuestionAskItem | null) => void;
 }
 
 export const usePermissionStore = create<PermissionState>((set) => ({
-  pending: null,
-  setPending: (item) => set({ pending: item }),
+  pendingPermission: null,
+  setPendingPermission: (item) => set({ pendingPermission: item }),
+  pendingQuestion: null,
+  setPendingQuestion: (item) => set({ pendingQuestion: item }),
 }));

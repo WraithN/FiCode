@@ -74,6 +74,59 @@ pub fn get_event_tx() -> Option<mpsc::Sender<AppEvent>> {
 }
 
 // =============================================================================
+// 全局问题响应通道：供 Web/Server 模式下 ask_for_question 异步等待前端回答
+// =============================================================================
+
+use std::time::Duration;
+use tokio::sync::oneshot;
+
+type QuestionWebResponseSender = oneshot::Sender<QuestionAnswer>;
+static QUESTION_RESPONSES: LazyLock<tokio::sync::Mutex<HashMap<String, QuestionWebResponseSender>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+
+/// 发送问题询问请求，等待用户通过 API 响应（60 秒超时）
+pub async fn wait_question_response(tool_call_id: &str) -> Result<QuestionAnswer, String> {
+    let (tx, rx) = oneshot::channel();
+    {
+        let mut map = QUESTION_RESPONSES.lock().await;
+        map.insert(tool_call_id.to_string(), tx);
+    }
+
+    log_debug!("question waiting | tool_call_id={}", tool_call_id);
+
+    match tokio::time::timeout(Duration::from_secs(60), rx).await {
+        Ok(Ok(answer)) => {
+            log_debug!("question resolved | tool_call_id={} | answer={:?}", tool_call_id, answer);
+            Ok(answer)
+        }
+        Ok(Err(_)) => {
+            let mut map = QUESTION_RESPONSES.lock().await;
+            map.remove(tool_call_id);
+            Err("Question response channel closed".to_string())
+        }
+        Err(_) => {
+            let mut map = QUESTION_RESPONSES.lock().await;
+            map.remove(tool_call_id);
+            Err("Question response timeout (60s)".to_string())
+        }
+    }
+}
+
+/// 用户响应问题询问
+pub async fn respond_question(tool_call_id: &str, answer: QuestionAnswer) -> Result<(), String> {
+    let mut map = QUESTION_RESPONSES.lock().await;
+    if let Some(tx) = map.remove(tool_call_id) {
+        tx.send(answer)
+            .map_err(|_| "Failed to send question response".to_string())
+    } else {
+        Err(format!(
+            "Question request {} not found or already timed out",
+            tool_call_id
+        ))
+    }
+}
+
+// =============================================================================
 // 辅助函数：从 JSON 对象中提取字符串参数
 // =============================================================================
 // `and_then` 是 Option/Result 的链式操作方法：
@@ -1219,7 +1272,69 @@ pub async fn execute_tool_calls(
 
                 log_info!("calling tool: ${}", name);
                 log_debug!("execute_tool_call | name={} | args={}", name, arguments);
-                let (content, is_error, duration_ms) = execute_single_tool_call(&id, &name, &arguments).await;
+
+                // ask_for_question 在 Web 模式下通过 SSE 与前端交互
+                let (content, is_error, duration_ms) = if name == "ask_for_question" && is_web {
+                    let input: HashMap<String, serde_json::Value> = match &arguments {
+                        serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                        _ => HashMap::new(),
+                    };
+
+                    let question = input
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    let options: Vec<crate::tui_event::QuestionOption> = input
+                        .get("options")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    let recommended = input
+                        .get("recommended")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    let allow_custom = input
+                        .get("allow_custom")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
+                    // 通过 SSE 发送 QuestionAsk 事件
+                    if let Ok(mut guard) = cb.lock() {
+                        if let Some(ref mut callback) = *guard {
+                            let _ = callback(SseEvent::QuestionAsk {
+                                tool_call_id: id.clone(),
+                                question: question.clone(),
+                                options: options.clone(),
+                                recommended: recommended.clone(),
+                                allow_custom,
+                            });
+                        }
+                    }
+
+                    match wait_question_response(&id).await {
+                        Ok(answer) => {
+                            let result = serde_json::to_string(&answer)
+                                .map_err(|e| format!("Serialize error: {}", e))
+                                .unwrap_or_default();
+                            log_debug!("execute_tool_call question answered | name={} | id={}", name, id);
+                            (result, false, 0)
+                        }
+                        Err(e) => {
+                            log_debug!("execute_tool_call question error | name={} | id={} | err={}", name, id, e);
+                            (format!("Error: {}", e), true, 0)
+                        }
+                    }
+                } else {
+                    execute_single_tool_call(&id, &name, &arguments).await
+                };
                 // 记录工具执行结果到 ToolSpan（drop 时自动结束 span）
                 // 注意：tool_span 已在权限检查前启动（位于 input 解析之后），以便 Ask 流程上报 permission_ask 事件
                 tool_span.record_result(&content, is_error);
