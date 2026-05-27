@@ -9,6 +9,7 @@ interface ChatState {
   currentAgent: AgentType;
   startTurn: (userMessage: string) => string;
   appendPart: (turnId: string, part: Part) => void;
+  updatePart: (turnId: string, partIndex: number, updater: (part: Part) => Part) => void;
   completeTurn: (turnId: string) => void;
   setAgent: (agent: AgentType) => void;
   setIsGenerating: (generating: boolean) => void;
@@ -45,6 +46,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return { ...turn, parts: [...turn.parts.slice(0, -1), merged] };
         }
         return { ...turn, parts: [...turn.parts, part] };
+      }),
+    }));
+  },
+
+  updatePart: (turnId: string, partIndex: number, updater: (part: Part) => Part) => {
+    set((state) => ({
+      turns: state.turns.map((turn) => {
+        if (turn.id !== turnId) return turn;
+        const newParts = [...turn.parts];
+        if (partIndex >= 0 && partIndex < newParts.length) {
+          newParts[partIndex] = updater(newParts[partIndex]);
+        }
+        return { ...turn, parts: newParts };
       }),
     }));
   },
