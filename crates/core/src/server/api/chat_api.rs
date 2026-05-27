@@ -66,6 +66,13 @@ pub async fn handle_chat_endpoint(
         return Json(resp).into_response();
     }
 
+    // 读取语言偏好并设置
+    let lang = headers
+        .get("X-Lang")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("en");
+    crate::i18n::set_language(lang);
+
     let agent_type = req.agent.unwrap_or_default();
     log_info!("[Server] handle_chat_endpoint | agent={:?}", agent_type);
 

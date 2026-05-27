@@ -1,3 +1,4 @@
+import i18n from '../i18n';
 import { SseEvent } from '../types/sse';
 import { AgentType } from '../types/agent';
 import { ApiResponse, FileTreeResult, LogEntry } from '../types/api';
@@ -39,8 +40,18 @@ export class ApiClient {
     return data.result;
   }
 
+  private getHeaders(): Record<string, string> {
+    const lang = i18n.language || 'en';
+    return {
+      'Content-Type': 'application/json',
+      'X-Lang': lang,
+    };
+  }
+
   async get<T>(path: string): Promise<T> {
-    const resp = await fetch(`${this.baseUrl}${path}`);
+    const resp = await fetch(`${this.baseUrl}${path}`, {
+      headers: this.getHeaders(),
+    });
     if (!resp.ok) throw new Error(`GET ${path} failed: ${resp.status}`);
     const data: ApiResponse<T> = await resp.json();
     if (!data.success || data.data === null) throw new Error(data.error || 'API returned no data');
@@ -50,7 +61,7 @@ export class ApiClient {
   async post<T>(path: string, body?: unknown): Promise<T> {
     const resp = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!resp.ok) throw new Error(`POST ${path} failed: ${resp.status}`);
