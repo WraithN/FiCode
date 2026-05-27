@@ -21,7 +21,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-rust_i18n::i18n!("locales", fallback = "en");
+rust_i18n::i18n!("src/i18n/locales", fallback = "en");
 
 static LANG_SET: AtomicBool = AtomicBool::new(false);
 
