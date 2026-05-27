@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient } from '../../services/apiClient';
 import { useChatStore } from '../../stores/chatStore';
 import { Part } from '../../types/part';
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export const InteractivePermissionPart: React.FC<Props> = ({ turnId, partIndex, part }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const updatePart = useChatStore((s) => s.updatePart);
@@ -45,11 +47,11 @@ export const InteractivePermissionPart: React.FC<Props> = ({ turnId, partIndex, 
   return (
     <div className="my-2 p-4 glass border border-tauri-border rounded-2xl space-y-3">
       <div className="flex items-center gap-2 text-sm text-text-muted">
-        <span>工具:</span>
+        <span>{t('permission.toolLabel')}:</span>
         <span className="font-mono">{part.tool_name}</span>
       </div>
       <div className="flex items-center gap-2 text-sm">
-        <span className="text-text-muted">风险等级:</span>
+        <span className="text-text-muted">{t('permission.riskLabel')}:</span>
         <span className={`font-semibold ${
           part.risk === 'Critical'
             ? 'text-red-500'
@@ -71,23 +73,23 @@ export const InteractivePermissionPart: React.FC<Props> = ({ turnId, partIndex, 
             disabled={loading}
             className="flex-1 px-4 py-2.5 rounded-xl bg-bg-tertiary text-text hover:bg-bg-overlay transition-colors text-sm font-medium disabled:opacity-50"
           >
-            拒绝
+            {t('permission.reject')}
           </button>
           <button
             onClick={handleApprove}
             disabled={loading}
             className="flex-1 px-4 py-2.5 rounded-xl bg-primary text-white hover:bg-primary-hover transition-colors text-sm font-medium disabled:opacity-50"
           >
-            {loading ? '处理中...' : '确认执行'}
+            {loading ? '处理中...' : t('permission.approve')}
           </button>
         </div>
       )}
 
       {part.status === 'approved' && (
-        <div className="text-sm text-green-400 font-medium">✓ 已确认执行</div>
+        <div className="text-sm text-green-400 font-medium">✓ {t('permission.approved')}</div>
       )}
       {part.status === 'rejected' && (
-        <div className="text-sm text-red-400 font-medium">✗ 已拒绝</div>
+        <div className="text-sm text-red-400 font-medium">✗ {t('permission.rejected')}</div>
       )}
 
       {error && (

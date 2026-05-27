@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient } from '../../services/apiClient';
 import { useChatStore } from '../../stores/chatStore';
 import { Part } from '../../types/part';
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export const InteractiveQuestionPart: React.FC<Props> = ({ turnId, partIndex, part }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customAnswer, setCustomAnswer] = useState('');
@@ -96,7 +98,7 @@ export const InteractiveQuestionPart: React.FC<Props> = ({ turnId, partIndex, pa
                     handleCustomAnswer();
                   }
                 }}
-                placeholder="自定义回答..."
+                placeholder={t('question.customPlaceholder')}
                 disabled={loading}
                 className="flex-1 bg-bg-tertiary text-text text-sm rounded-xl px-4 py-2.5 border border-tauri-border focus:outline-none focus:border-primary disabled:opacity-50"
               />
@@ -105,7 +107,7 @@ export const InteractiveQuestionPart: React.FC<Props> = ({ turnId, partIndex, pa
                 disabled={!customAnswer.trim() || loading}
                 className="px-4 py-2.5 rounded-xl bg-primary text-white hover:bg-primary-hover transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                发送
+                {t('question.sendButton')}
               </button>
             </div>
           )}
@@ -114,7 +116,7 @@ export const InteractiveQuestionPart: React.FC<Props> = ({ turnId, partIndex, pa
 
       {part.status === 'answered' && (
         <div className="text-sm text-green-400 font-medium">
-          ✓ 已回答: {part.answer}
+          ✓ {t('question.answered', { answer: part.answer })}
         </div>
       )}
 

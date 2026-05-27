@@ -1,8 +1,10 @@
 import React, { useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chatStore';
 import { TurnGroup } from './TurnGroup';
 
 export const ChatPanel: React.FC = () => {
+  const { t } = useTranslation();
   const turns = useChatStore((s) => s.turns);
   const isGenerating = useChatStore((s) => s.isGenerating);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -24,9 +26,9 @@ export const ChatPanel: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
                 </svg>
               </div>
-              <h2 className="text-2xl font-bold gradient-text mb-3">Welcome to fi-code</h2>
-              <p className="text-gray-400 mb-2">Your AI-powered coding assistant</p>
-              <p className="text-sm text-gray-500">Start a conversation or use /commands</p>
+              <h2 className="text-2xl font-bold gradient-text mb-3">{t('chat.emptyTitle')}</h2>
+              <p className="text-gray-400 mb-2">{t('chat.emptySubtitle')}</p>
+              <p className="text-sm text-gray-500">{t('chat.emptyHint')}</p>
             </div>
           </div>
         ) : (
