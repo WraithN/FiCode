@@ -22,6 +22,7 @@
 pub mod app;
 pub mod client;
 pub mod components;
+pub mod i18n;
 pub mod layout;
 pub mod theme;
 

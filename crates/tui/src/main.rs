@@ -36,6 +36,17 @@ struct TuiArgs {
 async fn main() -> anyhow::Result<()> {
     let args = TuiArgs::parse();
 
+    // 初始化语言（检测 LANG 环境变量）
+    let lang_env = std::env::var("LANG").unwrap_or_default();
+    let lang = lang_env
+        .split('.')
+        .next()
+        .unwrap_or("en")
+        .split('_')
+        .next()
+        .unwrap_or("en");
+    fi_code_tui::i18n::set_language(lang);
+
     // 初始化可观测性（失败不阻塞 TUI 启动，仅 warn）
     if let Ok(cfg) = fi_code_core::config::Config::load() {
         let _ = fi_code_core::observability::init(&cfg);

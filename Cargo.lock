@@ -1372,6 +1372,7 @@ dependencies = [
  "futures",
  "ratatui",
  "reqwest 0.13.2",
+ "rust-i18n",
  "serde",
  "serde_json",
  "syntect",

@@ -1,0 +1,14 @@
+[nav]
+settings = "Settings"
+logs = "Logs"
+sessions = "Sessions"
+files = "Files"
+
+[chat]
+thinking = "Thinking..."
+user = "User"
+assistant = "Assistant"
+
+[permission]
+approve = "Approve"
+reject = "Reject"

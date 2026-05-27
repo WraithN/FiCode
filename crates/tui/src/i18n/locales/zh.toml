@@ -1,0 +1,14 @@
+[nav]
+settings = "设置"
+logs = "日志"
+sessions = "会话"
+files = "文件"
+
+[chat]
+thinking = "思考中..."
+user = "用户"
+assistant = "助手"
+
+[permission]
+approve = "确认执行"
+reject = "拒绝"
