@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use crate::log_debug;
 use crate::log_trace;
 use crate::tools::windows_compat::{get_bash_path, get_compat_mode, WindowsCompatMode};
 use crate::utils::workspace::workspace_dir;
@@ -39,6 +40,45 @@ use std::time::Duration;
 // 用空结构体 + `impl` 块来组织静态方法，是一种常见的工具类写法。
 
 pub struct BasicTool {}
+
+// 智能 grep 黑名单：这些目录永远不会被搜索
+const BLOCKED_DIRS: &[&str] = &[
+    ".cache", ".cargo", ".env", ".git", ".hg", ".idea",
+    ".mypy_cache", ".next", ".nuxt", ".pytest_cache", ".ruff_cache",
+    ".rustup", ".svn", ".tox", ".venv", ".vscode", ".worktrees",
+    "__pycache__", "build", "coverage", "deps", "dist",
+    "env", "htmlcov", "node_modules", "out", "target",
+    "third_party", "vendor", "venv",
+];
+
+/// 缓存系统是否安装 ripgrep，避免每次 run_grep 都 spawn 子进程
+static RG_AVAILABLE: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
+    std::process::Command::new("rg")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+});
+
+/// 检查路径是否包含黑名单中的目录段
+fn is_blocked_path(path: &std::path::Path) -> bool {
+    path.components().any(|comp| {
+        if let Some(name) = comp.as_os_str().to_str() {
+            BLOCKED_DIRS.contains(&name)
+        } else {
+            false
+        }
+    })
+}
+
+/// 检查是否为隐藏文件/目录（以点开头的名称）
+fn is_hidden(entry: &walkdir::DirEntry) -> bool {
+    entry
+        .file_name()
+        .to_str()
+        .map(|s| s.starts_with('.'))
+        .unwrap_or(false)
+}
 
 impl BasicTool {
     // =========================================================================
@@ -338,11 +378,69 @@ impl BasicTool {
     // 同步函数：递归搜索目录下匹配正则的文件内容
     // =========================================================================
 
+    /// 使用系统 ripgrep 进行智能搜索，自动排除黑名单目录和隐藏文件
+    fn rg_smart_grep(dir: &std::path::Path, pattern: &str) -> Result<String, String> {
+        log_trace!("rg_smart_grep | dir={:?} | pattern={}", dir, pattern);
+
+        // rg 的 --glob 不排除显式传入的路径，所以如果根目录本身是黑名单，提前返回
+        if is_blocked_path(dir) {
+            return Ok("No matches found".to_string());
+        }
+
+        let mut cmd = std::process::Command::new("rg");
+        cmd.arg(pattern)
+            .arg(dir)
+            .arg("--line-number")
+            .arg("--no-heading")
+            .arg("--color=never")
+            .arg("--max-columns").arg("200")
+            .arg("--no-hidden")
+            .arg("--follow");
+
+        // 将 BLOCKED_DIRS 转为 rg 的 glob 排除规则
+        for blocked in BLOCKED_DIRS {
+            cmd.arg("--glob").arg(format!("!**/{}/**", blocked));
+        }
+
+        let output = cmd.output().map_err(|e| format!("rg execution failed: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // rg 返回 1 表示无匹配，这是正常情况
+            if output.status.code() == Some(1) && stderr.is_empty() {
+                return Ok("No matches found".to_string());
+            }
+            return Err(format!("rg error: {}", stderr));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line_count = stdout.lines().count();
+        let mut result = if line_count > 500 {
+            let mut truncated: String = stdout.lines().take(500).collect::<Vec<_>>().join("\n");
+            truncated.push_str("\n... (too many matches)");
+            truncated
+        } else {
+            stdout.to_string()
+        };
+        if result.len() > OUTPUT_TRUNCATE_LENGTH {
+            result = result.chars().take(OUTPUT_TRUNCATE_LENGTH).collect();
+        }
+        Ok(result)
+    }
+
     pub fn run_grep(dir: &str, pattern: &str) -> Result<String, String> {
         let dir = Self::safe_path(dir)?;
         log_trace!("run_grep | dir={:?} | pattern={}", dir, pattern);
+
+        // 统一在校验 regex 合法性后再分支，确保 rg 和 fallback 行为一致
         let re = regex::Regex::new(pattern).map_err(|e| format!("Invalid regex: {}", e))?;
 
+        if *RG_AVAILABLE {
+            log_debug!("run_grep | using ripgrep");
+            return Self::rg_smart_grep(&dir, pattern);
+        }
+
+        log_debug!("run_grep | using fallback recursive grep");
         let mut matches = Vec::new();
         Self::grep_recursive(&dir, &re, &mut matches)?;
 
@@ -385,14 +483,43 @@ impl BasicTool {
         re: &regex::Regex,
         matches: &mut Vec<String>,
     ) -> Result<(), String> {
-        for entry in std::fs::read_dir(dir).map_err(|e| format!("Error reading dir: {}", e))? {
-            let entry = entry.map_err(|e| format!("Error reading entry: {}", e))?;
-            let path = entry.path();
-            if path.is_dir() {
-                Self::grep_recursive(&path, re, matches)?;
-            } else if path.is_file() {
-                Self::grep_file(&path, re, matches)?;
+        use walkdir::WalkDir;
+
+        let walker = WalkDir::new(dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_entry(|e| {
+                // 跳过黑名单目录和隐藏目录
+                if e.file_type().is_dir() {
+                    if is_blocked_path(e.path()) {
+                        return false;
+                    }
+                    if is_hidden(e) {
+                        return false;
+                    }
+                }
+                true
+            });
+
+        for entry in walker {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    log_trace!("walkdir error: {}", e);
+                    continue;
+                }
+            };
+
+            if !entry.file_type().is_file() {
+                continue;
             }
+
+            // 跳过隐藏文件
+            if is_hidden(&entry) {
+                continue;
+            }
+
+            Self::grep_file(entry.path(), re, matches)?;
         }
         Ok(())
     }
@@ -702,5 +829,74 @@ mod tests {
             let hash = result.unwrap();
             assert!(!hash.is_empty(), "tree hash should not be empty");
         }
+    }
+
+    #[test]
+    fn test_grep_skips_blocked_dirs() {
+        use std::fs;
+
+        let tmp = tempfile::Builder::new().prefix("testgrep").tempdir_in(".").unwrap();
+        let root = tmp.path();
+
+        // 正常文件应该被搜到
+        fs::write(root.join("main.rs"), "fn main() {\n    let x = 42;\n}\n").unwrap();
+
+        // target/ 目录下的文件不应该被搜到
+        let target_dir = root.join("target");
+        fs::create_dir(&target_dir).unwrap();
+        fs::write(target_dir.join("cached.rs"), "let x = 42;\n").unwrap();
+
+        // .git/ 目录下的文件不应该被搜到
+        let git_dir = root.join(".git");
+        fs::create_dir(&git_dir).unwrap();
+        fs::write(git_dir.join("config"), "let x = 42;\n").unwrap();
+
+        // node_modules/ 目录下的文件不应该被搜到
+        let node_dir = root.join("node_modules");
+        fs::create_dir(&node_dir).unwrap();
+        fs::write(node_dir.join("index.js"), "let x = 42;\n").unwrap();
+
+        let result = BasicTool::run_grep(root.to_str().unwrap(), "let x = 42").unwrap();
+        assert!(result.contains("main.rs"), "Should find match in main.rs");
+        assert!(!result.contains("cached.rs"), "Should skip target/ directory");
+        assert!(!result.contains("index.js"), "Should skip node_modules/ directory");
+    }
+
+    #[test]
+    fn test_grep_skips_hidden_files() {
+        use std::fs;
+
+        let tmp = tempfile::Builder::new().prefix("testgrep").tempdir_in(".").unwrap();
+        let root = tmp.path();
+
+        // 正常文件应该被搜到
+        fs::write(root.join("visible.rs"), "let secret = 42;\n").unwrap();
+
+        // 隐藏文件不应该被搜到
+        fs::write(root.join(".hidden.rs"), "let secret = 42;\n").unwrap();
+
+        let result = BasicTool::run_grep(root.to_str().unwrap(), "let secret = 42").unwrap();
+        assert!(result.contains("visible.rs"), "Should find match in visible.rs");
+        assert!(!result.contains(".hidden.rs"), "Should skip hidden files");
+    }
+
+    #[test]
+    fn test_grep_skips_hidden_dirs() {
+        use std::fs;
+
+        let tmp = tempfile::Builder::new().prefix("testgrep").tempdir_in(".").unwrap();
+        let root = tmp.path();
+
+        // 正常文件应该被搜到
+        fs::write(root.join("normal.rs"), "let hidden_dir_test = 42;\n").unwrap();
+
+        // 隐藏目录下的文件不应该被搜到
+        let hidden_dir = root.join(".hidden_dir");
+        fs::create_dir(&hidden_dir).unwrap();
+        fs::write(hidden_dir.join("inside.rs"), "let hidden_dir_test = 42;\n").unwrap();
+
+        let result = BasicTool::run_grep(root.to_str().unwrap(), "let hidden_dir_test = 42").unwrap();
+        assert!(result.contains("normal.rs"), "Should find match in normal.rs");
+        assert!(!result.contains("inside.rs"), "Should skip files inside hidden directories");
     }
 }
