@@ -22,6 +22,7 @@
 use crate::log_debug;
 use crate::log_info;
 use crate::log_trace;
+use rust_i18n::t;
 use crate::mcp::manager::McpManager;
 use crate::provider::Provider;
 use crate::session::message::Part;
@@ -102,12 +103,12 @@ pub async fn wait_question_response(tool_call_id: &str) -> Result<QuestionAnswer
         Ok(Err(_)) => {
             let mut map = QUESTION_RESPONSES.lock().await;
             map.remove(tool_call_id);
-            Err("Question response channel closed".to_string())
+            Err(t!("error.channelClosed").to_string())
         }
         Err(_) => {
             let mut map = QUESTION_RESPONSES.lock().await;
             map.remove(tool_call_id);
-            Err("Question response timeout (60s)".to_string())
+            Err(t!("error.questionTimeout").to_string())
         }
     }
 }
@@ -117,7 +118,7 @@ pub async fn respond_question(tool_call_id: &str, answer: QuestionAnswer) -> Res
     let mut map = QUESTION_RESPONSES.lock().await;
     if let Some(tx) = map.remove(tool_call_id) {
         tx.send(answer)
-            .map_err(|_| "Failed to send question response".to_string())
+            .map_err(|_| t!("error.responseSendFailed").to_string())
     } else {
         Err(format!(
             "Question request {} not found or already timed out",
@@ -1162,7 +1163,7 @@ pub async fn execute_tool_calls(
 
                 match action {
                     crate::permission::PermissionAction::Deny => {
-                        let error_msg = format!("Permission denied: {}", reason);
+                        let error_msg = format!("{}: {}", t!("error.permissionDenied"), reason);
                         log_debug!("execute_tool_call denied | name={} | reason={}", name, reason);
                         let error_part = Part::ToolError {
                             tool_call_id: id.clone(),
@@ -1219,7 +1220,7 @@ pub async fn execute_tool_calls(
                                         false,
                                         ask_start.elapsed().as_millis() as u64,
                                     );
-                                    let error_msg = "Permission denied: user rejected".to_string();
+                                    let error_msg = t!("error.permissionDenied").to_string();
                                     log_debug!("execute_tool_call rejected | name={} | id={}", name, id);
                                     let error_part = Part::ToolError {
                                         tool_call_id: id.clone(),
@@ -1242,7 +1243,7 @@ pub async fn execute_tool_calls(
                                         false,
                                         ask_start.elapsed().as_millis() as u64,
                                     );
-                                    let error_msg = format!("Permission error: {}", e);
+                                    let error_msg = format!("{}: {}", t!("error.permissionDenied"), e);
                                     log_debug!("execute_tool_call permission error | name={} | err={}", name, e);
                                     let error_part = Part::ToolError {
                                         tool_call_id: id.clone(),

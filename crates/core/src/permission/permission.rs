@@ -27,6 +27,7 @@ use std::time::Duration;
 use tokio::sync::{oneshot, Mutex};
 
 use crate::log_debug;
+use rust_i18n::t;
 
 /// 风险等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,50 +85,50 @@ impl PermissionAction {
                 (
                     Self::Deny,
                     RiskType::Critical,
-                    "sudo privilege escalation detected".to_string(),
+                    t!("error.sudoDetected").to_string(),
                 )
             } else if command.contains("rm -rf") || command.contains("rm -fr") {
                 (
                     Self::Deny,
                     RiskType::Critical,
-                    "rm -rf dangerous operation detected".to_string(),
+                    t!("error.rmrfDetected").to_string(),
                 )
             } else if is_bash_injection(&command) {
                 (
                     Self::Deny,
                     RiskType::High,
-                    "potential bash injection attack detected".to_string(),
+                    t!("error.bashInjection").to_string(),
                 )
             } else {
                 (
                     Self::Ask,
                     RiskType::High,
-                    "tool bash requires user confirmation".to_string(),
+                    t!("tool.bashHighRisk").to_string(),
                 )
             }
         } else if tool_name == "read_file" || tool_name == "read" || tool_name == "grep" {
             (
                 Self::Allow,
                 RiskType::Low,
-                format!("tool {} is in allowlist", tool_name),
+                t!("tool.autoApproved", name = tool_name).to_string(),
             )
         } else if tool_name == "ask_for_question" {
             (
                 Self::Allow,
                 RiskType::Low,
-                "tool ask_for_question does not require permission check".to_string(),
+                t!("tool.autoApproved", name = tool_name).to_string(),
             )
         } else if tool_name == "write" || tool_name == "edit" {
             (
                 Self::Ask,
                 RiskType::High,
-                format!("tool {} may modify files, requires confirmation", tool_name),
+                t!("tool.writeHighRisk", name = tool_name).to_string(),
             )
         } else {
             (
                 Self::Allow,
                 RiskType::Low,
-                format!("tool {} auto-approved (low risk)", tool_name),
+                t!("tool.autoApproved", name = tool_name).to_string(),
             )
         };
 
@@ -181,12 +182,12 @@ pub async fn wait_permission_response(
         Ok(Err(_)) => {
             let mut map = PERMISSION_RESPONSES.lock().await;
             map.remove(tool_call_id);
-            Err("Permission response channel closed".to_string())
+            Err(t!("error.channelClosed").to_string())
         }
         Err(_) => {
             let mut map = PERMISSION_RESPONSES.lock().await;
             map.remove(tool_call_id);
-            Err("Permission confirmation timeout (30s)".to_string())
+            Err(t!("error.permissionTimeout").to_string())
         }
     }
 }
@@ -196,7 +197,7 @@ pub async fn respond_permission(tool_call_id: &str, approved: bool) -> Result<()
     let mut map = PERMISSION_RESPONSES.lock().await;
     if let Some(tx) = map.remove(tool_call_id) {
         tx.send(approved)
-            .map_err(|_| "Failed to send permission response".to_string())
+            .map_err(|_| t!("error.responseSendFailed").to_string())
     } else {
         Err(format!(
             "Permission request {} not found or already timed out",
