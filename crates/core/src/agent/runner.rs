@@ -191,10 +191,13 @@ impl AgentRunner {
                             }
                         }
                         ChunkContent::ToolUse(tool) => {
-                            if let Some(ref mut cb) = on_tool_event {
-                                let _ = cb(crate::server::transport::sse::SseEvent::Part {
-                                    part: tool.clone(),
-                                });
+                            // ask_for_question 通过 QuestionAsk SSE 事件与前端交互，不展示原始参数 JSON
+                            if !matches!(tool, Part::ToolUse { name, .. } if name == "ask_for_question") {
+                                if let Some(ref mut cb) = on_tool_event {
+                                    let _ = cb(crate::server::transport::sse::SseEvent::Part {
+                                        part: tool.clone(),
+                                    });
+                                }
                             }
                         }
                         ChunkContent::Notification(msg) => {

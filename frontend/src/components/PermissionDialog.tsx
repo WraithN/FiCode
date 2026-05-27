@@ -54,8 +54,9 @@ export const PermissionDialog: React.FC = () => {
   if (!hasPending) return null;
 
   return (
-    <div className="absolute bottom-full left-0 right-0 z-50 p-4">
-      <div className="glass border border-tauri-border rounded-2xl shadow-2xl max-w-2xl mx-auto overflow-hidden">
+    // fixed 定位确保弹窗始终停留在视口底部上方，不会被 ChatPanel 滚动或容器截断影响
+    <div className="fixed bottom-20 left-0 right-0 z-50 p-4">
+      <div className="glass border border-tauri-border rounded-2xl shadow-2xl max-w-2xl mx-auto overflow-hidden max-h-[60vh] overflow-y-auto">
         {/* 权限确认模式 */}
         {pendingPermission && (
           <div className="p-5 space-y-4">

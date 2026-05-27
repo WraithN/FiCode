@@ -19,12 +19,21 @@ export function useChatStream() {
 
     const turnId = startTurn(message);
     setIsGenerating(true);
+    const requestSentAt = performance.now();
+    let firstSseAt: number | null = null;
 
     try {
       const stream = apiClient.chatStream(currentSessionId, message, currentAgent);
       let receivedDone = false;
 
       for await (const event of stream) {
+        const now = performance.now();
+        if (firstSseAt === null) {
+          firstSseAt = now;
+          const ttft = Math.round(firstSseAt - requestSentAt);
+          console.log(`[TTFT-DIAG] first SSE received | total=${ttft}ms | type=${event.type}`);
+        }
+        console.log(`[TTFT-DIAG] SSE event | type=${event.type} | elapsed=${Math.round(now - requestSentAt)}ms`);
         if (event.type === 'compression_status') {
           setCompressionStatus({
             isCompressing: event.is_compressing,

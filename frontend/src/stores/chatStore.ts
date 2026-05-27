@@ -34,6 +34,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   appendPart: (turnId: string, part: Part) => {
+    console.log(`[TTFT-DIAG] appendPart | type=${part.type} | turnId=${turnId}`);
     set((state) => ({
       turns: state.turns.map((turn) => {
         if (turn.id !== turnId) return turn;

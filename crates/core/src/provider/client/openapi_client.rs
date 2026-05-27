@@ -173,7 +173,10 @@ impl AIClient for OpenAiClient {
                 ));
             })
         };
+        let http_req_start = std::time::Instant::now();
         let resp = send_with_retry(&self.client, request, &self.retry_config, Some(notifier)).await?;
+        let http_resp_elapsed_ms = http_req_start.elapsed().as_millis() as u64;
+        log_info!("[TTFT] HTTP response received | latency={}ms | url={}", http_resp_elapsed_ms, url);
         // send_with_retry 返回后，将所有重试通知通过 on_chunk 发送给客户端
         {
             let guard = retry_msgs.lock().unwrap();
@@ -207,7 +210,7 @@ impl AIClient for OpenAiClient {
             content_type
         );
         let byte_stream = resp.bytes_stream();
-        parse_openai_sse(byte_stream, on_chunk).await
+        parse_openai_sse(byte_stream, on_chunk, http_req_start).await
     }
 }
 
@@ -385,7 +388,11 @@ fn process_openai_choice(
     }
 }
 
-async fn parse_openai_sse<S>(byte_stream: S, on_chunk: &mut (dyn FnMut(Chunk) + Send)) -> Result<()>
+async fn parse_openai_sse<S>(
+    byte_stream: S,
+    on_chunk: &mut (dyn FnMut(Chunk) + Send),
+    http_req_start: std::time::Instant,
+) -> Result<()>
 where
     S: Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send + 'static,
 {
@@ -395,6 +402,7 @@ where
         usize,
         (Option<String>, Option<String>, String),
     > = std::collections::HashMap::new();
+    let mut first_sse_parsed = false;
 
     tokio::pin!(byte_stream);
     while let Some(chunk_result) = byte_stream.next().await {
@@ -464,6 +472,11 @@ where
             let Some(choices) = json.get("choices").and_then(|v| v.as_array()) else {
                 continue;
             };
+            if !first_sse_parsed {
+                first_sse_parsed = true;
+                let elapsed_ms = http_req_start.elapsed().as_millis() as u64;
+                log_info!("[TTFT] first SSE line parsed | latency={}ms", elapsed_ms);
+            }
             for choice in choices {
                 process_openai_choice(choice, &mut index_to_tool, on_chunk);
             }

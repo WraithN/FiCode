@@ -442,8 +442,21 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
         &llm_messages_json,
     );
 
+    let llm_call_start = std::time::Instant::now();
+    let mut first_chunk_received = false;
     if let Err(e) = client
         .stream_message(&system_prompt, &llm_messages, &schema, &mut |chunk| {
+            // TTFT：记录从请求 LLM 到收到第一个有效内容 chunk 的时间
+            if !first_chunk_received {
+                match &chunk.content {
+                    ChunkContent::Text(_) | ChunkContent::Think(_) | ChunkContent::ToolUse(_) => {
+                        first_chunk_received = true;
+                        let elapsed_ms = llm_call_start.elapsed().as_millis() as u64;
+                        log_info!("[TTFT] first chunk from LLM | latency={}ms | turn={}", elapsed_ms, state.turn_count);
+                    }
+                    _ => {}
+                }
+            }
             // 实时转发文本内容和系统通知，实现真流式
             match &chunk.content {
                 ChunkContent::Text(text) | ChunkContent::Think(text) => {
@@ -569,6 +582,7 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
     }
 
     // 发送 ToolUse 事件
+    // ask_for_question 通过 QuestionAsk SSE 事件与前端交互，不展示原始参数 JSON
     for block in &turn.content_blocks {
         if let Part::ToolUse {
             id,
@@ -576,6 +590,9 @@ pub async fn run_one_turn<C: AIClient + ?Sized>(
             arguments,
         } = block
         {
+            if name == "ask_for_question" {
+                continue;
+            }
             if let Some(ref mut cb) = on_tool_event {
                 let _ = cb(crate::server::transport::sse::SseEvent::Part {
                     part: crate::session::message::Part::ToolUse {

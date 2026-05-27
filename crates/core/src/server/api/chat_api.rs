@@ -55,6 +55,7 @@ pub async fn handle_chat_endpoint(
     headers: HeaderMap,
     Json(req): Json<ChatRequest>,
 ) -> Response {
+    let request_received_at = std::time::Instant::now();
     log_info!(
         "[Server] handle_chat_endpoint | session_id={:?} | message_len={}",
         req.session_id,
@@ -107,6 +108,7 @@ pub async fn handle_chat_endpoint(
             req.message,
             agent_type,
             sse_sender,
+            request_received_at,
         ))
         .catch_unwind()
         .await;
@@ -226,6 +228,7 @@ async fn run_agent_chat(
     message: String,
     agent_type: AgentType,
     sse_sender: SseSender,
+    request_received_at: std::time::Instant,
 ) -> Result<(), String> {
     log_info!(
         "[Server] run_agent_chat start | session_id={} | message_len={} | agent={:?}",
@@ -302,15 +305,38 @@ async fn run_agent_chat(
 
     // 运行 agent_loop，传入实时文本回调实现真流式
     let sse_sender_for_stream = sse_sender.clone();
+    let first_text_sent = std::sync::atomic::AtomicBool::new(false);
+    let session_id_for_ttft = session_id.clone();
     let mut on_text: Option<Box<dyn FnMut(&str) + Send>> = Some(Box::new(move |text: &str| {
         log_trace!("[Server] on_text callback | len={}", text.len());
+        if !first_text_sent.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let elapsed_ms = request_received_at.elapsed().as_millis() as u64;
+            log_info!(
+                "[TTFT] first token SSE sent | total={}ms | session_id={}",
+                elapsed_ms,
+                session_id_for_ttft
+            );
+        }
         let _ = sse_sender_for_stream.try_send(SseEvent::Message {
             content: text.to_string(),
         });
     }));
     let sse_sender_for_tools = sse_sender.clone();
+    let mut first_event_logged = false;
+    let session_id_for_diag = session_id.clone();
     let mut on_tool_event: Option<Box<dyn FnMut(SseEvent) + Send>> =
         Some(Box::new(move |event: SseEvent| {
+            let event_type = format!("{:?}", std::mem::discriminant(&event));
+            if !first_event_logged {
+                first_event_logged = true;
+                let elapsed_ms = request_received_at.elapsed().as_millis() as u64;
+                log_info!(
+                    "[TTFT-DIAG] first SSE event sending | total={}ms | type={} | session_id={}",
+                    elapsed_ms,
+                    event_type,
+                    session_id_for_diag
+                );
+            }
             log_trace!(
                 "[Server] on_tool_event callback | {:?}",
                 std::mem::discriminant(&event)
